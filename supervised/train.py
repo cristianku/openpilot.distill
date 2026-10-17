@@ -75,6 +75,12 @@ def main() -> None:
         default=ROOT / "outputs/supervised/supercombo.pt",
         help="checkpoint output path",
     )
+    parser.add_argument(
+        "--precision",
+        choices=("auto", "bf16", "fp16"),
+        default="auto",
+        help="autocast dtype; auto picks fp16 on GPUs without native bf16 (e.g. Tesla V100)",
+    )
     args = parser.parse_args()
 
     distributed = "RANK" in os.environ
@@ -90,6 +96,20 @@ def main() -> None:
     np.random.seed(rank)
     torch.manual_seed(rank)
     torch.set_float32_matmul_precision("high")
+
+    # V100 (sm_70) has no native bf16: bf16 autocast falls back to slow emulation.
+    # fp16 needs a GradScaler to keep small gradients from underflowing.
+    precision = args.precision
+    if precision == "auto":
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            precision = "bf16"
+        else:
+            precision = "fp16"
+    if precision == "bf16":
+        autocast_dtype = torch.bfloat16
+    else:
+        autocast_dtype = torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=(precision == "fp16"))
 
     train_dataset = Comma1MDataset(
         DatasetConfig(args.dataset, batch_size=args.batch_size),
@@ -119,6 +139,7 @@ def main() -> None:
 
     if is_main:
         print(f"student: {sum(p.numel() for p in raw_model.parameters()) / 1e6:.1f}M parameters")
+        print(f"precision: {precision}")
         args.output.parent.mkdir(parents=True, exist_ok=True)
     teacher = ORTSupercomboForInference.from_supercombo(
         args.teacher,
@@ -147,12 +168,14 @@ def main() -> None:
         targets = {name: torch.from_numpy(value).to(device) for name, value in targets.items()}
 
         optimizer.zero_grad(set_to_none=True)
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("cuda", dtype=autocast_dtype):
             predictions = model(inputs)
             loss, loss_metrics = loss_fn(predictions, targets, teacher_targets)
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
 
         if is_main:
             torch.cuda.synchronize()
