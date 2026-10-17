@@ -2,8 +2,9 @@
 # Copy selected segments of a route straight from the comma device into data/,
 # renamed to the hex folder name the dataset expects, then run the localizer on each.
 #
-# Usage: helpers/fetch_comma_segments.sh <route> <segment|first-last> [...] [--no-localizer]
+# Usage: helpers/fetch_comma_segments.sh [--host <ip|nome>] <route> <segment|first-last> [...] [--no-localizer]
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1   (formato connect)
+#   helpers/fetch_comma_segments.sh --host 192.168.88.29 6616faac453a3064/0000011c--8152ba83cf/1
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 0 1 2
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 2-9
 #
@@ -14,7 +15,8 @@
 # The comma only accepts the keys registered on GitHub: connect to this machine
 # with agent forwarding (ssh -A) so the Mac's key is used.
 #
-# Env: COMMA_HOST (default comma@192.168.88.29)
+# --host: IP or ssh name of the comma; "comma@" is added when no user is given.
+# Env: COMMA_HOST (default comma@192.168.88.29), overridden by --host
 
 set -euo pipefail
 
@@ -32,6 +34,10 @@ run_localizer=1
 while [ $# -gt 0 ]; do
   if [ "$1" = "--no-localizer" ]; then
     run_localizer=0
+  elif [ "$1" = "--host" ]; then
+    shift
+    [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
+    COMMA_HOST="$1"
   elif [ -z "$route" ] && [[ "$1" =~ ^([0-9a-f]+/)?([0-9a-f]+--[0-9a-f]+)/([0-9]+)$ ]]; then
     # connect format: <dongle_id>/<route>/<segment>
     route="${BASH_REMATCH[2]}"
@@ -51,6 +57,11 @@ while [ $# -gt 0 ]; do
   fi
   shift
 done
+
+# Without an explicit user the comma login user is "comma".
+if [[ "$COMMA_HOST" != *@* ]]; then
+  COMMA_HOST="comma@$COMMA_HOST"
+fi
 
 [ -n "$route" ] || die "manca la route (es. 0000011c--8152ba83cf)"
 [ -n "$segments" ] || die "mancano i segmenti (es. 0 1 2 oppure 2-9)"
