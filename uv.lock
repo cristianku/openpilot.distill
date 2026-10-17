@@ -843,16 +843,36 @@ wheels = [
 [[package]]
 name = "onnxruntime-gpu"
 version = "1.29.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/" }
+resolution-markers = [
+    "sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "flatbuffers" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "protobuf" },
+    { name = "flatbuffers", marker = "sys_platform == 'linux'" },
+    { name = "numpy", marker = "sys_platform == 'linux'" },
+    { name = "packaging", marker = "sys_platform == 'linux'" },
+    { name = "protobuf", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/7b/764082683bbc3b3351a3864ffb87be11aa13642913f78569fa72b934e319/onnxruntime_gpu-1.29.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:8ccd052ca4de21b2a335f3503a283126163b6fab9dba29d1d9cbf3fa55c51d28", size = 202177606, upload-time = "2026-08-17T22:29:31.047Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/96/1be0b9711a614861fbf5c0c85c4da3aa2321f9da0b4734a717eb606f70ab/onnxruntime_gpu-1.29.0-cp312-cp312-manylinux_2_34_aarch64.whl", hash = "sha256:545d2966dd11208bbc98e67be4d92e54ecd793acc45c0532cc7bfd36f50692fa", size = 162121384, upload-time = "2026-08-17T22:11:35.93Z" },
+    { url = "https://aiinfra.pkgs.visualstudio.com/2692857e-05ef-43b4-ba9c-ccf1c22c437c/_packaging/9387c3aa-d9ad-4513-968c-383f6f7f53b8/pypi/download/onnxruntime-gpu/1.29/onnxruntime_gpu-1.29.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:3338e3a5ad27ca5afd93c60732fa6fde308971cf424517817f3138fa7c5fcdb9", size = 475434900, upload-time = "2026-08-11T22:35:36Z" },
+]
+
+[[package]]
+name = "onnxruntime-gpu"
+version = "1.29.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'emscripten'",
+    "sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+]
+dependencies = [
+    { name = "flatbuffers", marker = "sys_platform != 'linux'" },
+    { name = "numpy", marker = "sys_platform != 'linux'" },
+    { name = "packaging", marker = "sys_platform != 'linux'" },
+    { name = "protobuf", marker = "sys_platform != 'linux'" },
+]
+wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/b1/99a89878969f0bed05cc6be5ae95f75929fbb0fbb5884497814f2ec12ba0/onnxruntime_gpu-1.29.0-cp312-cp312-win_amd64.whl", hash = "sha256:a64aa7c3dd7fa6b29fa7bcb0439ebd204607a590d3ce02bb276672257da4a454", size = 148173233, upload-time = "2026-08-17T22:16:58.298Z" },
 ]
 
@@ -995,7 +1015,8 @@ dependencies = [
     { name = "laika" },
     { name = "numpy" },
     { name = "onnx" },
-    { name = "onnxruntime-gpu" },
+    { name = "onnxruntime-gpu", version = "1.29.0", source = { registry = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/" }, marker = "sys_platform == 'linux'" },
+    { name = "onnxruntime-gpu", version = "1.29.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "opencv-python-headless" },
     { name = "opendbc" },
     { name = "openpilot" },
@@ -1028,7 +1049,8 @@ requires-dist = [
     { name = "laika", git = "https://github.com/commaai/laika?rev=a73329b819e2e1ab270a50b40e469ed2111845d3" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "onnx", specifier = ">=1.22.0" },
-    { name = "onnxruntime-gpu" },
+    { name = "onnxruntime-gpu", marker = "sys_platform != 'linux'" },
+    { name = "onnxruntime-gpu", marker = "sys_platform == 'linux'", index = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/" },
     { name = "opencv-python-headless" },
     { name = "opendbc", url = "https://github.com/commaai/opendbc/archive/7343a66d46213d5f73528afc6c6db713ebd88a9d.tar.gz" },
     { name = "openpilot", url = "https://github.com/commaai/openpilot/archive/084747c75d2cbd23af65ab7a9e770bbd7b98bac9.tar.gz" },
