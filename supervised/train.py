@@ -145,6 +145,8 @@ def main() -> None:
         args.teacher,
         providers=[("CUDAExecutionProvider", {"device_id": local_rank}), "CPUExecutionProvider"],
     )
+    if is_main:
+        print(f"teacher: {teacher.vision_session.get_providers()[0]}")
     run = (
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "openpilot.distill.supervised"),
