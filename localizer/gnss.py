@@ -6,6 +6,7 @@ from laika.helpers import ConstellationId
 from laika.iono import parse_ionex
 from laika.raw_gnss import GNSSMeasurement, get_DOP
 
+from .errors import UnusableSegment
 from .ionex import day_of, download_ionex
 
 GPS_WEEK_SECONDS = 604_800.0
@@ -26,7 +27,7 @@ def _gnss_epochs(raw_t: np.ndarray, raw_measurements: np.ndarray) -> tuple[np.nd
   raw_t = np.asarray(raw_t, dtype=np.float64)
   raw_measurements = np.asarray(raw_measurements, dtype=np.float64)
   if raw_measurements.ndim != 2 or raw_measurements.shape[1] != 10 or len(raw_t) != len(raw_measurements):
-    raise RuntimeError("raw UBlox measurements have an invalid shape")
+    raise UnusableSegment("raw UBlox measurements have an invalid shape")
 
   prn = raw_measurements[:, GNSSMeasurement.PRN]
   gps = prn <= GPS_MAX_PRN
@@ -34,7 +35,7 @@ def _gnss_epochs(raw_t: np.ndarray, raw_measurements: np.ndarray) -> tuple[np.nd
   measurements = raw_measurements[gps | glonass]
   log_t = raw_t[gps | glonass]
   if not np.any(gps):
-    raise RuntimeError("no raw GPS measurements found")
+    raise UnusableSegment("no raw GPS measurements found")
 
   receiver_t = (
     measurements[:, GNSSMeasurement.RECV_TIME_WEEK] * GPS_WEEK_SECONDS
@@ -49,7 +50,7 @@ def _gnss_epochs(raw_t: np.ndarray, raw_measurements: np.ndarray) -> tuple[np.nd
   # Receiver time is the measurement time; logMonoTime can include delivery jitter.
   epoch_t = log_t[starts[0]] + epoch_receiver_t - epoch_receiver_t[0]
   if len(epoch_t) < 2 or np.any(np.diff(epoch_t) <= 0.0):
-    raise RuntimeError("raw GNSS timestamps must be strictly increasing")
+    raise UnusableSegment("raw GNSS timestamps must be strictly increasing")
   return epoch_t, epochs
 
 
@@ -208,7 +209,7 @@ def localize_raw_gnss(
   epoch_t, epochs = _gnss_epochs(raw_t, raw_measurements)
   initial_position = np.asarray(initial_position, dtype=np.float64)
   if initial_position.shape != (3,) or not np.all(np.isfinite(initial_position)):
-    raise RuntimeError("the initial GPS position must be a finite ECEF vector")
+    raise UnusableSegment("the initial GPS position must be a finite ECEF vector")
   gps_epochs = [epoch[epoch[:, GNSSMeasurement.PRN] <= GPS_MAX_PRN] for epoch in epochs]
   ionex_used: dict[str, str] = {}
   dog_options = {

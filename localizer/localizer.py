@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .errors import UnusableSegment
 from .gnss import localize_raw_gnss
 from .math import (
   circular_offset,
@@ -119,7 +120,7 @@ def _globalize_live_pose(
   gps_speed = np.linalg.norm(gps_velocity_ned[:, :2], axis=1)
   moving = np.isfinite(gps_heading) & (gps_speed > 5.0)
   if np.count_nonzero(moving) < 2 or np.ptp(gps_t[moving]) < 0.5:
-    raise RuntimeError("global yaw needs at least two moving GPS fixes spanning 0.5 seconds")
+    raise UnusableSegment("global yaw needs at least two moving GPS fixes spanning 0.5 seconds")
   yaw_offset = circular_offset(gps_heading[moving], local_heading[moving])
   global_ned_from_local = euler_to_rot(np.array([[0.0, 0.0, yaw_offset]]))[0]
   ned_from_device = global_ned_from_local @ local_from_device
@@ -180,7 +181,7 @@ def localize(data: LocalizationInput, output_hz: float = 100.0) -> tuple[dict[st
     ("road-camera", data.frame_t),
   ):
     if not len(values) or not np.all(np.isfinite(values)) or np.any(np.diff(values) <= 0.0):
-      raise RuntimeError(f"{name} timestamps must be finite and strictly increasing")
+      raise UnusableSegment(f"{name} timestamps must be finite and strictly increasing")
   frame_t = np.asarray(data.frame_t, dtype=np.float64)
   position, velocity, quaternions, acceleration = _globalize_live_pose(
     data, gps_t, gps_position, gps_velocity

@@ -176,6 +176,11 @@ download_segments() {
     src="$REMOTE_DIR/$route--$s"
     name="$route_hex$(printf %02d "$s")"
     dst="$DATA_DIR/$name"
+    # Discarded by localize_segments.sh (data unusable for the localizer): not again.
+    if [ -d "$ROOT/data_scartati/$name" ]; then
+      echo "== $route--$s: scartato dal localizer (data_scartati/$name), salto"
+      continue
+    fi
     echo "== $route--$s -> data/$name"
 
     for f in $FILES; do

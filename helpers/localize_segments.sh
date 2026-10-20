@@ -22,11 +22,20 @@
 # FIN about two weeks later (details in localizer/ionex.py). Every run without arguments
 # redoes the segments for which a better map came out: P1D -> RAP -> FIN, one step at a time.
 # Segments done before localizer.ionex existed have no record and are left alone.
+#
+# Unusable segments: when the localizer fails because of the data itself (car never above
+# 18 km/h, no GPS, no calibration yet, incomplete segment: exit code 3, see localizer/errors.py)
+# the folder is moved to data_scartati/, so the training never sees it. The reason stays in
+# its localizer.failed. Network or GNSS map problems stay in data/ as "failed" and are retried.
+# To take a segment back: mv data_scartati/<name> data/
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="$ROOT/data"
+DISCARD_DIR="$ROOT/data_scartati"
+# Exit code of localizer.run for a segment unusable because of its data (localizer/errors.py).
+UNUSABLE_SEGMENT_EXIT_CODE=3
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -119,6 +128,12 @@ if [ "$status_only" -eq 1 ]; then
       echo "$state  $name"
     fi
   done
+  for dir in "$DISCARD_DIR"/*/; do
+    if [ ! -d "$dir" ]; then
+      continue
+    fi
+    echo "scartato  $(basename "$dir")  ($(head -1 "$dir/localizer.failed" 2>/dev/null))"
+  done
   exit 0
 fi
 
@@ -142,6 +157,7 @@ fi
 
 ok=""
 failed=""
+discarded=""
 for name in $names; do
   dir="$DATA_DIR/$name"
   echo "== $name"
@@ -154,15 +170,34 @@ for name in $names; do
     rm -f "$dir/localizer.failed"
     ok="$ok $name"
   else
+    status=$?
     {
       echo "$(date '+%Y-%m-%d %H:%M') $(tail -1 "$dir/localizer.log")"
       tail -20 "$dir/localizer.log"
     } > "$dir/localizer.failed"
-    failed="$failed $name"
+
+    # Unusable because of its data: out of data/. A segment that already has outputs
+    # (failed refine) is never moved: its old outputs are still good.
+    if [ "$status" -eq "$UNUSABLE_SEGMENT_EXIT_CODE" ] && [ ! -f "$dir/localizer.safetensors" ]; then
+      mkdir -p "$DISCARD_DIR"
+      if [ -e "$DISCARD_DIR/$name" ]; then
+        # Already discarded once (downloaded again): keep both, never overwrite.
+        mv "$dir" "$DISCARD_DIR/$name.$(date '+%Y%m%d%H%M%S')"
+      else
+        mv "$dir" "$DISCARD_DIR/$name"
+      fi
+      echo "$name: dati inutilizzabili, spostato in data_scartati/"
+      discarded="$discarded $name"
+    else
+      failed="$failed $name"
+    fi
   fi
 done
 
 echo "OK:${ok:- nessuno}"
+if [ -n "$discarded" ]; then
+  echo "Scartati (in data_scartati/):$discarded"
+fi
 if [ -n "$failed" ]; then
   echo "Falliti:$failed"
   exit 1
