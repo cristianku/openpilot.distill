@@ -3,7 +3,10 @@
 # renamed to the hex folder name the dataset expects, then run the localizer on each.
 #
 # Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--no-localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--no-localizer]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --strip-ends [--no-localizer]
+#   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip=0,1,2,last
+#   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip 0,1,14
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --strip-ends
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --segments=1,2,3,4
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --segments=1,2,5-9
@@ -19,8 +22,9 @@
 # The comma only accepts the keys registered on GitHub: connect to this machine
 # with agent forwarding (ssh -A) so the Mac's key is used.
 #
-# --strip-ends: every segment of the route found on the comma, except segment 0 (start)
-#               and the last one (arrival). No segment list needed.
+# --skip: every segment of the route found on the comma, except the listed ones.
+#         The list takes numbers, ranges (2-5) and "last" (the highest segment, the arrival).
+# --strip-ends: same as --skip=0,last (start and arrival). No segment list needed.
 # -h, --help: this help (also shown when called without arguments).
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default comma@192.168.88.29), overridden by --host
@@ -44,7 +48,8 @@ usage() {
 route=""
 segments=""
 run_localizer=1
-strip_ends=0
+skip=""
+skip_mode=0
 
 # Adds one segment item to $segments: a number (3) or a range (2-9).
 add_segment() {
@@ -70,6 +75,29 @@ add_segment_list() {
   done
 }
 
+# Adds a comma separated skip list (0,1,14 or 0,1,2,last or 2-5) to $skip.
+# "last" stays a word here: the highest segment is known only after asking the comma.
+add_skip_list() {
+  [ -n "$1" ] || die "--skip vuole una lista (es. --skip=0,1,last)"
+  IFS=',' read -r -a items <<< "$1"
+  for item in "${items[@]}"; do
+    if [ "$item" = "last" ]; then
+      skip="$skip last"
+    elif [[ "$item" =~ ^[0-9]+-[0-9]+$ ]]; then
+      skip_first="${item%-*}"
+      skip_last="${item#*-}"
+      for ((s = skip_first; s <= skip_last; s++)); do
+        skip="$skip $s"
+      done
+    elif [[ "$item" =~ ^[0-9]+$ ]]; then
+      skip="$skip $item"
+    else
+      die "segmento da saltare non valido: $item"
+    fi
+  done
+  skip_mode=1
+}
+
 if [ $# -eq 0 ]; then
   usage
 fi
@@ -80,7 +108,12 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--no-localizer" ]; then
     run_localizer=0
   elif [ "$1" = "--strip-ends" ]; then
-    strip_ends=1
+    add_skip_list "0,last"
+  elif [ "$1" = "--skip" ]; then
+    shift
+    add_skip_list "${1:-}"
+  elif [[ "$1" == --skip=* ]]; then
+    add_skip_list "${1#--skip=}"
   elif [ "$1" = "--host" ]; then
     shift
     [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
@@ -114,17 +147,17 @@ if [[ "$COMMA_HOST" != *@* ]]; then
 fi
 
 [ -n "$route" ] || die "manca la route (es. 0000011c--8152ba83cf)"
-if [ "$strip_ends" -eq 1 ]; then
-  [ -z "$segments" ] || die "--strip-ends non va insieme a una lista di segmenti"
+if [ "$skip_mode" -eq 1 ]; then
+  [ -z "$segments" ] || die "--skip/--strip-ends non va insieme a una lista di segmenti"
 else
-  [ -n "$segments" ] || die "mancano i segmenti (es. --segments=1,2,3 oppure --strip-ends)"
+  [ -n "$segments" ] || die "mancano i segmenti (es. --segments=1,2,3, --skip=0,last oppure --strip-ends)"
 fi
 
 ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
   || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
 
-# --strip-ends: read the segments on the comma, then drop segment 0 and the highest one.
-if [ "$strip_ends" -eq 1 ]; then
+# --skip / --strip-ends: read the segments on the comma, then drop the skipped ones.
+if [ "$skip_mode" -eq 1 ]; then
   found="$(ssh "$COMMA_HOST" "ls -d $REMOTE_DIR/$route--* 2>/dev/null || true" | sed 's/.*--//' | sort -n)"
   [ -n "$found" ] || die "nessun segmento di $route sul comma"
 
@@ -133,18 +166,30 @@ if [ "$strip_ends" -eq 1 ]; then
     last_segment="$s"
   done
 
-  for s in $found; do
-    if [ "$s" -eq 0 ]; then
-      continue
+  # "last" becomes the highest segment found on the comma.
+  skip_numbers=""
+  for k in $skip; do
+    if [ "$k" = "last" ]; then
+      skip_numbers="$skip_numbers $last_segment"
+    else
+      skip_numbers="$skip_numbers $k"
     fi
-    if [ "$s" -eq "$last_segment" ]; then
-      continue
-    fi
-    segments="$segments $s"
   done
 
-  [ -n "$segments" ] || die "togliendo lo 0 e l'ultimo ($last_segment) non resta nessun segmento"
-  echo "Sul comma: $(echo $found). Tolti 0 e $last_segment, scarico:$segments"
+  for s in $found; do
+    skipped=0
+    for k in $skip_numbers; do
+      if [ "$s" -eq "$k" ]; then
+        skipped=1
+      fi
+    done
+    if [ "$skipped" -eq 0 ]; then
+      segments="$segments $s"
+    fi
+  done
+
+  [ -n "$segments" ] || die "saltando$skip_numbers non resta nessun segmento"
+  echo "Sul comma: $(echo $found). Salto:$skip_numbers. Scarico:$segments"
 fi
 
 route_hex="$(echo "$route" | tr -d '-')"
