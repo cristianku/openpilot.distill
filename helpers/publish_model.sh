@@ -4,9 +4,11 @@
 # modeld_v2, upload ONNX + compiled model + the catalog driving_models.json in one commit.
 #
 # Usage: helpers/publish_model.sh [--host=<ip|nome>] [--name=<nome>] [--no-upload] [<supercombo.pt|file.onnx>]
+#        helpers/publish_model.sh [--host=<ip|nome>] [--name=<nome>] [--no-upload] --stock
 #   helpers/publish_model.sh                       (l'ultimo outputs/supervised/*/supercombo.pt)
 #   helpers/publish_model.sh outputs/supervised/2026-10-20_1855/supercombo.pt --name=prova
 #   helpers/publish_model.sh outputs/supervised/2026-10-20_1855/driving_supercombo.onnx   (solo ricompila)
+#   helpers/publish_model.sh --stock               (il modello originale del comma, es. cd210-native)
 #   helpers/publish_model.sh --no-upload           (prepara tutto, non carica niente)
 #
 # Steps:
@@ -30,6 +32,11 @@
 #
 # --name: name of the model in the menu and in the files (default: the run folder, e.g.
 #         2026-10-20_1910). Letters, digits, _ . -  The same name again replaces the model.
+# --stock: publishes the comma's own original driving model (the Default of the Models menu, e.g.
+#          CD210), compiled the same way, as "<default>-native" (e.g. cd210-native): a baseline to
+#          tell problems of this compile path from problems of a trained model. Taken from the comma
+#          (or from /data/driving_supercombo.onnx.orig when a trained model was installed in its
+#          place); kept in outputs/stock/<nome>/.
 # --no-upload: stops before Hugging Face.
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # -h, --help: this help.
@@ -42,6 +49,8 @@ COMMA_HOST="${COMMA_HOST:-comma}"
 HF_REPO="${HF_REPO:-cristianku/openpilot-distill-models}"
 REMOTE_OP="/data/openpilot"
 BUILD_DIR="/data/openpilot_distill/build"
+# Original model saved by helpers/install_model_on_comma.sh.
+BACKUP="/data/driving_supercombo.onnx.orig"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -61,16 +70,35 @@ add_comma_user() {
 }
 
 # Prints "key=value" lines read from the comma: onroad state and where this openpilot keeps the
-# files used here (paths asked to git, the layout changes between versions).
+# files used here (paths asked to git, the layout changes between versions). For --stock also the
+# name of the default model and the sha256 of the original model of this openpilot version (from
+# git, the onnx is in LFS), of the current one and of the backup.
 read_comma_info() {
-  ssh "$COMMA_HOST" bash -s <<'EOF'
+  ssh "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
+backup="$1"
 cd /data/openpilot || exit 1
 echo "onroad=$(cat /data/params/d/IsOnroad 2>/dev/null)"
 echo "compiler=$(git ls-files '*sunnypilot/modeld_v2/compile_modeld_v2.py' | head -1)"
-echo "reference=$(git ls-files '*selfdrive/modeld/models/driving_supercombo.onnx' | head -1)"
+reference="$(git ls-files '*selfdrive/modeld/models/driving_supercombo.onnx' | head -1)"
+echo "reference=$reference"
 helpers="$(git ls-files '*sunnypilot/models/helpers.py' | head -1)"
 if [ -n "$helpers" ]; then
   echo "selector_version=$(sed -n 's/^REQUIRED_JSON_VERSION *= *\([0-9]*\).*/\1/p' "$helpers")"
+fi
+model_name="$(git ls-files '*sunnypilot/models/model_name.py' | head -1)"
+if [ -n "$model_name" ]; then
+  echo "default_model=$(sed -n 's/^DEFAULT_MODEL *= *"\([^"]*\)".*/\1/p' "$model_name" | head -1)"
+fi
+if [ -n "$reference" ]; then
+  if [ "$(git cat-file -s "HEAD:$reference")" -lt 1024 ]; then
+    echo "original=$(git cat-file -p "HEAD:$reference" | sed -n 's/^oid sha256://p')"
+  else
+    echo "original=$(git cat-file -p "HEAD:$reference" | sha256sum | cut -d' ' -f1)"
+  fi
+  echo "current=$(sha256sum "$reference" | cut -d' ' -f1)"
+fi
+if [ -f "$backup" ]; then
+  echo "backup=$(sha256sum "$backup" | cut -d' ' -f1)"
 fi
 echo "tinygrad_ref=$(git -C tinygrad_repo rev-parse HEAD 2>/dev/null)"
 if [ -x /usr/local/venv/bin/python3 ]; then
@@ -81,6 +109,7 @@ EOF
 
 name=""
 upload=1
+stock=0
 input=""
 
 while [ $# -gt 0 ]; do
@@ -88,6 +117,8 @@ while [ $# -gt 0 ]; do
     usage
   elif [ "$1" = "--no-upload" ]; then
     upload=0
+  elif [ "$1" = "--stock" ]; then
+    stock=1
   elif [ "$1" = "--name" ]; then
     shift
     name="${1:-}"
@@ -110,22 +141,12 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ -z "$input" ]; then
+if [ "$stock" -eq 1 ]; then
+  [ -z "$input" ] || die "--stock non vuole un file: prende il modello originale dal comma"
+elif [ -z "$input" ]; then
   input="$(ls -t "$ROOT"/outputs/supervised/*/supercombo.pt 2>/dev/null | head -1 || true)"
   [ -n "$input" ] || die "nessun outputs/supervised/*/supercombo.pt: passa il .pt o l'.onnx"
 fi
-[ -f "$input" ] || die "$input non esiste"
-input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
-run_dir="$(dirname "$input")"
-
-if [ -z "$name" ]; then
-  name="$(basename "$run_dir")"
-fi
-[[ "$name" =~ ^[A-Za-z0-9_.-]+$ ]] || die "nome non valido: $name (solo lettere, numeri, _ . -)"
-# File and folder names: lowercase, anything else becomes "_" (2026-10-20_1910 -> 2026_10_20_1910).
-slug="$(echo "$name" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '_')"
-pkl_name="driving_distill_${slug}_tinygrad.pkl"
-stage="$ROOT/outputs/publish/$slug"
 
 ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
   || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
@@ -134,6 +155,10 @@ onroad=""
 compiler=""
 reference=""
 selector_version=""
+default_model=""
+original=""
+current=""
+backup=""
 tinygrad_ref=""
 python=""
 info="$(read_comma_info)" || die "non riesco a leggere /data/openpilot sul comma"
@@ -146,6 +171,14 @@ while IFS='=' read -r key value; do
     reference="$value"
   elif [ "$key" = "selector_version" ]; then
     selector_version="$value"
+  elif [ "$key" = "default_model" ]; then
+    default_model="$value"
+  elif [ "$key" = "original" ]; then
+    original="$value"
+  elif [ "$key" = "current" ]; then
+    current="$value"
+  elif [ "$key" = "backup" ]; then
+    backup="$value"
   elif [ "$key" = "tinygrad_ref" ]; then
     tinygrad_ref="$value"
   elif [ "$key" = "python" ]; then
@@ -158,6 +191,38 @@ done <<< "$info"
 [ -n "$reference" ] || die "sul comma non trovo driving_supercombo.onnx"
 [ -n "$selector_version" ] || die "sul comma non trovo REQUIRED_JSON_VERSION (sunnypilot/models/helpers.py)"
 [ -n "$python" ] || die "sul comma non c'e' /usr/local/venv/bin/python3"
+
+# --stock: the original model of this openpilot version, from its place or from the backup.
+if [ "$stock" -eq 1 ]; then
+  [ -n "$default_model" ] || die "sul comma non trovo DEFAULT_MODEL (sunnypilot/models/model_name.py)"
+  if [ -z "$name" ]; then
+    name="$(echo "$default_model" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')-native"
+  fi
+  if [ -n "$original" ] && [ "$current" = "$original" ]; then
+    stock_source="$REMOTE_OP/$reference"
+  elif [ -n "$original" ] && [ "$backup" = "$original" ]; then
+    stock_source="$BACKUP"
+  else
+    die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP)"
+  fi
+  input="$ROOT/outputs/stock/$name/driving_supercombo.onnx"
+  mkdir -p "$(dirname "$input")"
+  rsync -a "$COMMA_HOST:$stock_source" "$input"
+  echo "Originale del comma: $default_model ($stock_source)"
+fi
+
+[ -f "$input" ] || die "$input non esiste"
+input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+run_dir="$(dirname "$input")"
+
+if [ -z "$name" ]; then
+  name="$(basename "$run_dir")"
+fi
+[[ "$name" =~ ^[A-Za-z0-9_.-]+$ ]] || die "nome non valido: $name (solo lettere, numeri, _ . -)"
+# File and folder names: lowercase, anything else becomes "_" (2026-10-20_1910 -> 2026_10_20_1910).
+slug="$(echo "$name" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '_')"
+pkl_name="driving_distill_${slug}_tinygrad.pkl"
+stage="$ROOT/outputs/publish/$slug"
 
 echo "Modello: $name ($pkl_name)"
 echo "Comma: tinygrad $tinygrad_ref, catalogo versione $selector_version"
