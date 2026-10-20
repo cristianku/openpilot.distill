@@ -37,8 +37,8 @@
 #         and "last-N" (N segments before the last one).
 # --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
 #               It is the default when neither segments nor --skip are given.
-# --localizer: also run the localizer on each segment (off by default: it needs the
-#              GNSS ionex maps of the drive day, published on gnss-data about a day later).
+# --localizer: also run the localizer on each segment (off by default: helpers/localize_segments.sh
+#              does it later and redoes it when a better ionosphere map comes out).
 # --since: automatic mode only, first day to look at (AAAA-MM-GG).
 # -h, --help: this help.
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.

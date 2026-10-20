@@ -168,9 +168,10 @@ def _globalize_live_pose(
   return position_ecef, velocity_ecef, rot_to_quat(ecef_from_device), data.acceleration_device
 
 
-def localize(data: LocalizationInput, output_hz: float = 100.0) -> dict[str, np.ndarray]:
+def localize(data: LocalizationInput, output_hz: float = 100.0) -> tuple[dict[str, np.ndarray], dict[str, str]]:
+  """Return the localizer outputs and the ionosphere map used for each day ({"2026/293": "P1D"})."""
   initial_position = geodetic_to_ecef(data.gps_seed_geodetic[None])[0]
-  gps_t, gps_position, gps_velocity = localize_raw_gnss(
+  gps_t, gps_position, gps_velocity, ionex_used = localize_raw_gnss(
     data.raw_gnss_t, data.raw_gnss_measurements, initial_position
   )
   for name, values in (
@@ -204,7 +205,7 @@ def localize(data: LocalizationInput, output_hz: float = 100.0) -> dict[str, np.
   frame_states[:, 3:7] = nlerp_quaternions(frame_t, trajectory_t, states[:, 3:7])
   frame_states[:, 36:43] = frame_states[:, :7]
 
-  return {
+  outputs = {
     "t": trajectory_t,
     "states": states,
     "frame_t": frame_t,
@@ -212,3 +213,4 @@ def localize(data: LocalizationInput, output_hz: float = 100.0) -> dict[str, np.
     "rpy": calibration,
     "wide_from_device_euler": wide,
   }
+  return outputs, ionex_used

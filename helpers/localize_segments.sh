@@ -3,8 +3,8 @@
 # and frame_info.safetensors next to rlog.zst).
 #
 # Usage: helpers/localize_segments.sh [<segment> ...]
-#   helpers/localize_segments.sh                                            (tutti quelli da fare)
-#   helpers/localize_segments.sh --status                                   (solo stato, non lancia niente)
+#   helpers/localize_segments.sh                                            (da fare + da raffinare)
+#   helpers/localize_segments.sh --status                                   (solo stato, non lancia il localizer)
 #   helpers/localize_segments.sh 0000011c8152ba83cf01                       (nome cartella in data/)
 #   helpers/localize_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1    (formato connect)
 #   helpers/localize_segments.sh 0000011c--8152ba83cf 1 2 3
@@ -12,12 +12,16 @@
 #
 # State of a segment folder:
 #   done     localizer.safetensors and frame_info.safetensors both present (written only on success)
+#   refine   done, but a better ionosphere map is out now than the one used (see below)
 #   failed   localizer.failed present (date + last lines of the error); removed on the next success
 #   todo     neither
 # Every run also leaves the full output in localizer.log.
 #
-# Segments recorded today fail on the GNSS download (ionosphere maps come out ~1 day later):
-# they stay "failed" and are retried by the next run without arguments.
+# Ionosphere map: the localizer writes the one it used in localizer.ionex ("2026/293 P1D").
+# P1D (prediction) is the only one for a drive of today, RAP comes out about one day later,
+# FIN about two weeks later (details in localizer/ionex.py). Every run without arguments
+# redoes the segments for which a better map came out: P1D -> RAP -> FIN, one step at a time.
+# Segments done before localizer.ionex existed have no record and are left alone.
 
 set -euo pipefail
 
@@ -42,6 +46,33 @@ all_segments() {
     [ -f "$dir/rlog.zst" ] || continue
     basename "$dir"
   done
+}
+
+# Fills $ionex_lines with "<folder> <map used> <better map out now, or ->" for every
+# done segment with a localizer.ionex (one call to localizer/ionex.py for all of them).
+read_ionex_status() {
+  dirs=""
+  for name in $(all_segments); do
+    if [ "$(segment_state "$name")" = "done" ] && [ -f "$DATA_DIR/$name/localizer.ionex" ]; then
+      dirs="$dirs $DATA_DIR/$name"
+    fi
+  done
+  ionex_lines=""
+  if [ -n "$dirs" ]; then
+    ionex_lines="$(cd "$ROOT" && uv run python -m localizer.ionex $dirs)"
+  fi
+}
+
+# Map used and better map out for one segment, from $ionex_lines: sets $ionex_used, $ionex_better.
+ionex_of() {
+  ionex_used="?"
+  ionex_better="-"
+  while read -r dir used better; do
+    if [ "${dir##*/}" = "$1" ]; then
+      ionex_used="$used"
+      ionex_better="$better"
+    fi
+  done <<< "$ionex_lines"
 }
 
 names=""
@@ -72,10 +103,18 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$status_only" -eq 1 ]; then
+  read_ionex_status
   for name in $(all_segments); do
     state="$(segment_state "$name")"
     if [ "$state" = "failed" ]; then
       echo "$state  $name  ($(head -1 "$DATA_DIR/$name/localizer.failed"))"
+    elif [ "$state" = "done" ]; then
+      ionex_of "$name"
+      if [ "$ionex_better" != "-" ]; then
+        echo "refine  $name  (mappa $ionex_used, uscita $ionex_better)"
+      else
+        echo "done  $name  (mappa $ionex_used)"
+      fi
     else
       echo "$state  $name"
     fi
@@ -83,14 +122,22 @@ if [ "$status_only" -eq 1 ]; then
   exit 0
 fi
 
-# No segment given: every folder in data/ that is not done yet (todo or failed).
+# No segment given: every folder in data/ that is not done yet (todo or failed),
+# plus the done ones for which a better ionosphere map came out (refine).
 if [ -z "$names" ]; then
+  read_ionex_status
   for name in $(all_segments); do
     if [ "$(segment_state "$name")" != "done" ]; then
       names="$names $name"
+    else
+      ionex_of "$name"
+      if [ "$ionex_better" != "-" ]; then
+        echo "$name: rifaccio con la mappa $ionex_better (prima $ionex_used)"
+        names="$names $name"
+      fi
     fi
   done
-  [ -n "$names" ] || { echo "Niente da fare: tutti i segmenti sono gia' localizzati."; exit 0; }
+  [ -n "$names" ] || { echo "Niente da fare: tutti i segmenti sono gia' localizzati con la mappa migliore uscita."; exit 0; }
 fi
 
 ok=""

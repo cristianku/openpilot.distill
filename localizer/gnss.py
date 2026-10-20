@@ -3,7 +3,10 @@ import numpy as np
 from laika.astro_dog import AstroDog
 from laika.ephemeris import EphemerisType
 from laika.helpers import ConstellationId
+from laika.iono import parse_ionex
 from laika.raw_gnss import GNSSMeasurement, get_DOP
+
+from .ionex import day_of, download_ionex
 
 GPS_WEEK_SECONDS = 604_800.0
 GPS_MAX_PRN = 32
@@ -52,6 +55,22 @@ def _gnss_epochs(raw_t: np.ndarray, raw_measurements: np.ndarray) -> tuple[np.nd
 
 def _normal_measurements(rows: np.ndarray) -> list[GNSSMeasurement]:
   return [raw.normal_meas_from_array(row) for row in rows]
+
+
+class _AstroDog(AstroDog):
+  """AstroDog that also takes the predicted ionosphere map (P1D, see ionex.py) and
+  records in `ionex_used` which map it used for each day."""
+
+  def __init__(self, ionex_used: dict[str, str], **kwargs):
+    super().__init__(**kwargs)
+    self.ionex_used = ionex_used
+
+  def get_ionex_data(self, time):
+    file_path_ionex, product = download_ionex(time, self.cache_dir)
+    self.fetch_count(file_path_ionex)
+    self.ionex_used[day_of(time)] = product
+    for ionex_map in parse_ionex(file_path_ionex):
+      self.ionex_maps.append(ionex_map)
 
 
 def _correct_epochs(dog: AstroDog, initial_position: np.ndarray, epochs: list[np.ndarray]) -> list[np.ndarray]:
@@ -183,19 +202,22 @@ def _smooth_positions(
 
 def localize_raw_gnss(
   raw_t: np.ndarray, raw_measurements: np.ndarray, initial_position: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-  """Return smoothed ECEF position and velocity at receiver epochs."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, str]]:
+  """Return smoothed ECEF position and velocity at receiver epochs, and the
+  ionosphere map used for each day ({"2026/293": "P1D"})."""
   epoch_t, epochs = _gnss_epochs(raw_t, raw_measurements)
   initial_position = np.asarray(initial_position, dtype=np.float64)
   if initial_position.shape != (3,) or not np.all(np.isfinite(initial_position)):
     raise RuntimeError("the initial GPS position must be a finite ECEF vector")
   gps_epochs = [epoch[epoch[:, GNSSMeasurement.PRN] <= GPS_MAX_PRN] for epoch in epochs]
+  ionex_used: dict[str, str] = {}
   dog_options = {
     "dgps": False,
     "valid_ephem_types": EphemerisType.all_orbits(),
     "default_delays": False,
   }
-  dog = AstroDog(
+  dog = _AstroDog(
+    ionex_used,
     valid_const=(ConstellationId.GPS,),
     **dog_options,
   )
@@ -207,10 +229,11 @@ def localize_raw_gnss(
   gps_satellites = np.median([len(epoch) for epoch in corrected])
   has_glonass = any(np.any(epoch[:, GNSSMeasurement.PRN] >= GLONASS_MIN_PRN) for epoch in epochs)
   if has_glonass and (gps_dop > 3.0 or gps_satellites < 6):
-    dog = AstroDog(
+    dog = _AstroDog(
+      ionex_used,
       valid_const=(ConstellationId.GPS, ConstellationId.GLONASS),
       **dog_options,
     )
     corrected = _correct_epochs(dog, initial_position, epochs)
   states = _smooth_positions(epoch_t, corrected, initial_position)
-  return epoch_t, states[:, POSITION], states[:, VELOCITY]
+  return epoch_t, states[:, POSITION], states[:, VELOCITY], ionex_used
