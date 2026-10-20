@@ -37,6 +37,10 @@ dev = [
 
 [tool.uv]
 package = false
+# torch cu126 pins nvidia-cuda-runtime-cu12==12.6.77, but onnxruntime-gpu 1.29 (CUDA 12 feed) needs
+# libcudart >= 12.8 (cudaLibraryGetKernel & co.): with 12.6 its CUDA provider does not load and the
+# teacher runs on CPU (~300 s/step, >12 GB RAM). A 12.9 runtime still runs torch cu126 and Volta.
+override-dependencies = ["nvidia-cuda-runtime-cu12==12.9.79"]
 
 # Tesla V100 (Volta, sm_70): the default PyPI torch is built for CUDA 13, which dropped Volta.
 # The cu126 builds still ship sm_70 kernels.
