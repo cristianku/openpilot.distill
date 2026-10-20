@@ -28,11 +28,11 @@
 # --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
 # -h, --help: this help (also shown when called without arguments).
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
-# Env: COMMA_HOST (default comma@192.168.88.29), overridden by --host
+# Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
 
 set -euo pipefail
 
-COMMA_HOST="${COMMA_HOST:-comma@192.168.88.29}"
+COMMA_HOST="${COMMA_HOST:-comma}"
 REMOTE_DIR="/data/media/0/realdata"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="$ROOT/data"
@@ -101,6 +101,14 @@ add_skip_list() {
   skip_mode=1
 }
 
+# --host without an explicit user: the comma login user is "comma".
+# The default "comma" is left alone, user and IP come from ~/.ssh/config.
+add_comma_user() {
+  if [[ "$COMMA_HOST" != *@* ]]; then
+    COMMA_HOST="comma@$COMMA_HOST"
+  fi
+}
+
 if [ $# -eq 0 ]; then
   usage
 fi
@@ -121,9 +129,11 @@ while [ $# -gt 0 ]; do
     shift
     [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
     COMMA_HOST="$1"
+    add_comma_user
   elif [[ "$1" == --host=* ]]; then
     COMMA_HOST="${1#--host=}"
     [ -n "$COMMA_HOST" ] || die "--host vuole un IP o un nome"
+    add_comma_user
   elif [ "$1" = "--segments" ]; then
     shift
     add_segment_list "${1:-}"
@@ -143,11 +153,6 @@ while [ $# -gt 0 ]; do
   fi
   shift
 done
-
-# Without an explicit user the comma login user is "comma".
-if [[ "$COMMA_HOST" != *@* ]]; then
-  COMMA_HOST="comma@$COMMA_HOST"
-fi
 
 [ -n "$route" ] || die "manca la route (es. 0000011c--8152ba83cf)"
 if [ "$skip_mode" -eq 1 ]; then
