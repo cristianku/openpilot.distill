@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Copy selected segments of a route straight from the comma device into data/,
-# renamed to the hex folder name the dataset expects, then run the localizer on each.
+# renamed to the hex folder name the dataset expects; with --localizer it also runs the localizer on each.
 #
-# Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--no-localizer]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--no-localizer]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --strip-ends [--no-localizer]
+# Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --strip-ends [--localizer]
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip=0,1,2,last
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip 0,1,14
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --strip-ends
@@ -26,6 +26,8 @@
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
 #         and "last-N" (N segments before the last one).
 # --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
+# --localizer: also run the localizer on each segment (off by default: it needs the
+#              GNSS ionex maps of the drive day, published on gnss-data about a day later).
 # -h, --help: this help (also shown when called without arguments).
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
@@ -48,7 +50,7 @@ usage() {
 
 route=""
 segments=""
-run_localizer=1
+run_localizer=0
 skip=""
 skip_mode=0
 
@@ -116,6 +118,8 @@ fi
 while [ $# -gt 0 ]; do
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     usage
+  elif [ "$1" = "--localizer" ]; then
+    run_localizer=1
   elif [ "$1" = "--no-localizer" ]; then
     run_localizer=0
   elif [ "$1" = "--strip-ends" ]; then
