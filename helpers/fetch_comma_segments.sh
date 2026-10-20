@@ -23,8 +23,9 @@
 # with agent forwarding (ssh -A) so the Mac's key is used.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
-#         The list takes numbers, ranges (2-5) and "last" (the highest segment, the arrival).
-# --strip-ends: same as --skip=0,last (start and arrival). No segment list needed.
+#         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
+#         and "last-N" (N segments before the last one).
+# --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
 # -h, --help: this help (also shown when called without arguments).
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default comma@192.168.88.29), overridden by --host
@@ -83,6 +84,8 @@ add_skip_list() {
   for item in "${items[@]}"; do
     if [ "$item" = "last" ]; then
       skip="$skip last"
+    elif [[ "$item" =~ ^last-[0-9]+$ ]]; then
+      skip="$skip $item"
     elif [[ "$item" =~ ^[0-9]+-[0-9]+$ ]]; then
       skip_first="${item%-*}"
       skip_last="${item#*-}"
@@ -108,7 +111,7 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--no-localizer" ]; then
     run_localizer=0
   elif [ "$1" = "--strip-ends" ]; then
-    add_skip_list "0,last"
+    add_skip_list "0,1,last-1,last"
   elif [ "$1" = "--skip" ]; then
     shift
     add_skip_list "${1:-}"
@@ -166,11 +169,13 @@ if [ "$skip_mode" -eq 1 ]; then
     last_segment="$s"
   done
 
-  # "last" becomes the highest segment found on the comma.
+  # "last" becomes the highest segment found on the comma, "last-N" that minus N.
   skip_numbers=""
   for k in $skip; do
     if [ "$k" = "last" ]; then
       skip_numbers="$skip_numbers $last_segment"
+    elif [[ "$k" =~ ^last-[0-9]+$ ]]; then
+      skip_numbers="$skip_numbers $((last_segment - ${k#last-}))"
     else
       skip_numbers="$skip_numbers $k"
     fi
