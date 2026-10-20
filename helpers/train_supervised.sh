@@ -13,6 +13,9 @@
 # seen about a hundred times. train.py does no validation: judge from the loss
 # (gt = your driving, distill = the teacher) going down and flattening on wandb.
 #
+# --workers (default 6): processes that load and decode the videos in parallel. With 1
+# the GPU sits waiting for data most of the time.
+#
 # Before training it checks:
 #   - the teacher models/big_driving_supercombo.onnx: downloaded (or completed) when missing or partial
 #   - every segment in data/ is localized (localizer.safetensors + frame_info.safetensors):
@@ -41,7 +44,9 @@ usage() {
 
 steps=5000
 batch_size=8
-workers=1
+# Data-loader workers: with 1 the GPU waits ~3.5 s per step for the videos to be decoded
+# (one core busy, GPU mostly idle). 6 of the 8 cores, ~2.5 GB RAM each.
+workers=6
 background=0
 
 while [ $# -gt 0 ]; do
