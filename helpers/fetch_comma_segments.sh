@@ -4,7 +4,8 @@
 #
 # Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--localizer]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --strip-ends [--localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> [--strip-ends] [--localizer]
+#   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf   (= --strip-ends)
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip=0,1,2,last
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip 0,1,14
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --strip-ends
@@ -26,6 +27,7 @@
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
 #         and "last-N" (N segments before the last one).
 # --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
+#               It is the default when neither segments nor --skip are given.
 # --localizer: also run the localizer on each segment (off by default: it needs the
 #              GNSS ionex maps of the drive day, published on gnss-data about a day later).
 # -h, --help: this help (also shown when called without arguments).
@@ -161,8 +163,9 @@ done
 [ -n "$route" ] || die "manca la route (es. 0000011c--8152ba83cf)"
 if [ "$skip_mode" -eq 1 ]; then
   [ -z "$segments" ] || die "--skip/--strip-ends non va insieme a una lista di segmenti"
-else
-  [ -n "$segments" ] || die "mancano i segmenti (es. --segments=1,2,3, --skip=0,last oppure --strip-ends)"
+elif [ -z "$segments" ]; then
+  # No segments and no --skip: the default is --strip-ends.
+  add_skip_list "0,1,last-1,last"
 fi
 
 ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
