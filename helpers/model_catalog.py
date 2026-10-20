@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 
-FOLDER = "Distill Models"
+FOLDER = "Distill cristianku"
 # The official catalog uses 0..76: higher indexes put this folder at the top of the menu.
 FIRST_INDEX = 1000
 MONTHS = (
@@ -34,7 +34,7 @@ def make_bundle(args: argparse.Namespace, index: int) -> dict:
     date = f"{MONTHS[today.month - 1]} {today.day}, {today.year}"
     return {
         "short_name": args.name,
-        "display_name": f"Distill {args.name} ({date})",
+        "display_name": f"{args.name} ({date})",
         "index": index,
         "generation": "12",
         "environment": "distill",
