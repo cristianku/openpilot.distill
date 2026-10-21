@@ -311,21 +311,29 @@ def is_queue_supercombo(model: onnx.ModelProto) -> bool:
     return False
 
 
-def _check_frame_slice(graph: onnx.GraphProto, node: onnx.NodeProto, what: str) -> None:
-    """A Slice on axis 0 that keeps every QUEUE_FRAME_SKIP-th entry starting from the first one."""
+def _check_frame_slice(model: onnx.ModelProto, node: onnx.NodeProto, what: str) -> None:
+    """A Slice on axis 0 that keeps every QUEUE_FRAME_SKIP-th entry, from the first to the end of the queue."""
 
+    graph = model.graph
     if len(node.input) < 5:
         raise ValueError(f"{what}: Slice without explicit axes/steps")
     starts = _constant(graph, node.input[1])
+    ends = _constant(graph, node.input[2])
     axes = _constant(graph, node.input[3])
     steps = _constant(graph, node.input[4])
-    if starts is None or axes is None or steps is None:
-        raise ValueError(f"{what}: Slice with computed starts/axes/steps")
+    if starts is None or ends is None or axes is None or steps is None:
+        raise ValueError(f"{what}: Slice with computed starts/ends/axes/steps")
     if starts.tolist() != [0] or axes.tolist() != [0] or steps.tolist() != [QUEUE_FRAME_SKIP]:
         raise ValueError(
             f"{what}: Slice starts={starts.tolist()} axes={axes.tolist()} steps={steps.tolist()}, "
             f"expected [0] [0] [{QUEUE_FRAME_SKIP}] (5 Hz steps of a 20 Hz camera, like supervised/dataset.py)"
         )
+    # The end must reach the end of the queue (INT64_MAX in the torch export): a shorter one would
+    # drop the newest entries, and the kept ones would no longer end at the current frame.
+    queue_length = _shape(model, node.input[0])[0]
+    end_values = ends.tolist()
+    if not isinstance(queue_length, int) or len(end_values) != 1 or end_values[0] < queue_length:
+        raise ValueError(f"{what}: Slice ends={end_values} on a queue of {queue_length}, expected the whole queue")
 
 
 def find_queue_boundaries(model: onnx.ModelProto) -> dict:
@@ -417,7 +425,7 @@ def find_queue_boundaries(model: onnx.ModelProto) -> dict:
                 break
             next_node = next_nodes[0]
             if next_node.op_type == "Slice":
-                _check_frame_slice(graph, next_node, f"camera {camera}")
+                _check_frame_slice(model, next_node, f"camera {camera}")
                 frame_slices = frame_slices + 1
             elif next_node.op_type != "Reshape":
                 break
@@ -458,7 +466,7 @@ def find_queue_boundaries(model: onnx.ModelProto) -> dict:
             continue
         steps = _constant(graph, node.input[4])
         if steps is not None and steps.tolist() != [1]:
-            _check_frame_slice(graph, node, feature_queue)
+            _check_frame_slice(model, node, feature_queue)
             history_slices = history_slices + 1
     if history_slices != 1 or queue_length % QUEUE_FRAME_SKIP != 0:
         raise ValueError(
