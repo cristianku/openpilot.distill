@@ -13,6 +13,9 @@ import numpy as np
 from .segment import T_IDXS
 
 DEFAULT_HORIZON_S = 10.0
+# Bump when a change in the evaluation code changes the numbers: holdout results with another
+# version are recomputed instead of read from outputs/eval/.
+EVAL_CODE_VERSION = 1
 # Float slack for the time comparisons (T_IDXS[32] is exactly 10.0, frame times are float64).
 _TIME_EPSILON = 1e-6
 
