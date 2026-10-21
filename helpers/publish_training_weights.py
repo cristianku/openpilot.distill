@@ -211,7 +211,7 @@ def main() -> int:
     with TemporaryDirectory() as temporary:
         release_path = Path(temporary) / "manifest.json"
         release_path.write_text(json.dumps(release_info, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        for task, meta in models.items():
+        for meta in models.values():
             operations.append(CommitOperationAdd(path_in_repo=meta["hub_path"], path_or_fileobj=meta["path"]))
         operations.append(CommitOperationAdd(path_in_repo=release_manifest_path,
                                              path_or_fileobj=str(release_path)))
