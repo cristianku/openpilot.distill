@@ -28,6 +28,8 @@
 #   data/0000011c8152ba83cf03/fcamera.hevc -> the file above       (the link)
 # A file still downloaded straight into data/ (old layout) is moved into the shared folder and
 # replaced by the link; if the shared folder already has a different copy it stops, nothing deleted.
+# Both segment folders must be real folders: when data/<folder> or the shared one is a link
+# (the two would be the same files) it stops too, nothing deleted.
 #
 # Folder name in data/: route without dashes + segment number on two digits
 #   0000011c--8152ba83cf--3  ->  data/0000011c8152ba83cf03
@@ -74,6 +76,8 @@ file_size() {
 # Old layout: $1 (in data/) still a regular file downloaded there. It goes to $2 (shared
 # folder): moved when the shared folder does not have it yet, removed when the shared copy
 # is identical. A shared copy that differs is left to the user: stop, nothing deleted.
+# $1 and $2 being the same file (one reaches the other through a link) also stops: cmp
+# would call them identical and the rm would delete the only copy.
 move_old_file() {
   local old="$1"
   local shared="$2"
@@ -86,6 +90,8 @@ move_old_file() {
   if [ ! -e "$shared" ]; then
     mv "$old" "$shared"
     echo "  $(basename "$old"): spostato da data/ nella cartella comune"
+  elif [ "$old" -ef "$shared" ]; then
+    die "$old e $shared sono lo stesso file (uno arriva all'altro tramite un link): non cancello niente, controlla a mano"
   elif cmp -s "$old" "$shared"; then
     rm "$old"
     echo "  $(basename "$old"): uguale a quello nella cartella comune, tolto da data/"
@@ -243,6 +249,15 @@ download_segments() {
         die "$src/$f non esiste sul comma"
       fi
     done
+
+    # A segment folder that is a link would make data/$name/<file> and the shared file the
+    # same file (the localizer outputs would also end up in the shared folder): stop.
+    if [ -L "$dst" ]; then
+      die "$dst e' un link a una cartella: in data/ serve una cartella vera con dentro i link ai file. Non cancello niente, controlla a mano"
+    fi
+    if [ -L "$shared" ]; then
+      die "$shared e' un link a una cartella: nella cartella comune serve una cartella vera. Non cancello niente, controlla a mano"
+    fi
 
     mkdir -p "$shared" "$dst"
     for f in $FILES; do

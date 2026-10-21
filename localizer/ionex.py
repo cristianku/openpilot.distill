@@ -15,7 +15,6 @@ Usage: uv run python -m localizer.ionex <segment folder> [...]
 Prints "<folder> <map used> <better map out now, or ->" for every folder with a
 localizer.ionex (the worst day counts when a segment spans midnight).
 """
-import contextlib
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -81,10 +80,14 @@ def _download(time: GPSTime, product: str, cache_dir: str) -> str | None:
   filename = ionex_filename(time, product)
   if filename is None:
     return None
-  url_bases = (mirror_url(CDDIS_BASE_URL, "/gnss/products/ionex/"),)
+  # One url as a plain string, not a tuple: with a tuple laika logs "HTTPS error 404"
+  # for every map not out yet.
+  url_base = mirror_url(CDDIS_BASE_URL, "/gnss/products/ionex/")
+  if url_base is None:
+    return None
   folder_path = time.as_datetime().strftime("%Y/%j/")
   try:
-    return download_and_cache_file(url_bases, folder_path, cache_dir + "ionex/", filename)
+    return download_and_cache_file(url_base, folder_path, cache_dir + "ionex/", filename)
   except DownloadFailed:
     return None
 
@@ -142,9 +145,7 @@ def main() -> None:
       if len(better_products(product)) > len(better_products(worst)):
         worst = product
       if better == "-":
-        # laika prints "HTTPS error 404" for every map not out yet: keep stdout for the results.
-        with contextlib.redirect_stdout(sys.stderr):
-          found = better_ionex_out(day, product, cache_dir)
+        found = better_ionex_out(day, product, cache_dir)
         if found is not None:
           better = found
     results.append(f"{folder} {worst} {better}")

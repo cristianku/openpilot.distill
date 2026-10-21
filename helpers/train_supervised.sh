@@ -20,6 +20,8 @@
 #   - the teacher models/big_driving_supercombo.onnx: downloaded (or completed) when missing or partial
 #   - every segment in data/ is localized (localizer.safetensors + frame_info.safetensors):
 #     one without would stop the training, run helpers/localize_segments.sh first
+#   - fcamera.hevc / ecamera.hevc in data/ are not links to a missing file of the shared
+#     folder (COMMA_VIDEOS_DIR): one would stop the training too
 #   - wandb: without "uv run wandb login" done, it runs offline (WANDB_MODE=offline)
 #
 # Every run gets its own folder outputs/supervised/<data_ora>/ with supercombo.pt (the
@@ -97,11 +99,23 @@ else
 fi
 
 # Segments: the dataset takes every folder of data/ with fcamera.hevc, and one without
-# the localizer outputs would stop the training halfway.
+# the localizer outputs would stop the training halfway. The videos are links into the
+# shared folder (COMMA_VIDEOS_DIR): a link to a file that is not there (shared disk not
+# mounted, segment removed from it) is still listed by the dataset, which then stops when
+# it tries to read it.
 total=0
 missing=""
+broken=""
 for dir in "$DATA_DIR"/*/; do
+  if [ -L "$dir/fcamera.hevc" ] && [ ! -e "$dir/fcamera.hevc" ]; then
+    broken="$broken $(basename "$dir")"
+    continue
+  fi
   if [ ! -f "$dir/fcamera.hevc" ]; then
+    continue
+  fi
+  if [ -L "$dir/ecamera.hevc" ] && [ ! -e "$dir/ecamera.hevc" ]; then
+    broken="$broken $(basename "$dir")"
     continue
   fi
   total=$((total + 1))
@@ -109,6 +123,8 @@ for dir in "$DATA_DIR"/*/; do
     missing="$missing $(basename "$dir")"
   fi
 done
+[ -z "$broken" ] || die "link rotti verso la cartella comune (COMMA_VIDEOS_DIR), il training si fermerebbe:$broken
+Controlla che la cartella comune ci sia (disco montato) o riscarica con helpers/fetch_comma_segments.sh."
 [ "$total" -gt 0 ] || die "nessun segmento in data/ (scaricali con helpers/fetch_comma_segments.sh)"
 [ -z "$missing" ] || die "segmenti non localizzati, fermerebbero il training:$missing
 Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in data_scartati/)."
