@@ -336,6 +336,41 @@ def _check_frame_slice(model: onnx.ModelProto, node: onnx.NodeProto, what: str) 
         raise ValueError(f"{what}: Slice ends={end_values} on a queue of {queue_length}, expected the whole queue")
 
 
+def _check_history_window(graph: onnx.GraphProto, node: onnx.NodeProto, time_axis: int, history_steps: int) -> int:
+    """The GatherND that keeps the last T of the history steps; returns T.
+
+    With batch_dims 0 and indices [T, 1] it picks T entries of axis 0, which must be the time axis
+    there. The indices must be the last T steps in order (-T .. -1, or the same counted from the
+    start): step -1 is the current frame and every step is 4 frames before the next one, like the
+    5 Hz steps of the dataset.
+    """
+
+    batch_dims = _attribute(node, "batch_dims", 0)
+    if batch_dims != 0:
+        raise ValueError(f"{node.name}: GatherND with batch_dims {batch_dims}, expected 0")
+    if time_axis != 0:
+        raise ValueError(f"{node.name}: GatherND picks axis 0, but the time axis there is {time_axis}")
+    indices = _constant(graph, node.input[1])
+    if indices is None:
+        raise ValueError(f"{node.name}: GatherND with computed indices")
+    if indices.ndim != 2 or indices.shape[1] != 1:
+        raise ValueError(f"{node.name}: GatherND indices of shape {list(indices.shape)}, expected [T, 1]")
+    window_steps = int(indices.shape[0])
+    if window_steps < 1 or window_steps > history_steps:
+        raise ValueError(f"{node.name}: GatherND keeps {window_steps} of {history_steps} history steps")
+    for position in range(window_steps):
+        step = int(indices[position][0])
+        if step < 0:
+            step = step + history_steps
+        if step != history_steps - window_steps + position:
+            raise ValueError(
+                f"{node.name}: GatherND keeps the steps {indices[:, 0].tolist()} of {history_steps}, expected the "
+                f"last {window_steps} in order (-{window_steps} .. -1): the policies would read steps that are not "
+                f"{QUEUE_FRAME_SKIP} frames apart up to the current frame, like the dataset gives them"
+            )
+    return window_steps
+
+
 def find_queue_boundaries(model: onnx.ModelProto) -> dict:
     """Tensors where a queue-format model is cut, found from the structure of the graph.
 
@@ -498,10 +533,12 @@ def find_queue_boundaries(model: onnx.ModelProto) -> dict:
         raise ValueError(f"no history Concat after {feature_queue}")
 
     current = None
+    current_step = None
     for name in history_concat.input:
         producer = producers.get(name)
         if producer is not None and producer.op_type == "Unsqueeze":
             current = producer.input[0]
+            current_step = name
     if current is None:
         raise ValueError("history Concat without the Unsqueeze of the current features")
     current_shape = _shape(model, current)
@@ -510,6 +547,16 @@ def find_queue_boundaries(model: onnx.ModelProto) -> dict:
     feature_size = current_shape[1] * current_shape[2]
     if _shape(model, feature_queue)[-1] != feature_size:
         raise ValueError(f"{feature_queue} does not hold the {current_shape[1:]} current features")
+
+    # The history Concat puts the current features after the queue_length / 4 history steps, on the
+    # time axis 1: its last step is the current frame, every other one 4 frames before the next.
+    last_input = history_concat.input[len(history_concat.input) - 1]
+    if _attribute(history_concat, "axis") != 1 or last_input != current_step:
+        raise ValueError(f"{history_concat.name}: the current features are not the last step on axis 1")
+    history_steps = queue_length // QUEUE_FRAME_SKIP + 1
+    history_shape = _shape(model, history_concat.output[0])
+    if len(history_shape) != 4 or history_shape[1] != history_steps:
+        raise ValueError(f"{history_concat.name} gives {history_shape}, expected {history_steps} steps on axis 1")
 
     # The current features are also what the outputs carry as hidden_state: a Reshape of them is one
     # input of the Concat that builds the outputs vector.
@@ -528,14 +575,40 @@ def find_queue_boundaries(model: onnx.ModelProto) -> dict:
     if not hidden_found:
         raise ValueError("the hidden_state of the outputs is not the current features")
 
-    # Tokens: from the history concat follow the chain of single-consumer nodes (the window of the
-    # last T steps: Transpose, GatherND, Transpose in MD v3); the tensor read by several nodes is the
-    # input of the policies.
+    # Tokens: from the history concat follow the single-consumer nodes that cut the window of the
+    # last T steps (Transpose, GatherND, Transpose in MD v3); the tensor after them is the input of
+    # the policies. Only Transpose, GatherND and Identity belong to the window, and the GatherND must
+    # keep exactly the last T steps: a model whose policies read other steps (another spacing, a
+    # strided pick) is refused here, not trained on 5 Hz features it never reads that way. The first
+    # other node (or a tensor read by several nodes) is already part of the policies.
     tokens = history_concat.output[0]
+    time_axis = 1
+    window_steps = 0
     while len(consumers.get(tokens, [])) == 1:
-        tokens = consumers[tokens][0].output[0]
+        node = consumers[tokens][0]
+        if node.op_type == "Transpose":
+            perm = _attribute(node, "perm")
+            if perm is None:
+                raise ValueError(f"{node.name}: Transpose without perm")
+            new_axis = None
+            for position in range(len(perm)):
+                if perm[position] == time_axis:
+                    new_axis = position
+            time_axis = new_axis
+        elif node.op_type == "GatherND":
+            if window_steps != 0:
+                raise ValueError(f"{node.name}: a second GatherND between the history Concat and the policies")
+            window_steps = _check_history_window(graph, node, time_axis, history_steps)
+        elif node.op_type != "Identity":
+            break
+        tokens = node.output[0]
+    if window_steps == 0:
+        raise ValueError(f"no GatherND window of the last history steps between {history_concat.name} and {tokens}")
+    if time_axis != 1:
+        raise ValueError(f"policy tokens {tokens}: time on axis {time_axis}, expected 1")
     token_shape = _shape(model, tokens)
-    if len(token_shape) != 4 or token_shape[0] != 1 or token_shape[2:] != current_shape[1:]:
+    if (len(token_shape) != 4 or token_shape[0] != 1 or token_shape[1] != window_steps
+            or token_shape[2:] != current_shape[1:]):
         raise ValueError(f"policy tokens {tokens} have shape {token_shape}, current features {current_shape}")
     timesteps = token_shape[1]
 

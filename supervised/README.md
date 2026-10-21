@@ -29,6 +29,7 @@ sha256sum models/big_driving_supercombo.onnx
 ```
 
 `helpers/train_supervised.sh --teacher=md-v3|084747c7` (default `md-v3`) does the download and the sha256 check by itself.
+The `teacher` model of `helpers/eval_holdout.sh`, `helpers/compare_video.sh` and the web site is the default one, MD v3 (`evaluation/specs.py`).
 
 ### How the queue-format teacher is used
 
@@ -43,6 +44,9 @@ Before training with a new model of that repository, check the cut on CPU (a few
 
 ```bash
 uv run python -m helpers.check_teacher models/big_driving_supercombo_1365126a_12864.onnx
+# On the Tesla V100 server (DISTILL_UV_EXTRA=v100 in .env), with the extra like the helpers do:
+# a plain `uv run` there re-syncs the default CUDA 13 stack (pyproject.toml).
+uv run --extra v100 python -m helpers.check_teacher models/big_driving_supercombo_1365126a_12864.onnx
 ```
 
 It runs the full model at 20 Hz and compares it, output by output, with the split vision + dense policies at the last 5 Hz step; it also checks the vision features, causality and batching. Exit code 0 means every check passed.
@@ -52,9 +56,10 @@ The `distill/hidden_state` loss follows the teacher: with MD v3 it compares the 
 ## Training
 
 ```bash
-uv run torchrun --standalone --nproc-per-node=1 -m supervised.train --steps 5000 --batch-size 8 --workers 1 \
-  --teacher models/big_driving_supercombo_1365126a_12864.onnx
+uv run torchrun --standalone --nproc-per-node=1 -m supervised.train --steps 5000 --batch-size 8 --workers 1
 ```
+
+Without `--teacher` it uses MD v3 (`models/big_driving_supercombo_1365126a_12864.onnx`); add `--teacher models/big_driving_supercombo.onnx` for the old teacher.
 
 
 ## Training modes and recoverable checkpoints
@@ -63,7 +68,7 @@ The supervised trainer supports the same three modes as `sunnypilot.speedlimits`
 
 - `fresh` (default) creates an independent model using the configured initialization. Select a **new** output path for each run.
 - `continue` creates a **new run** initialized from the reviewed, SHA256-verified PyTorch weights referenced by `training/stable.json` in a Hugging Face model repository. It does not restore the previous optimizer.
-- `resume` requires the **same output path**, total `--steps`, dataset and teacher as an interrupted run and restores the model and AdamW optimizer from its local `.training.pt` checkpoint. A completed checkpoint is refused; use `continue` to begin a new run. The error message shows the `--teacher` and `--dataset` the run was started with; `helpers/train_supervised.sh --resume` reads them from the checkpoint by itself.
+- `resume` requires the **same output path**, total `--steps`, dataset and teacher as an interrupted run and restores the model and AdamW optimizer from its local `.training.pt` checkpoint. A completed checkpoint is refused; use `continue` to begin a new run. `--teacher` and `--dataset` are compared as strings with the ones saved in the checkpoint: give exactly those (the error message shows them). A run started without `--teacher` before MD v3 became the default saved the absolute path of `models/big_driving_supercombo.onnx`. `helpers/train_supervised.sh --resume` reads the steps and the teacher from the checkpoint by itself, and always uses the default `--dataset`.
 - `continue` may use a different teacher than the run that produced the weights (e.g. MD v3 after `084747c7`): expect `distill/hidden_state` to start high.
 
 ```bash

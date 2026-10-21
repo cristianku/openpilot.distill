@@ -1,6 +1,7 @@
 """Check on CPU that a queue-format big model of Hugging Face can be the distill teacher.
 
 Usage: uv run python -m helpers.check_teacher <big_driving_supercombo.onnx> [--ticks <n>] [--tolerance <x>] [--seed <n>]
+       (on the Tesla V100 server "uv run --extra v100 python -m ...": a plain uv run re-syncs the CUDA 13 stack)
 
 The big models of commaai/openpilot_driving_models ("MD v3" and later, openpilot PR #38916) keep their
 history inside the ONNX: modeld runs them at 20 Hz with ONE new frame per camera and gives every

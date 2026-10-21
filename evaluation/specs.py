@@ -1,7 +1,8 @@
 """Model specs: the strings that name a model on the command line and in the web site.
 
   stock           comma's own CD210 model, the pinned outputs/cd210/driving_supercombo.onnx
-  teacher         models/big_driving_supercombo.onnx (the model the student imitates)
+  teacher         the default teacher of supervised/train.py (supervised/teachers.py DEFAULT_TEACHER, MD v3:
+                  models/big_driving_supercombo_1365126a_12864.onnx), the model the new students imitate
   logged          the plan the car really ran: modelV2 from the segment rlog, no inference
   run:<run dir>   outputs/supervised/<run dir>/supercombo.pt (or supercombo.training.pt)
   hf:<slug>       Hugging Face training/releases/<slug>/supercombo.pt, else models/<slug>/driving_supercombo.onnx
@@ -17,6 +18,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from supervised.teachers import DEFAULT_TEACHER
+
 # Always fullmatch(): with match() the "$" also accepts a trailing newline ("stock\n").
 SPEC_PATTERN = re.compile(r"^(stock|teacher|logged|run:[A-Za-z0-9_.-]+|hf:[a-z0-9_]+)$")
 SEGMENT_PATTERN = re.compile(r"^[0-9a-f]{20}$")
@@ -30,7 +33,9 @@ STOCK_SHA256 = "65a08adc31d5c456219687d99b7bf5e44d61dae2d49ea67850e76105c7248cce
 STOCK_HF_FILE = "models/cd210_native/driving_supercombo.onnx"
 STOCK_CACHE_DIR = "models/cache"
 
-TEACHER_PATH = "models/big_driving_supercombo.onnx"
+# The teacher of the training (supervised/teachers.py, standard library only like this file): the
+# students are compared with the model they imitate, the same file supervised/train.py loads.
+TEACHER_PATH = DEFAULT_TEACHER
 RUNS_DIR = "outputs/supervised"
 HF_CACHE_DIR = "models/cache/hf"
 

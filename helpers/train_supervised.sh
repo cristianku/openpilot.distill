@@ -65,7 +65,8 @@
 # the GPU. The training keeps the lock until it ends, with --background too.
 #
 # Before training it checks:
-#   - the teacher file: downloaded (or completed) when missing or partial, sha256 checked after a download
+#   - the teacher file: downloaded (or completed) into <file>.part when missing, renamed only after
+#     its size and sha256 are checked
 #   - every segment in data/ is localized (localizer.safetensors + frame_info.safetensors):
 #     one without would stop the training, run helpers/localize_segments.sh first
 #   - fcamera.hevc / ecamera.hevc in data/ are not links to a missing file of the shared
@@ -169,6 +170,14 @@ if [ -n "$wandb_mode" ] && [ "$wandb_mode" != "online" ] && [ "$wandb_mode" != "
   && [ "$wandb_mode" != "disabled" ]; then
   die "--wandb vuole online, offline o disabled (non '$wandb_mode')"
 fi
+# --teacher: one of the two this script can download (file, URL and sha256 below). --resume takes
+# the teacher of the interrupted run from its checkpoint, so it refuses --teacher.
+if [ "$teacher_name" != "md-v3" ] && [ "$teacher_name" != "084747c7" ]; then
+  die "--teacher vuole md-v3 o 084747c7 (non '$teacher_name')"
+fi
+if [ "$mode" = "resume" ] && [ "$teacher_given" -eq 1 ]; then
+  die "con --resume il teacher e' quello del run interrotto: togli --teacher"
+fi
 
 # GPU lock first: two trainings started together must not both prepare a run.
 distill_gpu_lock_or_die
@@ -198,7 +207,6 @@ if [ "$mode" = "resume" ]; then
     || die "in $run_dir non c'e' supercombo.training.pt: il run e' partito senza checkpoint, non si puo' riprendere"
   [ ! -f "$run_dir/supercombo.pt" ] \
     || die "$run_dir e' gia' finito (c'e' supercombo.pt): per allenarlo ancora pubblicalo con --stable e usa --continue"
-  [ "$teacher_given" -eq 0 ] || die "con --resume il teacher e' quello del run interrotto: togli --teacher"
   # Steps and teacher of the run in one read (the checkpoint also holds the optimizer: slow to load).
   resume_info="$(cd "$ROOT" && distill_uv_run python -c 'import sys, torch
 saved = torch.load(sys.argv[1], map_location="cpu", weights_only=True)
@@ -235,10 +243,19 @@ elif [ "$teacher_name" = "084747c7" ]; then
 else
   die "--teacher vuole md-v3 o 084747c7 (non '$teacher_name')"
 fi
-# --resume: exactly the path saved in the checkpoint, train.py compares it as a string (the repo
-# path of the run may be written differently, e.g. through a symlink).
+# TEACHER is the file that is checked here, TEACHER_ARG the --teacher given to train.py.
+# --resume: TEACHER_ARG is exactly the path saved in the checkpoint, train.py compares it as a
+# string (the repo path of the run may be written differently, e.g. through a symlink). A relative
+# one (train.py started by hand with --teacher models/...) is relative to the repo root, where
+# train.py runs: the checks below look for the file there too, wherever this script is started from.
+TEACHER_ARG="$TEACHER"
 if [ "$mode" = "resume" ]; then
-  TEACHER="$saved_teacher"
+  TEACHER_ARG="$saved_teacher"
+  if [[ "$saved_teacher" == /* ]]; then
+    TEACHER="$saved_teacher"
+  else
+    TEACHER="$ROOT/$saved_teacher"
+  fi
 fi
 
 # wandb: --wandb wins. Without it as before: "uv run wandb login" saves the key in ~/.netrc,
@@ -272,13 +289,17 @@ echo "RUN_DIR=$run_dir"
 # Teacher and segment checks, then the training. A function, so that with --foreground-log its
 # whole output can go through one tee into train.log.
 prepare_and_train() {
-  # A download of the teacher still running elsewhere: a second curl on the same file would break it.
-  if pgrep -f "curl.*big_driving_supercombo.onnx" > /dev/null; then
+  # A download of this teacher file still running elsewhere (this script or the curl of
+  # supervised/README.md): a second curl on the same file would break it. Matched on the file that
+  # curl writes (--output), not on the URL: every model of commaai/openpilot_driving_models is
+  # called big_driving_supercombo.onnx, and downloading another one must not stop the training.
+  teacher_file_regex="$(basename "$TEACHER" | sed 's/[.]/[.]/g')"
+  if pgrep -f "curl .*--output ([^ ]*/)?${teacher_file_regex}([.]part)?( |\$)" > /dev/null; then
     die "il teacher si sta ancora scaricando (curl in corso): aspetta che finisca e rilancia"
   fi
 
-  # Teacher: download it, or finish a partial download, when its size is not the one of its source.
-  # Hugging Face answers with a redirect: the last Content-Length is the one of the file.
+  # Teacher: download it when its size is not the one of its source. Hugging Face answers with a
+  # redirect: the last Content-Length is the one of the file.
   remote_size="$(curl -sIL "$TEACHER_URL" | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1)"
   local_size=0
   if [ -f "$TEACHER" ]; then
@@ -288,16 +309,32 @@ prepare_and_train() {
     [ -f "$TEACHER" ] || die "manca $TEACHER e $TEACHER_SOURCE non risponde per scaricarlo"
     echo "Teacher $teacher_name: $TEACHER_SOURCE non risponde, uso $TEACHER cosi' com'e' ($local_size byte)."
   elif [ "$local_size" != "$remote_size" ]; then
-    echo "Teacher $teacher_name: $local_size di $remote_size byte, scarico da $TEACHER_SOURCE..."
+    # The download goes to $TEACHER.part (a stopped one is finished by the next start) and gets
+    # the teacher's name only after the size and sha256 checks: a partial or wrong file never has
+    # it, so no later start can find it with the right size and train with it.
+    partial="$TEACHER.part"
+    partial_size=0
+    if [ -f "$partial" ]; then
+      partial_size="$(stat -c %s "$partial")"
+    fi
     mkdir -p "$(dirname "$TEACHER")"
-    curl --fail --location --continue-at - "$TEACHER_URL" --output "$TEACHER"
-    local_size="$(stat -c %s "$TEACHER")"
-    [ "$local_size" = "$remote_size" ] || die "teacher scaricato a meta' ($local_size di $remote_size byte), rilancia"
+    # Already complete when the previous start stopped during the sha256: nothing left to download
+    # (curl would get "range not satisfiable").
+    if [ "$partial_size" != "$remote_size" ]; then
+      echo "Teacher $teacher_name: $partial_size di $remote_size byte, scarico da $TEACHER_SOURCE..."
+      curl --fail --location --continue-at - "$TEACHER_URL" --output "$partial"
+      partial_size="$(stat -c %s "$partial")"
+    fi
+    [ "$partial_size" = "$remote_size" ] || die "teacher scaricato a meta' ($partial_size di $remote_size byte), rilancia"
     # Only after a download, not at every start (0.8-1.8 GB to read).
     echo "Teacher $teacher_name: scaricato, controllo lo sha256..."
-    local_sha256="$(sha256sum "$TEACHER" | cut -d ' ' -f 1)"
-    [ "$local_sha256" = "$TEACHER_SHA256" ] \
-      || die "teacher scaricato ma sha256 diverso ($local_sha256 invece di $TEACHER_SHA256): cancella $TEACHER e rilancia"
+    local_sha256="$(sha256sum "$partial" | cut -d ' ' -f 1)"
+    if [ "$local_sha256" != "$TEACHER_SHA256" ]; then
+      rm -f "$partial"
+      die "teacher scaricato ma sha256 diverso ($local_sha256 invece di $TEACHER_SHA256): cancellato, rilancia per riscaricarlo"
+    fi
+    mv "$partial" "$TEACHER"
+    echo "Teacher $teacher_name: ok, sha256 giusto ($remote_size byte)."
   else
     echo "Teacher $teacher_name: ok ($local_size byte)."
   fi
@@ -353,19 +390,19 @@ Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in da
     # nohup cannot run a shell function: the uv command as an array (helpers/common.sh).
     distill_uv_command
     nohup "${DISTILL_UV_COMMAND[@]}" torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" >> "$log" 2>&1 &
     echo "Partito in background (pid $!). Segui con:  tail -f $log"
     echo "Alla fine il modello e' in $run_dir/supercombo.pt"
   elif [ "$foreground_log" -eq 1 ]; then
     # The output of this function already goes through tee into train.log.
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" 2>&1
     echo "Fatto. Modello: $run_dir/supercombo.pt"
   else
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" 2>&1 | tee -a "$log"
     echo "Fatto. Modello: $run_dir/supercombo.pt"
   fi
