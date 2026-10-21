@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Short trial training (10 steps), to see that GPU, videos, teacher and wandb all work
-# before a long run. Same checks and output folder as helpers/train_supervised.sh --test.
+# before a long run. Same checks, GPU lock and output folder as helpers/train_supervised.sh --test.
 #
-# Usage: helpers/train_supervised_test.sh [--batch-size=<n>] [--workers=<n>]
+# Usage: helpers/train_supervised_test.sh [--batch-size=<n>] [--workers=<n>] [--foreground-log]
+#                                         [--wandb=online|offline|disabled]
+# The other options are passed on to helpers/train_supervised.sh (see its --help).
 # While it runs, "nvidia-smi" in another terminal shows the GPU memory it uses.
 
 set -euo pipefail

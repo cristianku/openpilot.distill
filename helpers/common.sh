@@ -19,6 +19,14 @@
 #   A plain "uv run" on the V100 server would re-sync the default CUDA 13 torch, which has no
 #   Volta kernels (see [project.optional-dependencies] in pyproject.toml).
 #
+# distill_uv_command
+#   Sets the array DISTILL_UV_COMMAND to the same "uv run [--extra ...]", for the places where a
+#   shell function cannot be run (nohup, exec):  nohup "${DISTILL_UV_COMMAND[@]}" python ...
+#
+# DISTILL_SSH_OPTIONS (array) and DISTILL_RSYNC_SSH (string for rsync -e)
+#   Options of every ssh to the comma: never wait for a password or a host-key question (a job
+#   started from the web site has no terminal), give up when the comma does not answer.
+#
 # distill_gpu_lock_or_die
 #   Takes the GPU lock shared by every GPU job on the server (also sunnypilot.speedlimits and
 #   "flock /run/lock/v100-gpu.lock <command>"), or stops the script when the GPU is busy:
@@ -34,6 +42,11 @@
 DISTILL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DISTILL_ENV_FILE="$DISTILL_ROOT/.env"
 DISTILL_GPU_LOCK_FILE="/run/lock/v100-gpu.lock"
+# ConnectTimeout: the comma is off or away (car on the road). ServerAlive: the comma goes away in
+# the middle of a copy; without it rsync would wait for minutes. Keepalives are answered by sshd,
+# so a long compile that prints nothing is not cut.
+DISTILL_SSH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+DISTILL_RSYNC_SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 
 # Run directly (helpers/common.sh --help): print the comment block above.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -110,12 +123,17 @@ distill_load_env() {
   done < "$DISTILL_ENV_FILE"
 }
 
-distill_uv_run() {
+distill_uv_command() {
   if [ -n "${DISTILL_UV_EXTRA:-}" ]; then
-    uv run --extra "$DISTILL_UV_EXTRA" "$@"
+    DISTILL_UV_COMMAND=(uv run --extra "$DISTILL_UV_EXTRA")
   else
-    uv run "$@"
+    DISTILL_UV_COMMAND=(uv run)
   fi
+}
+
+distill_uv_run() {
+  distill_uv_command
+  "${DISTILL_UV_COMMAND[@]}" "$@"
 }
 
 # True when process $1 is process $2 or one of its descendants (walks up the parent pids).

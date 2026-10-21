@@ -26,7 +26,7 @@
 #      when they differ. Skipped for --stock and for an .onnx without supercombo.pt next to it.
 #   3. compile on the comma (offroad) with sunnypilot's compile_modeld_v2.py: modeld_v2 loads only
 #      that format, not the pickle of compile_onnx.py. It uses the comma's tinygrad: after a
-#      sunnypilot update that changes tinygrad, run again with the .onnx.
+#      sunnypilot update that changes tinygrad, run again with the .onnx and a new --name.
 #   4. catalog: a new driving_models.json with only this model (helpers/model_catalog.py) and the
 #      sha256 of the compiled file. The models published before (--stock included) leave the menu,
 #      their files stay on Hugging Face.
@@ -38,11 +38,14 @@
 #
 # Hugging Face: "uv run hf auth login" done once on this machine, with a token that can write
 # the repo.
-# The comma only accepts the keys registered on GitHub: connect to this machine with agent
-# forwarding (ssh -A) so the Mac's key is used.
+# The comma only accepts the keys registered on GitHub: this machine needs one of them, or connect
+# to it with agent forwarding (ssh -A) from the Mac. ssh never asks anything (BatchMode).
 #
 # --name: name of the model in the menu and in the files (default: the run folder, e.g.
-#         2026-10-20_1910). Letters, digits, _ . -  The same name again replaces the model.
+#         2026-10-20_1910). Letters, digits, _ . -  A name whose folder models/<nome>/ is already
+#         on Hugging Face is refused before anything else is done (checked with the public API):
+#         replacing a published model changes its sha256 and puts a comma that uses it back on
+#         Default. With --no-upload the check is only a warning.
 # --stock: publishes the comma's own original driving model (the Default of the Models menu, e.g.
 #          CD210), compiled the same way, as "<default>-native" (e.g. cd210-native): a baseline to
 #          tell problems of this compile path from problems of a trained model. Taken from the comma
@@ -56,8 +59,13 @@
 # -h, --help: this help.
 # Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
 #      HF_REPO (default cristianku/openpilot-distill-models)
+#      Both can also be set in the repo .env (see helpers/common.sh).
 
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/helpers/common.sh"
+distill_load_env
 
 COMMA_HOST="${COMMA_HOST:-comma}"
 HF_REPO="${HF_REPO:-cristianku/openpilot-distill-models}"
@@ -65,7 +73,6 @@ REMOTE_OP="/data/openpilot"
 BUILD_DIR="/data/openpilot_distill/build"
 # Original model saved by helpers/install_model_on_comma.sh.
 BACKUP="/data/driving_supercombo.onnx.orig"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -89,7 +96,7 @@ add_comma_user() {
 # sha256 of the original of this openpilot version (from git, the onnx is in LFS), of the current
 # one and of the backup.
 read_comma_info() {
-  ssh "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
 backup="$1"
 cd /data/openpilot || exit 1
 echo "onroad=$(cat /data/params/d/IsOnroad 2>/dev/null)"
@@ -169,8 +176,8 @@ elif [ -z "$input" ]; then
   [ -n "$input" ] || die "nessun outputs/supervised/*/supercombo.pt: passa il .pt o l'.onnx"
 fi
 
-ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
-  || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true \
+  || die "comma '$COMMA_HOST' non raggiungibile via ssh (acceso e in rete? chiave ssh registrata? dal Mac serve ssh -A)"
 
 onroad=""
 compiler=""
@@ -232,7 +239,7 @@ if [ "$stock" -eq 1 ]; then
   fi
   input="$ROOT/outputs/stock/$name/driving_supercombo.onnx"
   mkdir -p "$(dirname "$input")"
-  rsync -a "$COMMA_HOST:$original_source" "$input"
+  rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$original_source" "$input"
   echo "Originale del comma: $default_model ($original_source)"
 fi
 
@@ -260,6 +267,23 @@ slug="$(echo "$name" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '_')"
 pkl_name="driving_distill_${slug}_tinygrad.pkl"
 stage="$ROOT/outputs/publish/$slug"
 
+# A model already published under this name: refused before minutes of export and compile.
+# Public API, no token: 200 = models/<slug>/ exists, 404 = free.
+hf_tree_url="https://huggingface.co/api/models/$HF_REPO/tree/main/models/$slug"
+hf_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$hf_tree_url" || true)"
+if [ "$hf_code" = "200" ]; then
+  if [ "$upload" -eq 1 ]; then
+    die "il nome $name e' gia' pubblicato su Hugging Face (models/$slug/ in $HF_REPO): scegli un altro --name"
+  fi
+  echo "ATTENZIONE: il nome $name e' gia' pubblicato su Hugging Face (models/$slug/): con --no-upload preparo lo stesso, ma per caricarlo serve un altro --name"
+elif [ "$hf_code" = "404" ]; then
+  echo "Nome libero su Hugging Face: models/$slug/"
+elif [ "$upload" -eq 1 ]; then
+  die "non riesco a controllare su Hugging Face se il nome $name e' libero ($hf_tree_url, HTTP $hf_code)"
+else
+  echo "ATTENZIONE: non riesco a controllare su Hugging Face se il nome $name e' libero (HTTP $hf_code), con --no-upload vado avanti"
+fi
+
 echo "Modello: $name ($pkl_name)"
 echo "Comma: tinygrad $tinygrad_ref, catalogo versione $selector_version"
 
@@ -275,8 +299,8 @@ else
   [ -n "$original_source" ] \
     || die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP): serve come riferimento per l'export"
   echo "== 1. export $input -> $onnx (riferimento $original_source)"
-  rsync -a "$COMMA_HOST:$original_source" "$stage/reference.onnx"
-  (cd "$ROOT" && uv run python -m helpers.export_onnx "$input" --reference "$stage/reference.onnx" --output "$onnx")
+  rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$original_source" "$stage/reference.onnx"
+  (cd "$ROOT" && distill_uv_run python -m helpers.export_onnx "$input" --reference "$stage/reference.onnx" --output "$onnx")
   rm -f "$stage/reference.onnx"
 fi
 cp "$onnx" "$stage/models/$slug/driving_supercombo.onnx"
@@ -290,7 +314,7 @@ if [ -n "$weights" ]; then
   if [ "$stable" -eq 1 ]; then
     stable_args=(--stable)
   fi
-  (cd "$ROOT" && uv run python -m helpers.publish_training_weights --repo "$HF_REPO" --release "$slug" \
+  (cd "$ROOT" && distill_uv_run python -m helpers.publish_training_weights --repo "$HF_REPO" --release "$slug" \
     --model "supercombo=$weights" --stage-dir "$stage" "${stable_args[@]}") \
     || die "pesi PyTorch non pubblicabili (errore sopra)"
 else
@@ -300,21 +324,21 @@ fi
 # 3. Compile on the comma, flags as sunnypilot CI (TG_FLAGS_QCOM in .github/workflows/sunnypilot-build-model.yaml).
 # No taskset: this comma has only CPUs 0-3 online. compile_modeld_v2 writes a temporary file in the cwd.
 echo "== 3. compilo sul comma (qualche minuto)"
-ssh "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
-rsync -a "$onnx" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
-ssh "$COMMA_HOST" "cd $BUILD_DIR && env DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 OPENPILOT_HACKS=1 \
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
+rsync -a -e "$DISTILL_RSYNC_SSH" "$onnx" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cd $BUILD_DIR && env DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 OPENPILOT_HACKS=1 \
   PYTHONPATH=$REMOTE_OP:$REMOTE_OP/tinygrad_repo TINYGRAD_PATH=$REMOTE_OP/tinygrad_repo \
   $python $REMOTE_OP/$compiler driving_supercombo.onnx $pkl_name --device-input '*' --benchmark-runs 1" \
   || die "compilazione fallita sul comma (file in $BUILD_DIR)"
-rsync -a "$COMMA_HOST:$BUILD_DIR/$pkl_name" "$stage/models/$slug/"
-ssh "$COMMA_HOST" "rm -rf $BUILD_DIR"
+rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$BUILD_DIR/$pkl_name" "$stage/models/$slug/"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR"
 sha256="$(sha256sum "$stage/models/$slug/$pkl_name" | cut -d' ' -f1)"
 echo "Compilato: $pkl_name sha256 $sha256"
 
 # 4. Catalog: only this model, the menu shows the last one published.
 echo "== 4. catalogo"
 catalog_url="https://huggingface.co/$HF_REPO/resolve/main/driving_models.json"
-(cd "$ROOT" && uv run python -m helpers.model_catalog "$stage/driving_models.json" \
+(cd "$ROOT" && distill_uv_run python -m helpers.model_catalog "$stage/driving_models.json" \
   --name "$name" --file-name "$pkl_name" \
   --url "https://huggingface.co/$HF_REPO/resolve/main/models/$slug/$pkl_name" \
   --sha256 "$sha256" --selector-version "$selector_version" --tinygrad-ref "$tinygrad_ref")
@@ -326,7 +350,7 @@ fi
 
 # 5. One commit with the model files, the new catalog and the PyTorch weights.
 echo "== 5. carico su https://huggingface.co/$HF_REPO"
-(cd "$ROOT" && uv run hf upload "$HF_REPO" "$stage" . --commit-message "Publish model $name")
+(cd "$ROOT" && distill_uv_run hf upload "$HF_REPO" "$stage" . --commit-message "Publish model $name")
 
 echo "Pubblicato. Catalogo: $catalog_url"
 if [ -n "$weights" ] && [ "$stable" -eq 1 ]; then

@@ -35,8 +35,9 @@
 #   0000011c--8152ba83cf--3  ->  data/0000011c8152ba83cf03
 # (supervised/dataset.py does int(segment, 16): dashes would crash it.)
 #
-# The comma only accepts the keys registered on GitHub: connect to this machine
-# with agent forwarding (ssh -A) so the Mac's key is used.
+# The comma only accepts the keys registered on GitHub: this machine needs one of them (the
+# training server has its own), or connect to it with agent forwarding (ssh -A) from the Mac.
+# ssh never asks anything (BatchMode): a missing key or an unknown host key is an error.
 #
 # Without a route (automatic): every route on the comma with a segment written on or
 # after --since (default 2026-10-20) is checked for dashcam mode. Before fetching,
@@ -45,17 +46,19 @@
 # first two + last two segments and any remaining segment whose rlog contains
 # carState.gearShifter=reverse. Missing/unreadable logs are skipped, never assumed safe.
 # Explicit route/segment selection remains manual and does not apply these automatic filters.
-# The script is kept BYTE-IDENTICAL in openpilot.distill/v100 and
-# sunnypilot.speedlimits/main. In speedlimits its data links use raw/routes/<route>/<segment>/
-# rather than Distill's hex segment folders, while both share COMMA_VIDEOS_DIR.
-# Requires a Python log reader: Distill uses uv run python; speedlimits can use
-# its .venv with [log-reader], NNSLR_OPENPILOT_ROOT and NNSLR_OPENDBC_ROOT.
+# The same script lives in sunnypilot.speedlimits, but the two copies are no longer identical:
+# this one loads helpers/common.sh (.env, uv extra, ssh options) and has the strip-ends fix.
+# In speedlimits its data links use raw/routes/<route>/<segment>/ rather than Distill's hex
+# segment folders, while both share COMMA_VIDEOS_DIR.
+# Requires a Python log reader: Distill uses uv run python (helpers/common.sh distill_uv_run);
+# speedlimits can use its .venv with [log-reader], NNSLR_OPENPILOT_ROOT and NNSLR_OPENDBC_ROOT.
 # COMMA_FETCH_PYTHON can override the Python interpreter (speedlimits).
 # Already downloaded files are skipped by rsync, so it can be run after every drive.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
-#         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
-#         and "last-N" (N segments before the last one).
+#         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival),
+#         "last-N" (N segments before the last one) and first, second, second_last
+#         (the lowest, the second lowest and the second highest segment found).
 # --strip-ends: skip first two and last two AVAILABLE segment folders (even with gaps). No list needed.
 #               It is the default when neither segments nor --skip are given.
 # --localizer: also run the localizer on each segment (off by default: helpers/localize_segments.sh
@@ -65,12 +68,16 @@
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
 #      COMMA_VIDEOS_DIR (default comma-videos next to this repo), shared folder of the comma files
+#      Both can also be set in the repo .env (see helpers/common.sh).
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/helpers/common.sh"
+distill_load_env
+
 COMMA_HOST="${COMMA_HOST:-comma}"
 REMOTE_DIR="/data/media/0/realdata"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Distill's localizer wants flat hex folders; speedlimits' reader wants raw/routes.
 if [ -d "$ROOT/src/nnslr_tools" ]; then
   DATA_LAYOUT="speedlimits"
@@ -85,7 +92,8 @@ FILES="rlog.zst fcamera.hevc ecamera.hevc"
 if [ -n "${COMMA_FETCH_PYTHON:-}" ]; then
   FETCH_PYTHON=("$COMMA_FETCH_PYTHON")
 elif [ "$DATA_LAYOUT" = "distill" ]; then
-  FETCH_PYTHON=(uv run python)
+  # A shell function works as the first word of the array: "${FETCH_PYTHON[@]}" calls it.
+  FETCH_PYTHON=(distill_uv_run python)
 elif [ -x "$ROOT/.venv/bin/python" ]; then
   FETCH_PYTHON=("$ROOT/.venv/bin/python")
 else
@@ -181,13 +189,14 @@ add_segment_list() {
 }
 
 # Adds a comma separated skip list (0,1,14 or 0,1,2,last or 2-5) to $skip.
-# "last" stays a word here: the highest segment is known only after asking the comma.
+# first, second, second_last, last and last-N stay words here: the segments they mean are
+# known only after asking the comma (select_segments turns them into numbers).
 add_skip_list() {
   [ -n "$1" ] || die "--skip vuole una lista (es. --skip=0,1,last)"
   IFS=',' read -r -a items <<< "$1"
   for item in "${items[@]}"; do
     if [ "$item" = "first" ] || [ "$item" = "second" ] || [ "$item" = "second_last" ] || [ "$item" = "last" ]; then
-      skip="$skip last"
+      skip="$skip $item"
     elif [[ "$item" =~ ^last-[0-9]+$ ]]; then
       skip="$skip $item"
     elif [[ "$item" =~ ^[0-9]+-[0-9]+$ ]]; then
@@ -216,7 +225,7 @@ add_comma_user() {
 # Fills $segments with the segments of $route found on the comma, minus the ones in $skip.
 # Returns 1 (with a message) when the route is not there or nothing is left.
 select_segments() {
-  found="$(ssh "$COMMA_HOST" "ls -d $REMOTE_DIR/$route--* 2>/dev/null || true" | sed 's/.*--//' | sort -n)"
+  found="$(ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "ls -d $REMOTE_DIR/$route--* 2>/dev/null || true" | sed 's/.*--//' | sort -n)"
   if [ -z "$found" ]; then
     echo "nessun segmento di $route sul comma" >&2
     return 1
@@ -294,7 +303,7 @@ download_segments() {
     echo "== $route--$s -> $shared (link in $dst)"
 
     for f in $FILES; do
-      if ! ssh "$COMMA_HOST" "test -f $src/$f"; then
+      if ! ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "test -f $src/$f"; then
         die "$src/$f non esiste sul comma"
       fi
     done
@@ -311,12 +320,12 @@ download_segments() {
     mkdir -p "$shared" "$dst"
     for f in $FILES; do
       move_old_file "$dst/$f" "$shared/$f"
-      rsync -avP "$COMMA_HOST:$src/$f" "$shared/"
+      rsync -avP -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$src/$f" "$shared/"
       link_file "$shared/$f" "$dst/$f"
     done
 
     if [ "$run_localizer" -eq 1 ]; then
-      (cd "$ROOT" && uv run python -m localizer.run --segment "$name")
+      (cd "$ROOT" && distill_uv_run python -m localizer.run --segment "$name")
     fi
   done
 }
@@ -325,7 +334,7 @@ download_segments() {
 # them in $dashcam_routes.
 find_dashcam_routes() {
   # One line per segment folder: "2026-10-20 14:03:22.123456789 +0000 00000123--8fe1b32468--5"
-  listing="$(ssh "$COMMA_HOST" "cd $REMOTE_DIR && stat -c '%y %n' *--*--* 2>/dev/null || true")"
+  listing="$(ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cd $REMOTE_DIR && stat -c '%y %n' *--*--* 2>/dev/null || true")"
 
   # Routes with at least one segment written on or after $since.
   recent_routes=""
@@ -365,7 +374,7 @@ find_dashcam_routes() {
       fi
     done <<< "$listing"
 
-    if rsync -a "$COMMA_HOST:$REMOTE_DIR/$r--$first_segment/qlog.zst" "$qlog_dir/$r.qlog.zst"; then
+    if rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$r--$first_segment/qlog.zst" "$qlog_dir/$r.qlog.zst"; then
       qlogs="$qlogs $qlog_dir/$r.qlog.zst"
     else
       echo "$r: qlog del segmento $first_segment non copiato, salto la route" >&2
@@ -401,8 +410,8 @@ route_is_long_enough() {
   temp="$(mktemp -d)"
   # Both endpoints are needed to measure true duration; number of folders alone
   # would wrongly accept a five-segment route ending before 5 minutes.
-  if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$first_segment/qlog.zst" "$temp/first.zst" \
-       || ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$last_segment/qlog.zst" "$temp/last.zst"; then
+  if ! rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$route--$first_segment/qlog.zst" "$temp/first.zst" \
+       || ! rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$route--$last_segment/qlog.zst" "$temp/last.zst"; then
     echo "$route: qlog iniziale/finale non disponibili, giro escluso" >&2
     rm -rf "$temp"
     return 1
@@ -432,7 +441,7 @@ filter_reverse_segments() {
     # do not transfer the same (potentially large) rlog on every run.
     if [ ! -s "$logfile" ]; then
       mkdir -p "$shared"
-      if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
+      if ! rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
         echo "$route--$s: rlog non disponibile, segmento escluso" >&2
         continue
       fi
@@ -519,8 +528,8 @@ fi
 mkdir -p "$VIDEOS_DIR" || die "non riesco a creare la cartella comune $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
 
-ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
-  || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true \
+  || die "comma '$COMMA_HOST' non raggiungibile via ssh (acceso e in rete? chiave ssh registrata? dal Mac serve ssh -A)"
 
 if [ "$auto_mode" -eq 1 ]; then
   find_dashcam_routes

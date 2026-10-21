@@ -29,15 +29,19 @@
 # --no-reboot: does not reboot (the model is used from the next start).
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # -h, --help: this help.
-# Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
+# Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config, also from the repo .env), overridden by --host
+# ssh never asks anything (BatchMode): the comma must accept a key of this machine (or ssh -A from the Mac).
 
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/helpers/common.sh"
+distill_load_env
 
 COMMA_HOST="${COMMA_HOST:-comma}"
 REMOTE_OP="/data/openpilot"
 BACKUP="/data/driving_supercombo.onnx.orig"
 BUILD_DIR="/data/openpilot_distill/build"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -59,7 +63,7 @@ add_comma_user() {
 # is (path asked to git, the layout changes between versions), the sha256 of the original model of
 # this openpilot version (from git, the onnx is in LFS), of the current one and of the backup.
 read_comma_info() {
-  ssh "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
 backup="$1"
 cd /data/openpilot || exit 1
 echo "onroad=$(cat /data/params/d/IsOnroad 2>/dev/null)"
@@ -90,7 +94,7 @@ EOF
 # Copies a file on the comma over the model, through a temporary name so the swap is one rename.
 put_model() {
   local source="$1"
-  ssh "$COMMA_HOST" "cp $source $REMOTE_OP/$onnx.new && mv $REMOTE_OP/$onnx.new $REMOTE_OP/$onnx"
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cp $source $REMOTE_OP/$onnx.new && mv $REMOTE_OP/$onnx.new $REMOTE_OP/$onnx"
 }
 
 reboot_comma() {
@@ -99,7 +103,7 @@ reboot_comma() {
     return
   fi
   echo "Riavvio il comma (il primo avvio ricompila il modello, qualche minuto in piu')"
-  ssh "$COMMA_HOST" "sudo reboot" || true
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "sudo reboot" || true
 }
 
 restore=0
@@ -130,8 +134,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
-  || die "comma '$COMMA_HOST' non raggiungibile via ssh (acceso? hai fatto ssh -A?)"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true \
+  || die "comma '$COMMA_HOST' non raggiungibile via ssh (acceso e in rete? chiave ssh registrata? dal Mac serve ssh -A)"
 
 onroad=""
 active_bundle=""
@@ -198,7 +202,7 @@ echo "Modello: $input"
 
 # 2. Backup of the original, refreshed while the comma has it (it changes with openpilot updates).
 if [ "$current" = "$original" ]; then
-  ssh "$COMMA_HOST" "cp $REMOTE_OP/$onnx $BACKUP"
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cp $REMOTE_OP/$onnx $BACKUP"
   echo "== 2. salvato l'originale in $BACKUP"
 elif [ "$backup" = "$original" ]; then
   echo "== 2. sul comma c'e' gia' un modello tuo, l'originale e' in $BACKUP"
@@ -209,27 +213,27 @@ fi
 # 3. Export, with the original as reference for inputs and output layout.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-rsync -a "$COMMA_HOST:$BACKUP" "$tmp/reference.onnx"
+rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$BACKUP" "$tmp/reference.onnx"
 echo "== 3. export -> $student"
-(cd "$ROOT" && uv run python -m helpers.export_onnx "$input" --reference "$tmp/reference.onnx" --output "$student")
+(cd "$ROOT" && distill_uv_run python -m helpers.export_onnx "$input" --reference "$tmp/reference.onnx" --output "$student")
 
 # 4. Compile check on the comma, same command as the openpilot build. compile_onnx writes a
 # temporary file in the current folder.
 echo "== 4. compilo sul comma per controllo (qualche minuto)"
-ssh "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
-rsync -a "$student" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
+rsync -a -e "$DISTILL_RSYNC_SSH" "$student" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
 log="$run_dir/comma_compile.log"
-if ! ssh "$COMMA_HOST" "cd $BUILD_DIR && env $tg_flags PYTHONPATH=$REMOTE_OP/tinygrad_repo:$REMOTE_OP \
+if ! ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cd $BUILD_DIR && env $tg_flags PYTHONPATH=$REMOTE_OP/tinygrad_repo:$REMOTE_OP \
   $python $REMOTE_OP/tinygrad_repo/examples/openpilot/compile_onnx.py \
   driving_supercombo.onnx driving_tinygrad.pkl --out-of-band --benchmark-runs 1" > "$log" 2>&1; then
   tail -20 "$log"
-  ssh "$COMMA_HOST" "rm -rf $BUILD_DIR"
+  ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR"
   die "il comma non riesce a compilare il modello: non ho cambiato niente (log completo: $log)"
 fi
 grep -E " ms$" "$log" | tail -3 || true
 
 # 5. In place of the original, then reboot.
 put_model "$BUILD_DIR/driving_supercombo.onnx"
-ssh "$COMMA_HOST" "rm -rf $BUILD_DIR"
+ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR"
 echo "== 5. installato: per tornare all'originale helpers/install_model_on_comma.sh --restore"
 reboot_comma

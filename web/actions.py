@@ -1,0 +1,501 @@
+"""The fixed action table of the site: the ONLY commands it can run, and the strict checks of their
+parameters.
+
+A request names an action and sends its parameters as a JSON object; build_job() validates every
+parameter (regex, range, existence inside the repo) and returns the argv list to run. Nothing from a
+request ever becomes a shell string: the argv goes to subprocess without a shell, and every value in
+it passed one of the validators below.
+"""
+from __future__ import annotations
+
+import math
+import re
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+from web.common import RUN_RE, SEGMENT_RE, WebError, inside
+
+GPU_LOCK_FILE = '/run/lock/v100-gpu.lock'
+
+# Model specs of evaluation/ (python -m evaluation.compare / evaluation.holdout).
+MODEL_SPEC_RE = re.compile(r'^(stock|teacher|logged|run:[A-Za-z0-9_.-]+|hf:[a-z0-9_]+)$')
+# Name of a published model (helpers/publish_model.sh --name).
+NAME_RE = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')
+DATE_RE = re.compile(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+# A number typed in a form: digits with an optional decimal part, nothing else (no "1e3", no "nan").
+NUMBER_TEXT_RE = re.compile(r'^[0-9]{1,9}(\.[0-9]{1,6})?$')
+
+STEPS_MIN = 1
+STEPS_MAX = 200000
+BATCH_MIN = 1
+BATCH_MAX = 64
+WORKERS_MIN = 0
+WORKERS_MAX = 16
+# A segment is 60 s long: the clip must start inside it and cannot be longer.
+START_MIN = 0.0
+START_MAX = 59.0
+DURATION_MIN = 1.0
+DURATION_MAX = 60.0
+# Playback speed of the comparison video -> the exact text passed to --speed.
+SPEED_TEXT = {0.25: '0.25', 0.5: '0.5', 1.0: '1'}
+WANDB_MODES = ('', 'online', 'offline', 'disabled')
+TRAIN_MODES = ('fresh', 'continue', 'resume')
+REFERENCE_KINDS = ('stock', 'teacher', 'logged')
+CONFIRM_INSTALL = 'INSTALLA'
+CONFIRM_RESTORE = 'RIPRISTINA'
+
+
+@dataclass(frozen=True)
+class Action:
+    label: str
+    # One running job per group. "system" (the code update) runs only when nothing else runs.
+    group: str
+    # The helper script, relative to the repo root (None for the test action).
+    script: str | None
+    # The script takes the GPU lock itself; the site only checks before starting that it is free.
+    needs_gpu: bool = False
+    # Asks the comma to be reachable and offroad before starting.
+    needs_comma_offroad: bool = False
+
+
+ACTIONS = {
+    'fetch': Action('Scarica i segmenti dal comma', 'data', 'helpers/fetch_comma_segments.sh'),
+    'localize': Action('Localizza i segmenti', 'data', 'helpers/localize_segments.sh'),
+    'train': Action('Training', 'gpu', 'helpers/train_supervised.sh', needs_gpu=True),
+    'train_test': Action('Prova del training (10 step)', 'gpu', 'helpers/train_supervised.sh', needs_gpu=True),
+    'eval': Action('Valutazione sui segmenti hold-out', 'gpu', 'helpers/eval_holdout.sh', needs_gpu=True),
+    'compare': Action('Video di confronto', 'gpu', 'helpers/compare_video.sh', needs_gpu=True),
+    'export': Action('Export ONNX', 'cpu', 'helpers/export_onnx.sh'),
+    'publish_dry': Action('Pubblicazione di prova (dry run)', 'cpu', 'helpers/publish_model.sh'),
+    'publish': Action('Pubblicazione su Hugging Face', 'cpu', 'helpers/publish_model.sh'),
+    'install': Action('Installazione sul comma', 'comma', 'helpers/install_model_on_comma.sh',
+                      needs_comma_offroad=True),
+    'restore': Action('Ripristino del modello originale', 'comma', 'helpers/install_model_on_comma.sh',
+                      needs_comma_offroad=True),
+    'update': Action('Aggiornamento del codice', 'system', 'helpers/update.sh'),
+}
+
+# Only with "python -m web.server --test-actions": a harmless job to test the job runner and the GPU
+# lock path of a live server without training anything. Never available otherwise.
+TEST_ACTIONS = {
+    'selftest': Action('Prova del sito (nessun lavoro vero)', 'gpu', None, needs_gpu=True),
+}
+
+GROUP_NAMES = {
+    'data': 'uno scaricamento o una localizzazione',
+    'gpu': 'un job sulla GPU',
+    'cpu': 'un export o una pubblicazione',
+    'comma': 'un\'operazione sul comma',
+    'system': 'un aggiornamento del codice',
+    'test': 'una prova',
+}
+
+# The selftest job: takes the real GPU lock (when /run/lock exists) the way the helper scripts do,
+# prints PROGRESS lines for ~5 s, then exits 0. Run as: python -c <this> <lock file>.
+SELFTEST_CODE = '''
+import fcntl, os, sys, time
+lock = sys.argv[1]
+if os.path.isdir(os.path.dirname(lock)):
+    handle = os.open(lock, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("La GPU e' occupata da un altro job (lock preso).", flush=True)
+        sys.exit(1)
+    print("lock GPU preso: " + lock, flush=True)
+for step in range(1, 11):
+    print("PROGRESS %d/10" % step, flush=True)
+    time.sleep(0.5)
+print("prova finita", flush=True)
+'''
+
+
+@dataclass
+class JobSpec:
+    """A validated job, ready to run."""
+    action: str
+    label: str
+    group: str
+    argv: list
+    needs_gpu: bool = False
+    needs_comma_offroad: bool = False
+    # Validated parameters, kept in the job file (shown in the job list, matched by the publish check).
+    params: dict = field(default_factory=dict)
+    # One line in Italian that says what the job does, for the job list.
+    summary: str = ''
+
+
+def bad(message: str) -> WebError:
+    return WebError(400, 'invalid_param', message)
+
+
+def check_keys(params: dict, allowed: tuple[str, ...]) -> None:
+    """Refuses any parameter the action does not take: a typo must not be silently ignored."""
+    for key in params:
+        if key not in allowed:
+            raise bad('Parametro sconosciuto: ' + str(key)[:40] + '.')
+
+
+def int_param(params: dict, key: str, low: int, high: int, default: int | None = None) -> int:
+    value = params.get(key)
+    if value is None or value == '':
+        if default is None:
+            raise bad('Manca il parametro ' + key + '.')
+        return default
+    # bool is an int in Python: true/false must not pass as 1/0.
+    if isinstance(value, bool):
+        raise bad(key + ' deve essere un numero intero.')
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r'[0-9]{1,7}', value):
+        number = int(value)
+    else:
+        raise bad(key + ' deve essere un numero intero.')
+    if number < low or number > high:
+        raise bad(key + ' deve essere tra ' + str(low) + ' e ' + str(high) + '.')
+    return number
+
+
+def float_param(params: dict, key: str, low: float, high: float, default: float | None = None) -> float:
+    value = params.get(key)
+    if value is None or value == '':
+        if default is None:
+            raise bad('Manca il parametro ' + key + '.')
+        return default
+    if isinstance(value, bool):
+        raise bad(key + ' deve essere un numero.')
+    if isinstance(value, int) or isinstance(value, float):
+        number = float(value)
+    elif isinstance(value, str) and NUMBER_TEXT_RE.fullmatch(value):
+        number = float(value)
+    else:
+        raise bad(key + ' deve essere un numero.')
+    if not math.isfinite(number):
+        raise bad(key + ' deve essere un numero.')
+    if number < low or number > high:
+        raise bad(key + ' deve essere tra ' + format_number(low) + ' e ' + format_number(high) + '.')
+    return number
+
+
+def bool_param(params: dict, key: str) -> bool:
+    value = params.get(key)
+    if value is None:
+        return False
+    if value is True or value is False:
+        return value
+    raise bad(key + ' deve essere vero o falso.')
+
+
+def choice_param(params: dict, key: str, choices: tuple[str, ...], default: str | None = None) -> str:
+    value = params.get(key)
+    if value is None:
+        if default is None:
+            raise bad('Manca il parametro ' + key + '.')
+        return default
+    if not isinstance(value, str) or value not in choices:
+        raise bad(key + ' non valido.')
+    return value
+
+
+def text_param(params: dict, key: str) -> str:
+    value = params.get(key)
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise bad(key + ' deve essere un testo.')
+    return value
+
+
+def date_param(params: dict, key: str) -> str:
+    """'' or a real date written YYYY-MM-DD."""
+    value = text_param(params, key)
+    if value == '':
+        return ''
+    if not DATE_RE.fullmatch(value):
+        raise bad(key + ': data non valida (formato AAAA-MM-GG).')
+    try:
+        datetime.strptime(value, '%Y-%m-%d')
+    except ValueError as exc:
+        raise bad(key + ': data non valida (formato AAAA-MM-GG).') from exc
+    return value
+
+
+def name_param(params: dict, key: str) -> str:
+    value = text_param(params, key)
+    if not NAME_RE.fullmatch(value):
+        raise bad('Nome non valido: da 1 a 64 caratteri tra lettere, cifre, _ . -')
+    return value
+
+
+def format_number(number: float) -> str:
+    """10.0 -> '10', 2.5 -> '2.5': the text passed to the scripts and shown to the user."""
+    if number == int(number):
+        return str(int(number))
+    return repr(number)
+
+
+def run_folder(repo: Path, run: str) -> Path:
+    """outputs/supervised/<run> after the name and location checks (not its content)."""
+    if not isinstance(run, str) or not RUN_RE.fullmatch(run):
+        raise bad('Run non valido.')
+    base = repo / 'outputs' / 'supervised'
+    folder = base / run
+    if not folder.is_dir() or not inside(base, folder):
+        raise WebError(404, 'unknown_run', 'Il run ' + run + ' non esiste.')
+    return folder
+
+
+def run_param(repo: Path, value, need: str) -> str:
+    """A run name that exists. need: 'final' = with supercombo.pt (finished),
+    'model' = supercombo.pt or supercombo.training.pt, 'resume' = checkpoint without the final model."""
+    folder = run_folder(repo, value)
+    final = folder / 'supercombo.pt'
+    checkpoint = folder / 'supercombo.training.pt'
+    if need == 'final':
+        if not final.is_file() or not inside(folder, final):
+            raise WebError(409, 'run_not_finished', 'Il run ' + value + ' non ha ancora supercombo.pt (non e\' finito).')
+    elif need == 'model':
+        has_final = final.is_file() and inside(folder, final)
+        has_checkpoint = checkpoint.is_file() and inside(folder, checkpoint)
+        if not has_final and not has_checkpoint:
+            raise WebError(409, 'run_without_model', 'Il run ' + value + ' non ha un modello (supercombo.pt).')
+    elif need == 'resume':
+        if final.is_file():
+            raise WebError(409, 'run_finished', 'Il run ' + value + ' e\' gia\' finito: non si riprende.')
+        if not checkpoint.is_file() or not inside(folder, checkpoint):
+            raise WebError(409, 'run_without_checkpoint',
+                           'Il run ' + value + ' non ha supercombo.training.pt: non si puo\' riprendere.')
+    else:
+        raise ValueError('unknown need: ' + need)
+    return value
+
+
+def segment_param(repo: Path, value) -> str:
+    """A segment folder of data/ that exists and is localized."""
+    if not isinstance(value, str) or not SEGMENT_RE.fullmatch(value):
+        raise bad('Segmento non valido (20 caratteri esadecimali).')
+    base = repo / 'data'
+    folder = base / value
+    if not folder.is_dir() or not inside(base, folder):
+        raise WebError(404, 'unknown_segment', 'Il segmento ' + value + ' non e\' in data/.')
+    localized = (folder / 'localizer.safetensors').is_file() and (folder / 'frame_info.safetensors').is_file()
+    if not localized:
+        raise WebError(409, 'segment_not_localized', 'Il segmento ' + value + ' non e\' localizzato.')
+    return value
+
+
+def model_spec_param(repo: Path, params: dict, key: str, kinds: tuple[str, ...]) -> str:
+    """A model spec of evaluation/: one of `kinds` ('stock', 'teacher', 'logged', 'run', 'hf').
+    run:<x> must be an existing run with a model; hf:<slug> is checked by the script itself."""
+    value = params.get(key)
+    if not isinstance(value, str) or not MODEL_SPEC_RE.fullmatch(value):
+        raise bad(key + ': modello non valido.')
+    if value.startswith('run:'):
+        kind = 'run'
+    elif value.startswith('hf:'):
+        kind = 'hf'
+    else:
+        kind = value
+    if kind not in kinds:
+        raise bad(key + ': modello non ammesso qui.')
+    if kind == 'run':
+        run_param(repo, value[len('run:'):], 'model')
+    return value
+
+
+def slug_of(name: str) -> str:
+    """The folder name helpers/publish_model.sh uses on Hugging Face for --name:
+    lowercase, every character other than a-z 0-9 becomes '_' (tr -c 'a-z0-9' '_')."""
+    result = []
+    for character in name.lower():
+        if ('a' <= character <= 'z') or ('0' <= character <= '9'):
+            result.append(character)
+        else:
+            result.append('_')
+    return ''.join(result)
+
+
+def find_action(action_id: str, test_actions: bool = False) -> Action:
+    if action_id in ACTIONS:
+        return ACTIONS[action_id]
+    if test_actions and action_id in TEST_ACTIONS:
+        return TEST_ACTIONS[action_id]
+    raise WebError(404, 'unknown_action', 'Azione sconosciuta.')
+
+
+def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False) -> JobSpec:
+    """Validates the parameters of an action and builds its argv. Raises WebError on any problem."""
+    action = find_action(action_id, test_actions)
+    if not isinstance(params, dict):
+        raise bad('I parametri devono essere un oggetto JSON.')
+    argv = []
+    clean = {}
+    summary = ''
+
+    if action_id == 'fetch':
+        check_keys(params, ('since',))
+        since = date_param(params, 'since')
+        argv = ['helpers/fetch_comma_segments.sh']
+        summary = 'giri nuovi dal comma'
+        if since:
+            argv.append('--since=' + since)
+            clean['since'] = since
+            summary = 'giri dal ' + since
+
+    elif action_id == 'localize':
+        check_keys(params, ())
+        argv = ['helpers/localize_segments.sh']
+        summary = 'segmenti da fare e da raffinare'
+
+    elif action_id == 'train':
+        check_keys(params, ('steps', 'batch_size', 'workers', 'mode', 'run', 'wandb'))
+        mode = choice_param(params, 'mode', TRAIN_MODES, 'fresh')
+        batch_size = int_param(params, 'batch_size', BATCH_MIN, BATCH_MAX, 8)
+        workers = int_param(params, 'workers', WORKERS_MIN, WORKERS_MAX, 6)
+        wandb = choice_param(params, 'wandb', WANDB_MODES, '')
+        argv = ['helpers/train_supervised.sh', '--foreground-log']
+        if mode == 'resume':
+            # The steps of a resumed run come from its checkpoint (train_supervised.sh reads them).
+            if params.get('steps') not in (None, ''):
+                raise bad('Con "riprendi" i passi sono quelli del run interrotto: lascia vuoto il campo.')
+            run = run_param(repo, params.get('run'), 'resume')
+            clean['run'] = run
+            summary = 'riprende ' + run
+        else:
+            if params.get('run') not in (None, ''):
+                raise bad('Il run serve solo con "riprendi".')
+            steps = int_param(params, 'steps', STEPS_MIN, STEPS_MAX)
+            argv.append('--steps=' + str(steps))
+            clean['steps'] = steps
+            if mode == 'continue':
+                summary = str(steps) + ' step dai pesi stable'
+            else:
+                summary = str(steps) + ' step da zero'
+        argv.append('--batch-size=' + str(batch_size))
+        argv.append('--workers=' + str(workers))
+        if mode == 'continue':
+            argv.append('--continue')
+        elif mode == 'resume':
+            argv.append('--resume=outputs/supervised/' + clean['run'])
+        if wandb:
+            argv.append('--wandb=' + wandb)
+            summary = summary + ', wandb ' + wandb
+        clean['mode'] = mode
+        clean['batch_size'] = batch_size
+        clean['workers'] = workers
+        clean['wandb'] = wandb
+        summary = summary + ', batch ' + str(batch_size) + ', workers ' + str(workers)
+
+    elif action_id == 'train_test':
+        check_keys(params, ())
+        argv = ['helpers/train_supervised.sh', '--foreground-log', '--test']
+        summary = '10 step per vedere che tutto parte'
+
+    elif action_id == 'eval':
+        check_keys(params, ('model',))
+        model = model_spec_param(repo, params, 'model', ('stock', 'teacher', 'logged', 'run', 'hf'))
+        argv = ['helpers/eval_holdout.sh', '--model=' + model]
+        clean['model'] = model
+        summary = model
+
+    elif action_id == 'compare':
+        check_keys(params, ('segment', 'reference', 'student', 'start', 'duration', 'speed', 'inset', 'show_gt'))
+        segment = segment_param(repo, params.get('segment'))
+        reference = model_spec_param(repo, params, 'reference', REFERENCE_KINDS)
+        student = model_spec_param(repo, params, 'student', ('run', 'hf'))
+        start = float_param(params, 'start', START_MIN, START_MAX, 0.0)
+        duration = float_param(params, 'duration', DURATION_MIN, DURATION_MAX, 20.0)
+        speed = float_param(params, 'speed', 0.25, 1.0, 0.5)
+        if speed not in SPEED_TEXT:
+            raise bad('speed deve essere 0.25, 0.5 o 1.')
+        inset = bool_param(params, 'inset')
+        show_gt = bool_param(params, 'show_gt')
+        argv = ['helpers/compare_video.sh', '--segment=' + segment, '--reference=' + reference,
+                '--student=' + student, '--start=' + format_number(start),
+                '--duration=' + format_number(duration), '--speed=' + SPEED_TEXT[speed]]
+        if inset:
+            argv.append('--inset')
+        if show_gt:
+            argv.append('--show-gt')
+        clean = {'segment': segment, 'reference': reference, 'student': student, 'start': start,
+                 'duration': duration, 'speed': speed, 'inset': inset, 'show_gt': show_gt}
+        summary = (student + ' contro ' + reference + ' su ' + segment + ' (' + format_number(start) + ' s, '
+                   + format_number(duration) + ' s)')
+
+    elif action_id == 'export':
+        check_keys(params, ('run',))
+        run = run_param(repo, params.get('run'), 'final')
+        argv = ['helpers/export_onnx.sh', 'outputs/supervised/' + run + '/supercombo.pt']
+        clean['run'] = run
+        summary = run
+
+    elif action_id == 'publish_dry' or action_id == 'publish':
+        allowed = ('run', 'name', 'stable')
+        if action_id == 'publish':
+            allowed = ('run', 'name', 'stable', 'confirm')
+        check_keys(params, allowed)
+        run = run_param(repo, params.get('run'), 'final')
+        name = name_param(params, 'name')
+        stable = bool_param(params, 'stable')
+        if action_id == 'publish':
+            # Typed confirmation: the exact name, so a click alone never publishes.
+            if text_param(params, 'confirm') != name:
+                raise WebError(400, 'confirmation_required',
+                               'Per pubblicare scrivi esattamente il nome del modello (' + name + ').')
+            argv = ['helpers/publish_model.sh']
+        else:
+            argv = ['helpers/publish_model.sh', '--no-upload']
+        argv.append('--name=' + name)
+        if stable:
+            argv.append('--stable')
+        argv.append('outputs/supervised/' + run + '/supercombo.pt')
+        clean = {'run': run, 'name': name, 'stable': stable}
+        summary = run + ' come ' + name
+        if stable:
+            summary = summary + ' (stable)'
+
+    elif action_id == 'install':
+        check_keys(params, ('run', 'confirm'))
+        run = run_param(repo, params.get('run'), 'final')
+        if text_param(params, 'confirm') != CONFIRM_INSTALL:
+            raise WebError(400, 'confirmation_required', 'Per installare scrivi ' + CONFIRM_INSTALL + '.')
+        argv = ['helpers/install_model_on_comma.sh', 'outputs/supervised/' + run + '/supercombo.pt']
+        clean['run'] = run
+        summary = run + ' sul comma (si riavvia)'
+
+    elif action_id == 'restore':
+        check_keys(params, ('confirm',))
+        if text_param(params, 'confirm') != CONFIRM_RESTORE:
+            raise WebError(400, 'confirmation_required', 'Per ripristinare scrivi ' + CONFIRM_RESTORE + '.')
+        argv = ['helpers/install_model_on_comma.sh', '--restore']
+        summary = 'modello originale sul comma (si riavvia)'
+
+    elif action_id == 'update':
+        check_keys(params, ())
+        argv = ['helpers/update.sh']
+        summary = 'git pull, uv sync, riavvio del sito'
+
+    elif action_id == 'selftest':
+        check_keys(params, ())
+        argv = [sys.executable, '-c', SELFTEST_CODE, GPU_LOCK_FILE]
+        summary = 'job finto di 5 secondi con il lock GPU'
+
+    else:
+        raise WebError(404, 'unknown_action', 'Azione sconosciuta.')
+
+    return JobSpec(action=action_id, label=action.label, group=action.group, argv=argv,
+                   needs_gpu=action.needs_gpu, needs_comma_offroad=action.needs_comma_offroad,
+                   params=clean, summary=summary)
+
+
+def script_missing(repo: Path, action_id: str, test_actions: bool = False) -> str:
+    """'' when the helper of the action is in this checkout, else the Italian reason. The helpers
+    written for the site (eval, compare, update) may be missing on an older checkout."""
+    action = find_action(action_id, test_actions)
+    if action.script is None:
+        return ''
+    if (repo / action.script).is_file():
+        return ''
+    return 'manca ' + action.script + ' in questa versione del repo'

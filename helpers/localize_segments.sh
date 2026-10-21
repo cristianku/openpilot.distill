@@ -33,6 +33,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/helpers/common.sh"
+distill_load_env
+
 DATA_DIR="$ROOT/data"
 DISCARD_DIR="$ROOT/data_scartati"
 # Exit code of localizer.run for a segment unusable because of its data (localizer/errors.py).
@@ -69,7 +72,7 @@ read_ionex_status() {
   done
   ionex_lines=""
   if [ -n "$dirs" ]; then
-    ionex_lines="$(cd "$ROOT" && uv run python -m localizer.ionex $dirs)"
+    ionex_lines="$(cd "$ROOT" && distill_uv_run python -m localizer.ionex $dirs)"
   fi
 }
 
@@ -167,7 +170,7 @@ for name in $names; do
     failed="$failed $name"
     continue
   fi
-  if (cd "$ROOT" && uv run python -m localizer.run --segment "$name") 2>&1 | tee "$dir/localizer.log"; then
+  if (cd "$ROOT" && distill_uv_run python -m localizer.run --segment "$name") 2>&1 | tee "$dir/localizer.log"; then
     rm -f "$dir/localizer.failed"
     ok="$ok $name"
   else

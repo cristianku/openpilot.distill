@@ -1,6 +1,8 @@
 """Train Supercombo on logged comma1M segments."""
 
 import argparse
+import json
+import math
 import os
 from pathlib import Path
 import random
@@ -55,6 +57,74 @@ def loss_fn(predictions, targets, teacher_targets):
 
 def _identity(value):
     return value
+
+
+def metrics_record(step: int, total_steps: int, metrics: dict) -> dict:
+    """One line of metrics.jsonl: step, wall-clock time and every scalar of the wandb metrics."""
+    record = {"step": step, "total_steps": total_steps, "time": time.time()}
+    for name, value in metrics.items():
+        # Images (wandb.Image) only go to wandb.
+        if not isinstance(value, int | float):
+            continue
+        # inf/nan (grad_norm on an fp16 overflow step) are not valid JSON: written as null.
+        if math.isfinite(value):
+            record[name] = value
+        else:
+            record[name] = None
+    return record
+
+
+def write_run_info(path: Path, run_info: dict) -> None:
+    """Write run.json through a temporary file: a reader (the web site) never sees half a file."""
+    temporary_path = path.with_name(path.name + ".tmp")
+    temporary_path.write_text(json.dumps(run_info, indent=2) + "\n")
+    os.replace(temporary_path, path)
+
+
+def start_run_info(path: Path, args: argparse.Namespace, precision: str, starting_step: int) -> dict:
+    """run.json at the start of a run: its settings and start time.
+
+    A resumed run keeps the run.json written at its start and gets one more entry in "resumed".
+    """
+    run_info = None
+    if args.mode == "resume" and path.is_file():
+        try:
+            run_info = json.loads(path.read_text())
+        except (OSError, ValueError):
+            # Unreadable: a new run.json, the training itself does not need it.
+            run_info = None
+        if not isinstance(run_info, dict):
+            run_info = None
+
+    # A new run, or a resumed one started before run.json existed (its real start is unknown).
+    if run_info is None:
+        run_info = {
+            "mode": args.mode,
+            "steps": args.steps,
+            "batch_size": args.batch_size,
+            "workers": args.workers,
+            "precision": precision,
+            "teacher": args.teacher,
+            "dataset": args.dataset,
+            "started": time.time(),
+            "hf_repo": args.hf_repo,
+        }
+
+    if args.mode == "resume":
+        resumed = run_info.get("resumed")
+        if not isinstance(resumed, list):
+            resumed = []
+        resumed.append({
+            "time": time.time(),
+            "step": starting_step,
+            "batch_size": args.batch_size,
+            "workers": args.workers,
+            "precision": precision,
+        })
+        run_info["resumed"] = resumed
+
+    write_run_info(path, run_info)
+    return run_info
 
 
 def main() -> None:
@@ -182,10 +252,18 @@ def main() -> None:
         if is_main:
             print(f"resume local training from step {starting_step}/{args.steps}")
 
+    # Next to the model: run.json (settings, start, end) and metrics.jsonl (one JSON line per step,
+    # flushed at once), read live by the web site. Appended to: a resume continues the same file,
+    # so the steps after the last checkpoint appear twice (the last line of a step wins).
+    run_info_path = args.output.parent / "run.json"
+    run_info = None
+    metrics_file = None
     if is_main:
         print(f"student: {sum(p.numel() for p in raw_model.parameters()) / 1e6:.1f}M parameters")
         print(f"precision: {precision}")
         args.output.parent.mkdir(parents=True, exist_ok=True)
+        run_info = start_run_info(run_info_path, args, precision, starting_step)
+        metrics_file = open(args.output.parent / "metrics.jsonl", "a", encoding="utf-8")
 
     def save_training_state(step: int, status: str) -> None:
         if is_main:
@@ -274,6 +352,8 @@ def main() -> None:
                 f"gt={metrics['gt']:.6g} distill={metrics['distill']:.6g} "
                 f"time={metrics['step_time']:.2f}s"
             )
+            metrics_file.write(json.dumps(metrics_record(step, args.steps, metrics), allow_nan=False) + "\n")
+            metrics_file.flush()
             run.log(metrics, step=step)
             if step % args.checkpoint_interval == 0:
                 save_training_state(step, "in_progress")
@@ -284,6 +364,9 @@ def main() -> None:
             args.output,
         )
         save_training_state(args.steps, "completed")
+        metrics_file.close()
+        run_info["finished"] = time.time()
+        write_run_info(run_info_path, run_info)
         run.finish()
     if distributed:
         dist.destroy_process_group()
