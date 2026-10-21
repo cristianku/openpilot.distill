@@ -177,6 +177,9 @@ def main() -> None:
                 "optimizer": optimizer.state_dict(),
             }, checkpoint_path)
 
+    if is_main and args.mode != "resume":
+        save_training_state(0, "in_progress")
+
     teacher = ORTSupercomboForInference.from_supercombo(
         args.teacher,
         providers=[("CUDAExecutionProvider", {"device_id": local_rank}), "CPUExecutionProvider"],
