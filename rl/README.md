@@ -20,8 +20,9 @@ Terminal 2:
 uv run python -m rl.env --actor "supercombo|wasd" --cache-dir outputs/rl/cache
 ```
 
-`supercombo` uses `models/big_driving_supercombo.onnx` through ONNX Runtime by default. Pass a supervised Torch
-state dict to use the Torch runtime instead:
+`supercombo` uses the default teacher, `models/big_driving_supercombo_1365126a_12864.onnx` (MD v3, see
+[`supervised/README.md`](../supervised/README.md)), through ONNX Runtime. `--model models/big_driving_supercombo.onnx`
+runs the old 084747c7 teacher instead. Pass a supervised Torch state dict to use the Torch runtime:
 
 ```bash
 uv run python -m rl.env --actor supercombo --model /path/to/supercombo.pt

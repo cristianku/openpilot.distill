@@ -20,14 +20,30 @@ from .checkpoints import atomic_torch_save, model_weights, stable_weights, torch
 from .dataset import Comma1MDataset, DatasetConfig, prefill_supercombo_batch
 from .model import Supercombo, SupercomboConfig, VisionConfig
 from .model_for_inference import InputQueues, ORTSupercomboForInference
+from .teachers import DEFAULT_TEACHER
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_OUTPUTS = ("wide_from_device_euler", "pose", "plan", "action")
+# Teacher with one pooled 512 vector of hidden_state per step (openpilot 084747c75).
 LOSS_WEIGHTS = {"gt/imgs": 100.0, "distill/lead": 0.05, "distill/hidden_state": 10.0}
+# Teacher with 32 spatial tokens x 512 per step (the queue-format Hugging Face models, MD v3 and
+# later). The token target has about 10x the energy of the pooled one (mean of x^2 8.4-9.4 vs 0.84
+# on road frames), so the weight goes from 10 to 1: the term starts near the old balance, and the
+# part that varies between frames is 2-4x stronger than before. After ~500 steps the weighted
+# distill/hidden_state should stay below the sum of the other distill terms; if not, try 0.5.
+TOKEN_LOSS_WEIGHTS = {"gt/imgs": 100.0, "distill/lead": 0.05, "distill/hidden_state": 1.0}
 
 
-def loss_fn(predictions, targets, teacher_targets):
+def loss_weights_for(teacher) -> dict[str, float]:
+    """The loss weights for a teacher: TOKEN_LOSS_WEIGHTS when its features are spatial tokens."""
+
+    if len(teacher.feature_shape) == 2:
+        return TOKEN_LOSS_WEIGHTS
+    return LOSS_WEIGHTS
+
+
+def loss_fn(predictions, targets, teacher_targets, loss_weights=LOSS_WEIGHTS):
     predicted_images = predictions["imgs"][:, -1].float() / 127.5 - 1
     target_images = targets["imgs"].permute(0, 3, 1, 2).float() / 127.5 - 1
     target_losses = {"imgs": F.mse_loss(predicted_images, target_images)}
@@ -38,15 +54,27 @@ def loss_fn(predictions, targets, teacher_targets):
         )
         for name in TARGET_OUTPUTS
     }
-    distill_losses = {
-        name: F.mse_loss(
-            (predictions["hidden_state"].mean(-2) if name == "hidden_state" else predictions[name]).float(),
-            target.float(),
-        )
-        for name, target in teacher_targets.items()
-    }
-    target_loss = sum(LOSS_WEIGHTS.get(f"gt/{name}", 1.0) * value for name, value in target_losses.items())
-    distill_loss = sum(LOSS_WEIGHTS.get(f"distill/{name}", 1.0) * value for name, value in distill_losses.items())
+    distill_losses = {}
+    for name, target in teacher_targets.items():
+        prediction = predictions[name]
+        if name == "hidden_state":
+            # The student gives (batch, steps, 32 tokens, 512).
+            if target.ndim == prediction.ndim - 1:
+                # Old teacher (openpilot 084747c75): one pooled 512 vector per step, so the 32
+                # tokens of the student are averaged the same way.
+                prediction = prediction.mean(-2)
+            elif target.ndim != prediction.ndim:
+                raise ValueError(
+                    f"distill/hidden_state: student {tuple(prediction.shape)}, teacher {tuple(target.shape)}"
+                )
+            # Same number of dimensions: a queue-format teacher, one 512 vector per token of the same
+            # 4x8 grid (row by row) as the student, compared token by token.
+        # F.mse_loss would broadcast a mismatch (with only a warning) instead of stopping.
+        if tuple(prediction.shape) != tuple(target.shape):
+            raise ValueError(f"distill/{name}: student {tuple(prediction.shape)}, teacher {tuple(target.shape)}")
+        distill_losses[name] = F.mse_loss(prediction.float(), target.float())
+    target_loss = sum(loss_weights.get(f"gt/{name}", 1.0) * value for name, value in target_losses.items())
+    distill_loss = sum(loss_weights.get(f"distill/{name}", 1.0) * value for name, value in distill_losses.items())
     return target_loss + distill_loss, {
         "gt": target_loss,
         "distill": distill_loss,
@@ -132,8 +160,8 @@ def main() -> None:
     parser.add_argument("--dataset", default=str(ROOT), help="comma1M dataset root")
     parser.add_argument(
         "--teacher",
-        default=str(ROOT / "models/big_driving_supercombo.onnx"),
-        help="teacher Supercombo ONNX model",
+        default=str(ROOT / DEFAULT_TEACHER),
+        help="teacher Supercombo ONNX model (old interface or queue-format Hugging Face big model)",
     )
     parser.add_argument("--steps", type=int, default=1, help="total training steps for this run")
     parser.add_argument("--mode", choices=("fresh", "continue", "resume"), default="fresh",
@@ -240,7 +268,10 @@ def main() -> None:
         if saved.get("status") != "in_progress" or saved.get("total_steps") != args.steps:
             parser.error("resume requires an interrupted run with the same --steps")
         if saved.get("teacher") != args.teacher or saved.get("dataset") != args.dataset:
-            parser.error("resume requires the same --teacher and --dataset")
+            parser.error(
+                "resume requires the same --teacher and --dataset as the interrupted run: "
+                f"--teacher {saved.get('teacher')} --dataset {saved.get('dataset')}"
+            )
         starting_step = saved["step"]
         if not isinstance(starting_step, int) or not 0 <= starting_step < args.steps:
             parser.error("invalid resume step")
@@ -287,13 +318,16 @@ def main() -> None:
         args.teacher,
         providers=[("CUDAExecutionProvider", {"device_id": local_rank}), "CPUExecutionProvider"],
     )
+    # The hidden_state target of the teacher decides the loss weights (pooled or per token).
+    loss_weights = loss_weights_for(teacher)
     if is_main:
-        print(f"teacher: {teacher.vision_session.get_providers()[0]}")
+        print(f"teacher: {teacher.vision_session.get_providers()[0]}, features {teacher.feature_shape}")
+        print(f"loss weights: {loss_weights}")
     run = (
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "openpilot.distill.supervised"),
             dir=args.output.parent,
-            config={**vars(args), "world_size": world_size, "loss_weights": LOSS_WEIGHTS},
+            config={**vars(args), "world_size": world_size, "loss_weights": loss_weights},
         )
         if is_main
         else None
@@ -314,7 +348,7 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast("cuda", dtype=autocast_dtype):
             predictions = model(inputs)
-            loss, loss_metrics = loss_fn(predictions, targets, teacher_targets)
+            loss, loss_metrics = loss_fn(predictions, targets, teacher_targets, loss_weights)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)

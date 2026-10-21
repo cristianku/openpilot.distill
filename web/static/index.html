@@ -199,7 +199,7 @@
       </div>
       <div class="form-grid">
         <label class="field">Inizio (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
-        <label class="field">Durata (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="20" inputmode="decimal"></label>
+        <label class="field">Durata (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>
         <label class="field">Velocità<select id="cmp-speed">
           <option value="0.25">0.25×</option><option value="0.5" selected>0.5×</option><option value="1">1×</option>
         </select></label>
@@ -208,6 +208,7 @@
         <label class="check"><input type="checkbox" id="cmp-inset" checked> Vista dall'alto (riquadro)</label>
         <label class="check"><input type="checkbox" id="cmp-gt"> Mostra la traiettoria vera</label>
       </div>
+      <p class="note">L'inizio minimo è 5.2 s: prima i modelli si riscaldano (uno più basso viene spostato lì). Sulla GPU un video di 15 s richiede circa un minuto.</p>
       <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-compare">Crea il video</button><div class="reason" id="reason-compare"></div></div></div>
     </div>
     <div class="card" id="player-card" hidden>

@@ -30,10 +30,17 @@ import cv2
 import numpy as np
 
 from .metrics import DEFAULT_HORIZON_S, EVAL_CODE_VERSION, frame_misses, plan_point_mask, rounded
-from .render import GREEN, WHITE, draw_panel, footer_image, inset_scale
+from .render import GREEN, WHITE, InsetZoom, draw_panel, footer_image
 from .runners import ACTION_T, BLOCK_FRAMES, EVAL_WARMUP_FRAMES, TRAFFIC_RIGHT_HAND, build_runner
-from .segment import CAMERA_FPS, T_IDXS, ModelInputPacker, load_segment, narrow_camera_intrinsics, nvdec_available
-from .segment import stream_frames
+from .segment import (
+    CAMERA_FPS,
+    T_IDXS,
+    ModelInputPacker,
+    load_segment,
+    narrow_camera_intrinsics,
+    nvdec_available,
+    stream_frames,
+)
 from .specs import parse_model_spec, resolve_model, validate_segment_name
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -193,12 +200,13 @@ def main() -> None:
 
     masks = plan_point_mask(segment.frame_t, segment.frame_t[-1], args.horizon)
     first_point = np.arange(len(T_IDXS)) == 0
-    inset = None
-    if args.inset:
-        inset = inset_scale(segment.ground_truth[start_frame:clip_end], masks[start_frame:clip_end])
+    inset_zoom = InsetZoom()
     intrinsics = narrow_camera_intrinsics()
     packer = ModelInputPacker(segment.rpy)
     use_nvdec = args.device == "cuda" and nvdec_available()
+    decoder_name = "ffmpeg"
+    if use_nvdec:
+        decoder_name = "nvdec"
     width = int(segment.frame_info["fcamera/width"].item())
     height = int(segment.frame_info["fcamera/height"].item())
     footer = footer_image(width, args.show_gt)
@@ -259,6 +267,9 @@ def main() -> None:
 
                 frame_bgr = cv2.cvtColor(narrow_rgbs[lane], cv2.COLOR_RGB2BGR)
                 truth_points = truth[mask | first_point]
+                inset = None
+                if args.inset:
+                    inset = inset_zoom.update(truth_points)
                 top = draw_panel(
                     frame_bgr, segment.rpy, intrinsics, reference.spec.label, WHITE, reference_plans[lane, :, 0:3],
                     truth_points, args.show_gt, reference_miss.average, speed_mps, time_s, inset,
@@ -320,7 +331,7 @@ def main() -> None:
             "traffic_convention": list(TRAFFIC_RIGHT_HAND),
             "desire": 0,
             "calibration_rpy": [float(value) for value in segment.rpy],
-            "decoder": "nvdec" if use_nvdec else "ffmpeg",
+            "decoder": decoder_name,
         },
         "models": {
             "reference": model_record(reference, reference_runner, reference_miss, reference_lateral),

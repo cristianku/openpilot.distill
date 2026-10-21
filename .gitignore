@@ -7,6 +7,8 @@ scripts/
 data/
 models/.cache/
 models/model.fp8_nvfp4.torchpackage
+# Teachers (0.8 and 1.8 GB), downloaded by helpers/train_supervised.sh
+models/big_driving_supercombo*.onnx
 .env
 data_scartati/
 worldmodel-inspected/

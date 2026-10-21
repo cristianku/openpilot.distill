@@ -33,8 +33,13 @@ TRUTH_LEGEND = "linea gialla = dove ho guidato davvero"
 INSET_WIDTH = 270
 INSET_HEIGHT = 330
 INSET_MARGIN = 16
-_FORWARD_RANGES_M = (25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 400.0)
-_LATERAL_RANGES_M = (5.0, 10.0, 20.0, 50.0, 100.0, 200.0)
+# Plot area inside the inset (labels above and below it).
+_PLOT_HALF_WIDTH = (INSET_WIDTH - 28) / 2.0
+_PLOT_HEIGHT = INSET_HEIGHT - 68
+# Smallest ranges of the inset, and how fast it zooms back in (per frame) once the path gets shorter.
+_MIN_FORWARD_M = 20.0
+_MIN_LATERAL_M = 5.0
+_ZOOM_IN_PER_FRAME = 0.97
 
 
 def project_to_image(points: np.ndarray, rpy: np.ndarray, intrinsics: np.ndarray) -> np.ndarray:
@@ -130,27 +135,39 @@ class InsetScale:
     lateral_m: float
 
 
-def inset_scale(paths: np.ndarray, masks: np.ndarray) -> InsetScale:
-    """Fixed ranges for a whole clip, from the real paths, so the inset does not jump frame to frame."""
-    paths = np.asarray(paths, dtype=np.float64)
-    masks = np.asarray(masks, dtype=bool)
-    forward = 0.0
-    lateral = 0.0
-    if masks.any():
-        forward = float(np.max(paths[..., 0][masks]))
-        lateral = float(np.max(np.abs(paths[..., 1][masks])))
-    forward_range = _FORWARD_RANGES_M[-1]
-    for candidate in _FORWARD_RANGES_M:
-        if forward <= candidate:
-            forward_range = candidate
-            break
-    # Lateral axis exaggerated (labelled): the misses are lateral, metres matter there.
-    lateral_range = _LATERAL_RANGES_M[-1]
-    for candidate in _LATERAL_RANGES_M:
-        if lateral * 1.2 <= candidate:
-            lateral_range = candidate
-            break
-    return InsetScale(forward_m=forward_range, lateral_m=lateral_range)
+class InsetZoom:
+    """Ranges of the top-down inset, following the real path of each frame.
+
+    They grow at once when the path needs more room and shrink slowly (3% per frame), so the
+    inset neither clips the path nor flickers. Both panels use the same ranges.
+    """
+
+    def __init__(self) -> None:
+        self.forward_m = 0.0
+        self.lateral_m = 0.0
+
+    def update(self, truth_points: np.ndarray) -> InsetScale:
+        points = np.asarray(truth_points, dtype=np.float64).reshape(-1, 3)
+        points = points[np.isfinite(points).all(axis=1)]
+        forward_needed = _MIN_FORWARD_M
+        lateral_needed = _MIN_LATERAL_M
+        if len(points):
+            forward_needed = max(forward_needed, 1.1 * float(np.max(points[:, 0])))
+            lateral_needed = max(lateral_needed, 1.2 * float(np.max(np.abs(points[:, 1]))))
+        # Lateral axis exaggerated on straight roads (the misses are lateral, metres matter there) but
+        # never squeezed: in a sharp turn a squeezed lateral axis makes the curves look straight, so
+        # the forward axis then grows until both have the same metres per pixel.
+        forward_needed = max(forward_needed, lateral_needed / _PLOT_HALF_WIDTH * _PLOT_HEIGHT)
+
+        if lateral_needed >= self.lateral_m:
+            self.lateral_m = lateral_needed
+        else:
+            self.lateral_m = max(lateral_needed, self.lateral_m * _ZOOM_IN_PER_FRAME)
+        if forward_needed >= self.forward_m:
+            self.forward_m = forward_needed
+        else:
+            self.forward_m = max(forward_needed, self.forward_m * _ZOOM_IN_PER_FRAME)
+        return InsetScale(forward_m=self.forward_m, lateral_m=self.lateral_m)
 
 
 def draw_inset(
@@ -162,16 +179,16 @@ def draw_inset(
     height, width = image.shape[:2]
     left = width - INSET_WIDTH - INSET_MARGIN
     top = height - INSET_HEIGHT - INSET_MARGIN
-    _darken(image, top, top + INSET_HEIGHT, left, left + INSET_WIDTH, 0.3)
+    # Opaque: the lines drawn on the camera frame must not show through the inset.
+    image[top : top + INSET_HEIGHT, left : left + INSET_WIDTH] = (12, 12, 12)
     cv2.rectangle(image, (left, top), (left + INSET_WIDTH - 1, top + INSET_HEIGHT - 1), GREY, 1, cv2.LINE_AA)
 
     plot_left = left + 14
-    plot_right = left + INSET_WIDTH - 14
     plot_top = top + 34
-    plot_bottom = top + INSET_HEIGHT - 34
-    centre_x = (plot_left + plot_right) / 2.0
-    half_width = (plot_right - plot_left) / 2.0
-    plot_height = plot_bottom - plot_top
+    plot_bottom = plot_top + _PLOT_HEIGHT
+    half_width = _PLOT_HALF_WIDTH
+    centre_x = plot_left + half_width
+    plot_height = _PLOT_HEIGHT
 
     cv2.putText(image, "vista dall'alto", (left + 10, top + 22), FONT, 0.55, WHITE, 1, cv2.LINE_AA)
     # Straight-ahead axis and the car at the bottom.

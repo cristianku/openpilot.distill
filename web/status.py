@@ -451,13 +451,24 @@ def _is_date_value(value) -> bool:
     return isinstance(value, str) or isinstance(value, int) or isinstance(value, float)
 
 
-AVG_MISS_KEYS = ('avg_miss_m', 'avg_miss', 'miss_m', 'mean_miss_m')
-LATERAL_MISS_KEYS = ('avg_lateral_miss_m', 'lateral_miss_m', 'avg_lateral_miss', 'lateral_miss')
+def _text(data: dict, key: str, limit: int = 120) -> str | None:
+    value = data.get(key)
+    if isinstance(value, str):
+        return short_text(value, limit)
+    return None
+
+
+AVG_MISS_KEYS = ('avg_miss_m',)
+LATERAL_MISS_KEYS = ('avg_lateral_miss_m',)
 
 
 def eval_results(repo: Path) -> list[dict]:
     """The leaderboard: outputs/eval/*.json written by evaluation/holdout.py, best avg miss first.
-    The overall numbers are taken from the top level of the file or from its "overall" object."""
+
+    Read from each file (schema 1 of evaluation/holdout.py):
+      model: {spec, key, label, sha256, ...}   overall: {segments, frames, avg_miss_m, avg_lateral_miss_m}
+      selection ("heldout" by default)          settings: {rate_hz, horizon_s}     created (ISO, UTC)
+    """
     folder = repo / 'outputs' / 'eval'
     results = []
     if not folder.is_dir():
@@ -470,33 +481,37 @@ def eval_results(repo: Path) -> list[dict]:
             continue
         overall = data.get('overall')
         if not isinstance(overall, dict):
-            overall = data
-        avg_miss = _first_number(overall, AVG_MISS_KEYS)
-        lateral = _first_number(overall, LATERAL_MISS_KEYS)
-        segments_value = data.get('segments')
-        count = None
-        if isinstance(segments_value, list) or isinstance(segments_value, dict):
-            count = len(segments_value)
-        if count is None:
-            count = _first_number(overall, ('n_segments', 'segment_count'))
+            overall = {}
         model = data.get('model')
-        if not isinstance(model, str):
-            model = data.get('model_spec')
-        if not isinstance(model, str):
-            model = path.stem
-        date = data.get('date')
-        if not _is_date_value(date):
-            date = data.get('created')
+        if not isinstance(model, dict):
+            model = {}
+        settings = data.get('settings')
+        if not isinstance(settings, dict):
+            settings = {}
+        spec = _text(model, 'spec')
+        if spec is None:
+            spec = path.stem
+        segment_count = _first_number(overall, ('segments',))
+        if segment_count is not None:
+            segment_count = int(segment_count)
+        frames = _first_number(overall, ('frames',))
+        if frames is not None:
+            frames = int(frames)
+        date = data.get('created')
         if not _is_date_value(date):
             date = path.stat().st_mtime
-        sha = data.get('model_sha256')
-        if not isinstance(sha, str):
-            sha = data.get('sha256')
-        if not isinstance(sha, str):
-            sha = ''
-        results.append({'file': path.name, 'model': short_text(model, 120), 'avg_miss_m': avg_miss,
-                        'lateral_miss_m': lateral, 'segments': count, 'date': date,
-                        'sha256': short_text(sha, 64)})
+        skipped = data.get('skipped')
+        skipped_count = 0
+        if isinstance(skipped, list) or isinstance(skipped, dict):
+            skipped_count = len(skipped)
+        results.append({'file': path.name, 'model': spec, 'label': _text(model, 'label') or spec,
+                        'avg_miss_m': _first_number(overall, AVG_MISS_KEYS),
+                        'lateral_miss_m': _first_number(overall, LATERAL_MISS_KEYS),
+                        'segments': segment_count, 'frames': frames, 'skipped': skipped_count,
+                        'selection': _text(data, 'selection', 60) or '',
+                        'rate_hz': _first_number(settings, ('rate_hz',)),
+                        'horizon_s': _first_number(settings, ('horizon_s',)),
+                        'date': date, 'sha256': _text(model, 'sha256', 64) or ''})
 
     def sort_key(row):
         if row['avg_miss_m'] is None:
@@ -508,58 +523,66 @@ def eval_results(repo: Path) -> list[dict]:
 
 
 # -- comparison videos -------------------------------------------------------------------------------
-def _model_side(data: dict, side: str) -> dict:
-    """Name and avg miss of 'reference' or 'student' in a compare json, from either
-    {"reference": {"name"/"spec", "avg_miss_m"}} or {"avg_miss_m": {"reference": x}}."""
-    result = {'model': None, 'avg_miss_m': None}
-    block = data.get(side)
+def _compare_model(data: dict, side: str) -> dict:
+    """'reference' or 'student' of a compare json (schema 1 of evaluation/compare.py):
+    models.<side> = {spec, label, sha256, avg_miss_m, avg_lateral_miss_m, frames, ...}."""
+    result = {'model': None, 'label': None, 'avg_miss_m': None, 'lateral_miss_m': None}
+    models = data.get('models')
+    block = None
+    if isinstance(models, dict):
+        block = models.get(side)
     if isinstance(block, dict):
-        for key in ('spec', 'name', 'model'):
-            if isinstance(block.get(key), str):
-                result['model'] = short_text(block[key], 120)
-                break
+        result['model'] = _text(block, 'spec')
+        result['label'] = _text(block, 'label')
         result['avg_miss_m'] = _first_number(block, AVG_MISS_KEYS)
-    elif isinstance(block, str):
-        result['model'] = short_text(block, 120)
-    if result['avg_miss_m'] is None:
-        for key in AVG_MISS_KEYS:
-            values = data.get(key)
-            if isinstance(values, dict):
-                result['avg_miss_m'] = _first_number(values, (side,))
-                if result['avg_miss_m'] is not None:
-                    break
+        result['lateral_miss_m'] = _first_number(block, LATERAL_MISS_KEYS)
     if result['model'] is None:
         args = data.get('args')
-        if isinstance(args, dict) and isinstance(args.get(side), str):
-            result['model'] = short_text(args[side], 120)
+        if isinstance(args, dict):
+            result['model'] = _text(args, side)
     return result
 
 
 def compare_videos(repo: Path) -> list[dict]:
-    """outputs/compare/*.mp4, newest first, with the numbers of the json next to each video."""
+    """outputs/compare/*.mp4 (not the .partial.mp4 being encoded), newest first, with the numbers
+    of the <same name>.json next to each video (schema 1 of evaluation/compare.py: segment,
+    args {reference, student, start_s, duration_s, speed}, clip {start_s, end_s}, models, created)."""
     folder = repo / 'outputs' / 'compare'
     videos = []
     if not folder.is_dir():
         return videos
     for path in folder.iterdir():
-        if not VIDEO_NAME_RE.fullmatch(path.name) or path.is_symlink() or not path.is_file():
+        if not VIDEO_NAME_RE.fullmatch(path.name) or path.name.endswith('.partial.mp4'):
+            continue
+        if path.is_symlink() or not path.is_file():
             continue
         stat = path.stat()
-        item = {'name': path.name, 'size': stat.st_size, 'modified': stat.st_mtime, 'segment': None,
-                'start': None, 'duration': None, 'speed': None,
-                'reference': {'model': None, 'avg_miss_m': None}, 'student': {'model': None, 'avg_miss_m': None}}
+        item = {'name': path.name, 'size': stat.st_size, 'modified': stat.st_mtime, 'has_json': False,
+                'segment': None, 'start': None, 'duration': None, 'speed': None, 'created': None,
+                'reference': _compare_model({}, 'reference'), 'student': _compare_model({}, 'student')}
         data = _read_json(path.with_suffix('.json'))
         if isinstance(data, dict):
+            item['has_json'] = True
             args = data.get('args')
             if not isinstance(args, dict):
-                args = data
-            if isinstance(args.get('segment'), str):
-                item['segment'] = short_text(args['segment'], 40)
-            item['start'] = _first_number(args, ('start',))
-            item['duration'] = _first_number(args, ('duration',))
+                args = {}
+            clip = data.get('clip')
+            if not isinstance(clip, dict):
+                clip = {}
+            item['segment'] = _text(data, 'segment', 40)
+            # The clip really shown (compare.py moves a too early start after the warm-up).
+            start = _first_number(clip, ('start_s',))
+            end = _first_number(clip, ('end_s',))
+            if start is not None and end is not None:
+                item['start'] = start
+                item['duration'] = round(end - start, 3)
+            else:
+                item['start'] = _first_number(args, ('start_s',))
+                item['duration'] = _first_number(args, ('duration_s',))
             item['speed'] = _first_number(args, ('speed',))
-            item['reference'] = _model_side(data, 'reference')
-            item['student'] = _model_side(data, 'student')
+            item['created'] = _text(data, 'created', 40)
+            item['reference'] = _compare_model(data, 'reference')
+            item['student'] = _compare_model(data, 'student')
         videos.append(item)
     videos.sort(key=lambda video: video['modified'], reverse=True)
     return videos
@@ -567,7 +590,7 @@ def compare_videos(repo: Path) -> list[dict]:
 
 def video_path(repo: Path, name: str) -> Path | None:
     """The file of a comparison video, only for a plain name inside outputs/compare (no links)."""
-    if not VIDEO_NAME_RE.fullmatch(name):
+    if not VIDEO_NAME_RE.fullmatch(name) or name.endswith('.partial.mp4'):
         return None
     folder = repo / 'outputs' / 'compare'
     path = folder / name

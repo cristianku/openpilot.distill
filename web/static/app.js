@@ -385,7 +385,8 @@
     if (comma.reachable) {
       if (comma.onroad === true) row('Stato', 'onroad (in marcia)', 'todo');
       else row('Stato', 'offroad (fermo)', 'ok');
-      row('Modello attivo (menu Modelli)', comma.bundle || 'Default');
+      if (comma.bundle_default === false) row('Modello scelto nel menu Modelli', comma.bundle, 'imp');
+      else row('Menu Modelli', 'Default (il modello di openpilot)');
       row('Copia dell\'originale', comma.backup ? 'presente (/data/driving_supercombo.onnx.orig)' : 'nessuna');
     } else if (comma.error) {
       row('Errore', comma.error);
@@ -876,7 +877,14 @@
     results.forEach((result, index) => {
       const row = node('tr', index === 0 && result.avg_miss_m !== null ? 'best' : '');
       row.appendChild(node('td', 'num', String(index + 1)));
-      row.appendChild(node('td', 'mono', result.model));
+      const modelCell = node('td');
+      modelCell.appendChild(node('div', 'mono', result.model));
+      let note = result.label && result.label !== result.model ? result.label : '';
+      if (result.selection && result.selection !== 'heldout') note += (note ? ' · ' : '') + 'segmenti: ' + result.selection;
+      if (result.rate_hz && result.rate_hz !== 5) note += (note ? ' · ' : '') + result.rate_hz + ' Hz';
+      if (result.skipped) note += (note ? ' · ' : '') + result.skipped + ' saltati';
+      if (note) modelCell.appendChild(node('div', 'note', note));
+      row.appendChild(modelCell);
       row.appendChild(node('td', 'num', result.avg_miss_m === null ? '–' : result.avg_miss_m.toFixed(2) + ' m'));
       row.appendChild(node('td', 'num', result.lateral_miss_m === null ? '–' : result.lateral_miss_m.toFixed(2) + ' m'));
       row.appendChild(node('td', 'num', result.segments === null ? '–' : String(result.segments)));
@@ -921,8 +929,9 @@
     for (const video of videos) {
       const item = node('li', 'item');
       const text = node('div', 'grow');
-      const who = (video.student.model || '?') + ' contro ' + (video.reference.model || '?');
-      text.appendChild(node('div', 'what', who));
+      const who = (video.student.label || video.student.model || '?') + ' contro '
+        + (video.reference.label || video.reference.model || '?');
+      text.appendChild(node('div', 'what', video.has_json ? who : video.name));
       let sub = (video.segment || video.name) + ' · ' + fmtTime(video.modified) + ' · ' + fmtBytes(video.size);
       if (video.student.avg_miss_m !== null) sub += ' · studente ' + video.student.avg_miss_m.toFixed(2) + ' m';
       if (video.reference.avg_miss_m !== null) sub += ' · riferimento ' + video.reference.avg_miss_m.toFixed(2) + ' m';
@@ -946,16 +955,19 @@
     byId('player-title').textContent = 'Video · ' + name;
     const miss = byId('player-miss');
     miss.replaceChildren();
-    function box(who, model, value) {
+    function box(who, side) {
       const element = node('div', 'box');
-      element.appendChild(node('div', 'who', who + (model ? ': ' + model : '')));
-      element.appendChild(node('div', 'num', value === null || value === undefined ? '–' : value.toFixed(2) + ' m'));
-      element.appendChild(node('div', 'who', 'avg miss su questo tratto'));
+      const name = side.label || side.model;
+      element.appendChild(node('div', 'who', who + (name ? ': ' + name : '')));
+      element.appendChild(node('div', 'num', side.avg_miss_m === null ? '–' : side.avg_miss_m.toFixed(2) + ' m'));
+      let note = 'avg miss su questo tratto';
+      if (side.lateral_miss_m !== null) note += ' · laterale ' + side.lateral_miss_m.toFixed(2) + ' m';
+      element.appendChild(node('div', 'who', note));
       return element;
     }
     if (video) {
-      miss.appendChild(box('Riferimento (sopra)', video.reference.model, video.reference.avg_miss_m));
-      miss.appendChild(box('Studente (sotto)', video.student.model, video.student.avg_miss_m));
+      miss.appendChild(box('Riferimento (sopra)', video.reference));
+      miss.appendChild(box('Studente (sotto)', video.student));
       let sub = video.segment ? 'segmento ' + video.segment : '';
       if (video.start !== null) sub += ' · da ' + video.start + ' s';
       if (video.duration !== null) sub += ' · ' + video.duration + ' s';

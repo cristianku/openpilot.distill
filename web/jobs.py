@@ -36,10 +36,12 @@ HISTORY = 50
 # Job files read to find running jobs and the history: far more than a day of use.
 SCAN_LIMIT = 400
 STOP_GRACE_SECONDS = 20
+WRAPPER_READY_SECONDS = 5
 PROGRESS_RE = re.compile(r'^PROGRESS (\d+)/(\d+)\s*$')
 STEP_RE = re.compile(r'^step (\d+)/(\d+):')
 RUN_DIR_RE = re.compile(r'^RUN_DIR=(.+)$')
-VIDEO_RE = re.compile(r'outputs/compare/([A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.mp4)')
+VIDEO_RE = re.compile(r'/outputs/compare/([A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.mp4)$')
+OUTPUT_MP4_RE = re.compile(r'^OUTPUT_MP4=(.+)$')
 STATE_LABELS = {'running': 'in corso', 'ok': 'finito', 'failed': 'fallito', 'stopped': 'fermato',
                 'unknown': 'terminato (esito sconosciuto)'}
 # Environment variables of the site that the jobs must not see.
@@ -110,10 +112,17 @@ def parse_run_dir(text: str, repo: Path) -> str | None:
 
 
 def parse_video(text: str) -> str | None:
-    """The last outputs/compare/<name>.mp4 named in a log (the file a compare job wrote)."""
+    """The video a compare job wrote: the name in its last "OUTPUT_MP4=<abs path>" line
+    (evaluation/compare.py prints it at the end), only when it is a file of outputs/compare/."""
     found = None
-    for match in VIDEO_RE.finditer(text):
-        found = match.group(1)
+    for line in log_lines(text):
+        match = OUTPUT_MP4_RE.match(line.strip())
+        if match is None:
+            continue
+        name = match.group(1).strip().rsplit('/', 1)[-1]
+        inside_compare = VIDEO_RE.search(match.group(1)) is not None
+        if inside_compare and not name.endswith('.partial.mp4'):
+            found = name
     return found
 
 
@@ -366,9 +375,22 @@ class JobManager:
                     raise WebError(500, 'start_failed', 'Non riesco ad avviare il job: ' + str(exc)) from exc
             update_job_file(job_file, {'pid': process.pid, 'pgid': process.pid})
             self._processes[job_id] = process
+            self._wait_wrapper_ready(job_file, process)
         # Reaps the wrapper as soon as it ends, so it never stays a zombie.
         threading.Thread(target=process.wait, name='reap-' + job_id, daemon=True).start()
         return self.get(job_id)
+
+    def _wait_wrapper_ready(self, job_file: Path, process, timeout: float = WRAPPER_READY_SECONDS) -> None:
+        """Waits until the wrapper has its signal handlers (it marks wrapper_ready in the job file): a stop
+        sent before that would kill the wrapper and lose the exit code. Python starts in ~0.1 s."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = read_job_file(job_file)
+            if job is not None and job.get('wrapper_ready') is not None:
+                return
+            if process.poll() is not None:
+                return
+            time.sleep(0.02)
 
     def stop(self, job_id: str) -> dict:
         view = self.get(job_id)
@@ -404,25 +426,30 @@ class JobManager:
         deadline = time.monotonic() + grace
         while time.monotonic() < deadline:
             if not self._group_alive(pgid):
+                self._record_stopped(job_id, -15, False)
                 return
             time.sleep(0.5)
-        job = read_job_file(self.job_file(job_id))
-        if job is None or job.get('exit_code') is not None:
-            return
-        # The group leader must still be the wrapper of this job (no pid reuse).
-        if not self._is_job_process(pgid, job_id):
-            return
-        self._append_log(job_id, '\n== non si e\' fermato in ' + str(int(grace)) + ' s: SIGKILL\n')
+        # Still alive since stop() checked that its leader was the wrapper of this job: the same group
+        # (a process group id is not reused while the group has members). Also kills what is left
+        # when the wrapper already ended (e.g. data-loader workers that ignored SIGTERM).
+        self._append_log(job_id, '\n== non si e\' fermato in ' + str(int(grace)) + ' s: SIGKILL al gruppo\n')
         try:
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             return
         # The wrapper died with the group: record the result in its place.
         time.sleep(1)
+        self._record_stopped(job_id, -9, True)
+
+    def _record_stopped(self, job_id: str, code: int, killed: bool) -> None:
+        """Exit code of a stopped job whose wrapper could not write it (it died with the group)."""
+        # Give the wrapper a moment: it writes its own result right after the job ends.
+        time.sleep(0.5)
         job = read_job_file(self.job_file(job_id))
-        if job is not None and job.get('exit_code') is None:
-            update_job_file(self.job_file(job_id), {'exit_code': -9, 'finished': time.time(), 'killed': True})
-            self._append_log(job_id, '\n== finito con codice -9 (fermato con SIGKILL)\n')
+        if job is None or job.get('exit_code') is not None:
+            return
+        update_job_file(self.job_file(job_id), {'exit_code': code, 'finished': time.time(), 'killed': killed})
+        self._append_log(job_id, '\n== finito con codice ' + str(code) + ' (fermato dal sito)\n')
 
     def _append_log(self, job_id: str, text: str) -> None:
         try:

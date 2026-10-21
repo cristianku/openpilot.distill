@@ -12,10 +12,11 @@ from supervised.model_for_inference import (
     SupercomboForInference,
     TorchSupercomboForInference,
 )
+from supervised.teachers import DEFAULT_TEACHER
 
 
 FPS = 5
-SUPERCOMBO = Path(__file__).resolve().parents[1] / "models/big_driving_supercombo.onnx"
+SUPERCOMBO = Path(__file__).resolve().parents[1] / DEFAULT_TEACHER
 
 
 class ConstantActor:

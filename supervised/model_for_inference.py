@@ -352,11 +352,33 @@ class ORTSupercomboForInference(SupercomboForInference):
     ) -> ORTSupercomboForInference:
         import onnx
 
-        from .onnx_helpers import make_dense, split_supercombo
+        from .onnx_helpers import (
+            is_queue_supercombo,
+            make_dense,
+            make_dense_queue,
+            split_queue_supercombo,
+            split_supercombo,
+        )
 
         model = model if hasattr(model, "graph") else onnx.load(str(model))
-        vision, policies = split_supercombo(model)
-        return cls(vision, make_dense(policies), providers=providers)
+        input_names = []
+        for value in model.graph.input:
+            input_names.append(value.name)
+        if "features_buffer" in input_names:
+            # Old interface (openpilot 084747c75): the feature history comes from outside.
+            vision, policies = split_supercombo(model)
+            policies = make_dense(policies)
+        elif is_queue_supercombo(model):
+            # Hugging Face commaai/openpilot_driving_models (MD v3 and later): the history is kept
+            # inside the ONNX in state_x queues.
+            vision, policies = split_queue_supercombo(model)
+            policies = make_dense_queue(policies)
+        else:
+            raise ValueError(
+                f"teacher with inputs {input_names}: neither the old interface (features_buffer) nor the "
+                "queue format of the Hugging Face big models (state_feat_q)"
+            )
+        return cls(vision, policies, providers=providers)
 
     @staticmethod
     def _dtype(value) -> np.dtype:

@@ -4,7 +4,7 @@
 #
 # Usage: helpers/train_supervised.sh [--steps=<n>] [--batch-size=<n>] [--workers=<n>] [--test]
 #                                    [--background | --foreground-log] [--wandb=online|offline|disabled]
-#                                    [--continue | --resume=<run>]
+#                                    [--continue | --resume=<run>] [--teacher=md-v3|084747c7]
 #   helpers/train_supervised.sh                  (5000 step, in primo piano)
 #   helpers/train_supervised.sh --test           (10 step, solo per vedere che tutto parte)
 #   helpers/train_supervised.sh --background     (continua anche se chiudi la ssh)
@@ -13,6 +13,7 @@
 #   helpers/train_supervised.sh --resume=outputs/supervised/2026-10-21_1544  (riprende un run interrotto)
 #   helpers/train_supervised.sh --resume=2026-10-21_1544                     (uguale, solo il nome del run)
 #   helpers/train_supervised.sh --foreground-log --wandb=offline             (come lo lancia il sito)
+#   helpers/train_supervised.sh --teacher=084747c7 --background              (col teacher vecchio)
 #
 # Start of the model (supervised/train.py --mode):
 #   (default)   fresh: a new model, from the pretrained vision backbone.
@@ -24,6 +25,19 @@
 #               and metrics.jsonl, same --steps (read from the checkpoint when not given).
 #               <run> is the run folder or only its name in outputs/supervised/, old names
 #               (2026-10-21_1544) and new ones (2026-10-21_154412) alike.
+#
+# Teacher (--teacher, the big model the student imitates; supervised/teachers.py):
+#   md-v3     (default) the big model of openpilot master since "MD v3" (commit 1e219d778):
+#             commaai/openpilot_driving_models on Hugging Face, 1365126a-e71e-4778-be00-8ab92dc82c09/12864,
+#             at a pinned revision -> models/big_driving_supercombo_1365126a_12864.onnx (0.8 GB).
+#             Its history is inside the ONNX: supervised/onnx_helpers.py cuts it for the training
+#             (helpers/check_teacher.py checks the cut). distill/hidden_state compares 32 tokens x 512.
+#   084747c7  the big model of openpilot 084747c75 from GitHub, the one of upstream openpilot.distill
+#             -> models/big_driving_supercombo.onnx (1.8 GB). distill/hidden_state compares one
+#             averaged 512 vector: its values are not comparable with the md-v3 ones.
+#   --resume always takes the teacher of the interrupted run (saved in its checkpoint), so it does
+#   not take --teacher. --continue is a new run and can change teacher (distill/hidden_state then
+#   starts high).
 #
 # One step = --batch-size moments (default 8) taken at random from ONE segment.
 # 5000 steps (the README value) x 8 = 40000 samples: with ~45 segments every segment is
@@ -51,7 +65,7 @@
 # the GPU. The training keeps the lock until it ends, with --background too.
 #
 # Before training it checks:
-#   - the teacher models/big_driving_supercombo.onnx: downloaded (or completed) when missing or partial
+#   - the teacher file: downloaded (or completed) when missing or partial, sha256 checked after a download
 #   - every segment in data/ is localized (localizer.safetensors + frame_info.safetensors):
 #     one without would stop the training, run helpers/localize_segments.sh first
 #   - fcamera.hevc / ecamera.hevc in data/ are not links to a missing file of the shared
@@ -72,9 +86,11 @@ distill_load_env
 
 DATA_DIR="$ROOT/data"
 RUNS_DIR="$ROOT/outputs/supervised"
+# Teacher 084747c7: openpilot commit of its GitHub LFS file.
 OPENPILOT_SHA="084747c75d2cbd23af65ab7a9e770bbd7b98bac9"
-TEACHER="$ROOT/models/big_driving_supercombo.onnx"
-TEACHER_URL="https://media.githubusercontent.com/media/commaai/openpilot/${OPENPILOT_SHA}/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx"
+# Teacher md-v3: revision of commaai/openpilot_driving_models on Hugging Face (pinned: the repo
+# gets new models, a fixed revision always gives the same file).
+HF_TEACHER_REVISION="8dbc57a6480111bd58487ecc248e30d50fb2f8dd"
 HF_REPO="${HF_REPO:-cristianku/openpilot-distill-models}"
 # Run folder names: with seconds, and the old ones to the minute (runs before 2026-10-22).
 RUN_NAME_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}([0-9]{2})?$'
@@ -103,6 +119,9 @@ mode="fresh"
 resume_dir=""
 # --resume takes the steps from the checkpoint unless they are given.
 steps_given=0
+teacher_name="md-v3"
+# --resume takes the teacher from the checkpoint and refuses --teacher.
+teacher_given=0
 
 while [ $# -gt 0 ]; do
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
@@ -131,6 +150,9 @@ while [ $# -gt 0 ]; do
     batch_size="${1#--batch-size=}"
   elif [[ "$1" == --workers=* ]]; then
     workers="${1#--workers=}"
+  elif [[ "$1" == --teacher=* ]]; then
+    teacher_name="${1#--teacher=}"
+    teacher_given=1
   else
     die "opzione non valida: $1 (vedi --help)"
   fi
@@ -176,11 +198,47 @@ if [ "$mode" = "resume" ]; then
     || die "in $run_dir non c'e' supercombo.training.pt: il run e' partito senza checkpoint, non si puo' riprendere"
   [ ! -f "$run_dir/supercombo.pt" ] \
     || die "$run_dir e' gia' finito (c'e' supercombo.pt): per allenarlo ancora pubblicalo con --stable e usa --continue"
+  [ "$teacher_given" -eq 0 ] || die "con --resume il teacher e' quello del run interrotto: togli --teacher"
+  # Steps and teacher of the run in one read (the checkpoint also holds the optimizer: slow to load).
+  resume_info="$(cd "$ROOT" && distill_uv_run python -c 'import sys, torch
+saved = torch.load(sys.argv[1], map_location="cpu", weights_only=True)
+print(saved["total_steps"])
+print(saved.get("teacher", ""))' \
+    "$run_dir/supercombo.training.pt")"
+  saved_steps="$(printf '%s\n' "$resume_info" | sed -n 1p)"
+  saved_teacher="$(printf '%s\n' "$resume_info" | sed -n 2p)"
   if [ "$steps_given" -eq 0 ]; then
-    steps="$(cd "$ROOT" && distill_uv_run python -c 'import sys, torch
-print(torch.load(sys.argv[1], map_location="cpu", weights_only=True)["total_steps"])' \
-      "$run_dir/supercombo.training.pt")"
+    steps="$saved_steps"
   fi
+  # The file name says which teacher it is (the runs before --teacher all used 084747c7).
+  saved_teacher_file="$(basename "$saved_teacher")"
+  if [ "$saved_teacher_file" = "big_driving_supercombo_1365126a_12864.onnx" ]; then
+    teacher_name="md-v3"
+  elif [ "$saved_teacher_file" = "big_driving_supercombo.onnx" ]; then
+    teacher_name="084747c7"
+  else
+    die "il run usa il teacher '$saved_teacher', che questo script non sa scaricare: riprendilo a mano con supervised/train.py --mode resume --teacher ..."
+  fi
+fi
+
+# Teacher: file, where to download it and its sha256 (supervised/teachers.py, supervised/README.md).
+if [ "$teacher_name" = "md-v3" ]; then
+  TEACHER="$ROOT/models/big_driving_supercombo_1365126a_12864.onnx"
+  TEACHER_URL="https://huggingface.co/commaai/openpilot_driving_models/resolve/${HF_TEACHER_REVISION}/1365126a-e71e-4778-be00-8ab92dc82c09/12864/big_driving_supercombo.onnx"
+  TEACHER_SHA256="1cfd2c45353d876b5b257b24d77537de58ab90a44ae595f15b1f64b6ea3fd770"
+  TEACHER_SOURCE="Hugging Face"
+elif [ "$teacher_name" = "084747c7" ]; then
+  TEACHER="$ROOT/models/big_driving_supercombo.onnx"
+  TEACHER_URL="https://media.githubusercontent.com/media/commaai/openpilot/${OPENPILOT_SHA}/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx"
+  TEACHER_SHA256="a501760a9d1d5fef0eab2b8c5d122d06124fc26dc8e0782e0aa94b82a208f0ff"
+  TEACHER_SOURCE="GitHub"
+else
+  die "--teacher vuole md-v3 o 084747c7 (non '$teacher_name')"
+fi
+# --resume: exactly the path saved in the checkpoint, train.py compares it as a string (the repo
+# path of the run may be written differently, e.g. through a symlink).
+if [ "$mode" = "resume" ]; then
+  TEACHER="$saved_teacher"
 fi
 
 # wandb: --wandb wins. Without it as before: "uv run wandb login" saves the key in ~/.netrc,
@@ -219,23 +277,29 @@ prepare_and_train() {
     die "il teacher si sta ancora scaricando (curl in corso): aspetta che finisca e rilancia"
   fi
 
-  # Teacher: download it, or finish a partial download, when its size is not the one on GitHub.
+  # Teacher: download it, or finish a partial download, when its size is not the one of its source.
+  # Hugging Face answers with a redirect: the last Content-Length is the one of the file.
   remote_size="$(curl -sIL "$TEACHER_URL" | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1)"
   local_size=0
   if [ -f "$TEACHER" ]; then
     local_size="$(stat -c %s "$TEACHER")"
   fi
   if [ -z "$remote_size" ]; then
-    [ -f "$TEACHER" ] || die "manca $TEACHER e GitHub non risponde per scaricarlo"
-    echo "Teacher: GitHub non risponde, uso $TEACHER cosi' com'e' ($local_size byte)."
+    [ -f "$TEACHER" ] || die "manca $TEACHER e $TEACHER_SOURCE non risponde per scaricarlo"
+    echo "Teacher $teacher_name: $TEACHER_SOURCE non risponde, uso $TEACHER cosi' com'e' ($local_size byte)."
   elif [ "$local_size" != "$remote_size" ]; then
-    echo "Teacher: $local_size di $remote_size byte, scarico..."
+    echo "Teacher $teacher_name: $local_size di $remote_size byte, scarico da $TEACHER_SOURCE..."
     mkdir -p "$(dirname "$TEACHER")"
     curl --fail --location --continue-at - "$TEACHER_URL" --output "$TEACHER"
     local_size="$(stat -c %s "$TEACHER")"
     [ "$local_size" = "$remote_size" ] || die "teacher scaricato a meta' ($local_size di $remote_size byte), rilancia"
+    # Only after a download, not at every start (0.8-1.8 GB to read).
+    echo "Teacher $teacher_name: scaricato, controllo lo sha256..."
+    local_sha256="$(sha256sum "$TEACHER" | cut -d ' ' -f 1)"
+    [ "$local_sha256" = "$TEACHER_SHA256" ] \
+      || die "teacher scaricato ma sha256 diverso ($local_sha256 invece di $TEACHER_SHA256): cancella $TEACHER e rilancia"
   else
-    echo "Teacher: ok ($local_size byte)."
+    echo "Teacher $teacher_name: ok ($local_size byte)."
   fi
 
   # Segments: the dataset takes every folder of data/ with fcamera.hevc, and one without
@@ -279,7 +343,7 @@ Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in da
   else
     start="ripresa dall'ultimo checkpoint"
   fi
-  echo "Training ($start): $steps step, batch $batch_size, workers $workers, wandb ${WANDB_MODE:-online} -> $run_dir"
+  echo "Training ($start): $steps step, batch $batch_size, workers $workers, teacher $teacher_name, wandb ${WANDB_MODE:-online} -> $run_dir"
 
   # The log is appended to: --resume keeps writing the train.log of its run.
   # The GPU lock (fd 9) is inherited by the training: with --background it stays held after this
@@ -289,19 +353,19 @@ Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in da
     # nohup cannot run a shell function: the uv command as an array (helpers/common.sh).
     distill_uv_command
     nohup "${DISTILL_UV_COMMAND[@]}" torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
       --output "$run_dir/supercombo.pt" >> "$log" 2>&1 &
     echo "Partito in background (pid $!). Segui con:  tail -f $log"
     echo "Alla fine il modello e' in $run_dir/supercombo.pt"
   elif [ "$foreground_log" -eq 1 ]; then
     # The output of this function already goes through tee into train.log.
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
       --output "$run_dir/supercombo.pt" 2>&1
     echo "Fatto. Modello: $run_dir/supercombo.pt"
   else
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
-      --steps "$steps" --batch-size "$batch_size" --workers "$workers" \
+      --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER" \
       --output "$run_dir/supercombo.pt" 2>&1 | tee -a "$log"
     echo "Fatto. Modello: $run_dir/supercombo.pt"
   fi

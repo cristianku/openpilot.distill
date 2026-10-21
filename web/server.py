@@ -55,6 +55,8 @@ STATIC_FILES = {
     'app.css': 'text/css; charset=utf-8',
     'favicon.svg': 'image/svg+xml',
 }
+BUNDLE_REASON = ('sul comma e\' scelto un modello nel menu Modelli: rimetti Default (Impostazioni > Modelli) '
+                 'e controlla di nuovo')
 TOKEN_MESSAGE = 'Accesso negato: apri l\'indirizzo con il token (helpers/web.sh lo stampa).'
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 PROBLEM_CSP = ("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
@@ -304,6 +306,8 @@ class App:
                     reason = 'il comma non e\' raggiungibile'
                 elif comma_state.get('onroad') is True:
                     reason = 'il comma e\' onroad: spegni l\'auto'
+                elif action_id == 'install' and comma_state.get('bundle_default') is False:
+                    reason = BUNDLE_REASON
             if not reason and action_id in ('export', 'publish_dry', 'publish', 'install') and not finished_runs:
                 reason = 'nessun run finito (con supercombo.pt)'
             states[action_id] = {'label': action.label, 'group': action.group, 'allowed': not reason,
@@ -346,6 +350,10 @@ class App:
                                'Il comma non e\' raggiungibile: ' + state.get('error', '') + '.')
             if state.get('onroad') is True:
                 raise WebError(409, 'comma_onroad', 'Il comma e\' onroad: spegni l\'auto e riprova.')
+            # helpers/install_model_on_comma.sh refuses it too: a model chosen in the Models menu runs
+            # in place of openpilot's one, so the installed model would not be used.
+            if action_id == 'install' and state.get('bundle_default') is False:
+                raise WebError(409, 'comma_bundle', BUNDLE_REASON[0].upper() + BUNDLE_REASON[1:] + '.')
         if action_id == 'publish':
             snapshot = self.hf.snapshot(force=True)
             if not snapshot['ok']:

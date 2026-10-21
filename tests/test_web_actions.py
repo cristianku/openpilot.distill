@@ -76,7 +76,7 @@ class ArgvTest(ActionTestCase):
     def test_train_resume(self):
         spec = self.build('train', {'mode': 'resume', 'run': UNFINISHED, 'batch_size': 8, 'workers': 6})
         self.assertEqual(spec.argv, ['helpers/train_supervised.sh', '--foreground-log', '--batch-size=8',
-                                     '--workers=6', '--resume=outputs/supervised/' + UNFINISHED])
+                                     '--workers=6', '--resume=' + UNFINISHED])
 
     def test_train_test(self):
         self.assertEqual(self.build('train_test', {}).argv,
@@ -97,10 +97,12 @@ class ArgvTest(ActionTestCase):
                                       'start': '0', 'duration': '60', 'speed': 1, 'inset': False, 'show_gt': True})
         self.assertEqual(spec.argv, ['helpers/compare_video.sh', '--segment=' + SEGMENT, '--reference=teacher',
                                      '--student=hf:cd210_native', '--start=0', '--duration=60', '--speed=1',
-                                     '--show-gt'])
+                                     '--no-inset', '--show-gt'])
         spec = self.build('compare', {'segment': SEGMENT, 'reference': 'logged', 'student': 'run:' + RUN,
                                       'speed': 0.25})
         self.assertIn('--speed=0.25', spec.argv)
+        # compare.py draws the inset by default: an unchecked box must say --no-inset.
+        self.assertIn('--no-inset', spec.argv)
 
     def test_export_publish_install_restore_update(self):
         pt = 'outputs/supervised/' + RUN + '/supercombo.pt'

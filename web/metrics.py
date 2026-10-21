@@ -308,13 +308,21 @@ def _read_run_json(folder: Path) -> dict:
 
 def time_from_name(name: str) -> float | None:
     """Unix time of a run folder name (the server clock is UTC, so is the name)."""
-    for pattern in ('%Y-%m-%d_%H%M%S', '%Y-%m-%d_%H%M'):
-        try:
-            moment = datetime.strptime(name, pattern)
-        except ValueError:
-            continue
-        return moment.replace(tzinfo=UTC).timestamp()
-    return None
+    if not RUN_RE.fullmatch(name):
+        return None
+    # By length: strptime would also read "1544" as 15:04:04 with %H%M%S (one-digit minutes).
+    time_part = name.split('_', 1)[1]
+    if len(time_part) == 6:
+        pattern = '%Y-%m-%d_%H%M%S'
+    elif len(time_part) == 4:
+        pattern = '%Y-%m-%d_%H%M'
+    else:
+        return None
+    try:
+        moment = datetime.strptime(name, pattern)
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=UTC).timestamp()
 
 
 def running_runs_from_processes(repo: Path) -> set[str]:

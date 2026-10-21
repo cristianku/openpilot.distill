@@ -28,6 +28,7 @@ from scipy.ndimage import gaussian_filter1d
 from torch.utils.data import DataLoader, get_worker_info, IterableDataset
 
 from helpers.video_helpers import calibration_view_eulers, calibration_warp_matrix, decode_frames
+from supervised.teachers import DEFAULT_TEACHER
 
 COMMA1M_REPO_ID = "commaai/comma1M"
 
@@ -348,7 +349,7 @@ def _main() -> None:
     root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-path", default=str(root))
-    parser.add_argument("--model", type=Path, default=root / "models/big_driving_supercombo.onnx")
+    parser.add_argument("--model", type=Path, default=root / DEFAULT_TEACHER)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--limit", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=0)

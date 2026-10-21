@@ -13,6 +13,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Check Python syntax (no GPU dependencies)
-        run: python -m compileall -q supervised helpers/publish_training_weights.py tests
+        run: python -m compileall -q supervised helpers/publish_training_weights.py helpers/check_teacher.py tests
       - name: Check stable manifests and training checkpoint helpers
         run: python -m unittest discover -s tests -p "test_*.py" -v

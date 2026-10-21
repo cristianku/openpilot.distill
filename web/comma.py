@@ -8,6 +8,7 @@ car: no ssh every 30 s all day for nobody). install/restore ask again right befo
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -15,12 +16,13 @@ import time
 from web.common import short_text
 
 INTERVAL_SECONDS = 30
+BUNDLE_NAME_RE = re.compile(r'"(?:displayName|internalName)"\s*:\s*"([^"]{1,120})"')
 # Probe only when a page asked for the status in the last ... seconds.
 INTEREST_SECONDS = 120
 # Fixed command, nothing from a request in it. Every line is key=value.
 REMOTE_COMMAND = (
     'echo "onroad=$(cat /data/params/d/IsOnroad 2>/dev/null)"; '
-    'echo "bundle=$(head -c 600 /data/params/d/ModelManager_ActiveBundle 2>/dev/null | tr -d \'\\n\')"; '
+    'echo "bundle=$(head -c 8000 /data/params/d/ModelManager_ActiveBundle 2>/dev/null | tr -d \'\\n\')"; '
     'if [ -f /data/driving_supercombo.onnx.orig ]; then echo "backup=1"; else echo "backup=0"; fi'
 )
 
@@ -36,26 +38,37 @@ def ssh_probe(host: str) -> tuple[int, str]:
     return result.returncode, result.stdout
 
 
+def bundle_is_default(raw: str) -> bool:
+    """True when no model is chosen in the sunnypilot Models menu (the rule of
+    helpers/install_model_on_comma.sh: the param is empty or "{}")."""
+    text = raw.strip()
+    return text == '' or text == '{}'
+
+
 def bundle_name(raw: str) -> str:
     """A readable name of the active Models entry; 'Default' when none is chosen."""
     text = raw.strip()
-    if text == '' or text == '{}' or text == 'null':
+    if bundle_is_default(text) or text == 'null':
         return 'Default'
     try:
         data = json.loads(text)
     except ValueError:
-        return short_text(text, 80)
-    if not isinstance(data, dict):
-        return short_text(text, 80)
-    for key in ('displayName', 'display_name', 'internalName', 'name', 'ref'):
-        value = data.get(key)
-        if isinstance(value, str) and value:
-            return short_text(value, 80)
+        data = None
+    if isinstance(data, dict):
+        for key in ('displayName', 'display_name', 'internalName', 'name', 'ref'):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return short_text(value, 80)
+    # Cut or odd JSON: the name is still readable in the text.
+    match = BUNDLE_NAME_RE.search(text)
+    if match is not None:
+        return short_text(match.group(1), 80)
     return short_text(text, 80)
 
 
 def parse_probe(code: int, output: str) -> dict:
-    result = {'reachable': False, 'onroad': None, 'bundle': None, 'backup': None, 'error': ''}
+    result = {'reachable': False, 'onroad': None, 'bundle': None, 'bundle_default': None, 'backup': None,
+              'error': ''}
     if code != 0:
         if code == 124:
             result['error'] = 'ssh non risponde (timeout)'
@@ -74,6 +87,7 @@ def parse_probe(code: int, output: str) -> dict:
             result['onroad'] = value.strip() == '1'
         elif key == 'bundle':
             result['bundle'] = bundle_name(value)
+            result['bundle_default'] = bundle_is_default(value)
         elif key == 'backup':
             result['backup'] = value.strip() == '1'
     return result
@@ -86,7 +100,7 @@ class CommaMonitor:
         self._lock = threading.Lock()
         self._probe_lock = threading.Lock()
         self._state = {'host': host, 'checked': None, 'reachable': None, 'onroad': None, 'bundle': None,
-                       'backup': None, 'error': 'non ancora controllato'}
+                       'bundle_default': None, 'backup': None, 'error': 'non ancora controllato'}
         self._last_interest = 0.0
         self._thread = None
 

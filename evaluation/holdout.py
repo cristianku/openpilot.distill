@@ -28,8 +28,15 @@ from pathlib import Path
 
 import numpy as np
 
-from .metrics import DEFAULT_HORIZON_S, EVAL_CODE_VERSION, average, frame_misses, full_horizon_frames
-from .metrics import plan_point_mask, rounded
+from .metrics import (
+    DEFAULT_HORIZON_S,
+    EVAL_CODE_VERSION,
+    average,
+    frame_misses,
+    full_horizon_frames,
+    plan_point_mask,
+    rounded,
+)
 from .runners import ACTION_T, BLOCK_FRAMES, EVAL_WARMUP_FRAMES, TRAFFIC_RIGHT_HAND, build_runner
 from .segment import CAMERA_FPS, ModelInputPacker, Segment, load_segment, nvdec_available, stream_frames
 from .specs import parse_model_spec, resolve_model, validate_segment_name
@@ -91,7 +98,7 @@ def select_segments(selection: str) -> tuple[list[str], str]:
     if not names:
         raise SystemExit("ERRORE: --segments vuoto")
     digest = hashlib.sha256(",".join(names).encode()).hexdigest()[:8]
-    return names, f"lista{digest}"
+    return names, f"lista-{digest}"
 
 
 def evaluated_frames(segment: Segment, rate: int, horizon_s: float) -> np.ndarray:
@@ -132,7 +139,7 @@ def cached_result(path: Path, sha256: str, segments: list[str], settings: dict) 
 
 
 def evaluate_segment(runner, segment: Segment, frames: np.ndarray, horizon_s: float, use_nvdec: bool, progress) -> dict:
-    """Run the model over one segment; per-frame misses of the evaluated frames."""
+    """Run the model over one segment; per-frame misses of the evaluated frames. progress(n): n frames done."""
     wanted = set()
     for frame_index in frames:
         wanted.add(int(frame_index))
@@ -209,7 +216,8 @@ def main() -> None:
     if not args.force:
         saved = cached_result(output_path, model.sha256, segments, settings)
         if saved is not None:
-            print(f"risultato gia' calcolato: avg miss {saved['overall']['avg_miss_m']} m (--force per rifarlo)")
+            saved_miss = saved["overall"]["avg_miss_m"]
+            print(f"risultato gia' calcolato: avg miss {saved_miss} m (--force per rifarlo)", flush=True)
             print(f"OUTPUT_JSON={output_path}", flush=True)
             return
 
@@ -239,6 +247,9 @@ def main() -> None:
     if runner.warmup_frames > EVAL_WARMUP_FRAMES:
         print(f"ATTENZIONE: {runner.name} vuole {runner.warmup_frames} frame di riscaldamento", flush=True)
     use_nvdec = args.device == "cuda" and nvdec_available()
+    decoder_name = "ffmpeg"
+    if use_nvdec:
+        decoder_name = "nvdec"
     progress = Progress(total_frames)
 
     per_segment = []
@@ -302,7 +313,7 @@ def main() -> None:
             "action_t": list(ACTION_T),
             "traffic_convention": list(TRAFFIC_RIGHT_HAND),
             "desire": 0,
-            "decoder": "nvdec" if use_nvdec else "ffmpeg",
+            "decoder": decoder_name,
             "device": args.device,
         },
         "per_segment": per_segment,

@@ -84,7 +84,8 @@ def main(arguments: list[str] | None = None) -> int:
     # The site may go away (restart): its end must not stop the job.
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
-    update_job_file(job_file, {'pid': os.getpid(), 'pgid': os.getpgid(0)})
+    # From here a stop (SIGTERM) can no longer kill the wrapper: the site waits for this mark.
+    update_job_file(job_file, {'pid': os.getpid(), 'pgid': os.getpgid(0), 'wrapper_ready': time.time()})
     code = 0
     try:
         # Same stdout/stderr (the log) and same process group as this wrapper.

@@ -28,7 +28,7 @@ class RenderTest(unittest.TestCase):
         frame = np.full((760, 1344, 3), 80, dtype=np.uint8)
         original = frame.copy()
         plan = self.straight_plan()
-        scale = render.inset_scale(plan[None], np.ones((1, 33), dtype=bool))
+        scale = render.InsetZoom().update(plan)
         panel = render.draw_panel(
             frame, np.zeros(3), np.array(MICI_NARROW_K), "studente", render.GREEN, plan, plan, True, 1.234, 12.0, 3.5,
             scale,
@@ -48,12 +48,27 @@ class RenderTest(unittest.TestCase):
         render.draw_path(frame, pixels, render.WHITE, 5)
         render.draw_path(frame, np.zeros((1, 2)), render.WHITE, 5)
 
-    def test_inset_scale_from_the_truth(self):
+    def test_inset_zoom_grows_at_once_and_shrinks_slowly(self):
+        zoom = render.InsetZoom()
         plan = self.straight_plan()
         plan[:, 1] = np.linspace(0.0, 7.0, 33)
-        scale = render.inset_scale(plan[None], np.ones((1, 33), dtype=bool))
-        self.assertEqual(scale.forward_m, 150.0)
-        self.assertEqual(scale.lateral_m, 10.0)
+        scale = zoom.update(plan)
+        self.assertAlmostEqual(scale.forward_m, 165.0)
+        self.assertAlmostEqual(scale.lateral_m, 8.4)
+
+        # Stopped car: the next frame zooms in only by 3%.
+        scale = zoom.update(np.zeros((33, 3)))
+        self.assertAlmostEqual(scale.forward_m, 165.0 * 0.97)
+        self.assertAlmostEqual(scale.lateral_m, 8.4 * 0.97)
+
+    def test_inset_zoom_never_squeezes_the_lateral_axis(self):
+        turn = np.zeros((33, 3))
+        turn[:, 0] = np.linspace(0.0, 40.0, 33)
+        turn[:, 1] = np.linspace(0.0, 60.0, 33)
+        scale = render.InsetZoom().update(turn)
+        forward_metres_per_pixel = scale.forward_m / (render.INSET_HEIGHT - 68)
+        lateral_metres_per_pixel = scale.lateral_m / ((render.INSET_WIDTH - 28) / 2)
+        self.assertAlmostEqual(forward_metres_per_pixel, lateral_metres_per_pixel)
 
     def test_footer_has_even_height(self):
         for show_truth in (False, True):

@@ -155,7 +155,9 @@ class OnDeviceSupercombo(nn.Module):
             policy_outputs = getattr(self.model, name)(features, desire_pulse, traffic, action)
             for output_name, value in policy_outputs.items():
                 outputs[output_name] = value[:, -1]
-        # Same reduction as the distill loss on hidden_state (supervised/train.py).
+        # openpilot's driving_supercombo.onnx has room for 512 values of hidden_state: the 32 tokens
+        # are averaged (the distill loss does the same with the old 084747c7 teacher; with the
+        # queue-format teachers it compares the tokens one by one).
         outputs["hidden_state"] = features[:, -1].mean(dim=1)
 
         next_state_img_q = torch.cat((state_img_q[:, 1:], new_img[:, None]), dim=1)

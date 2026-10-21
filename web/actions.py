@@ -379,7 +379,8 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         if mode == 'continue':
             argv.append('--continue')
         elif mode == 'resume':
-            argv.append('--resume=outputs/supervised/' + clean['run'])
+            # The run name: train_supervised.sh finds it in outputs/supervised/.
+            argv.append('--resume=' + clean['run'])
         if wandb:
             argv.append('--wandb=' + wandb)
             summary = summary + ', wandb ' + wandb
@@ -416,8 +417,11 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         argv = ['helpers/compare_video.sh', '--segment=' + segment, '--reference=' + reference,
                 '--student=' + student, '--start=' + format_number(start),
                 '--duration=' + format_number(duration), '--speed=' + SPEED_TEXT[speed]]
+        # evaluation.compare draws the inset by default: both ways explicit, so the checkbox counts.
         if inset:
             argv.append('--inset')
+        else:
+            argv.append('--no-inset')
         if show_gt:
             argv.append('--show-gt')
         clean = {'segment': segment, 'reference': reference, 'student': student, 'start': start,
