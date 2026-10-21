@@ -45,7 +45,9 @@ DISTILL_GPU_LOCK_FILE="/run/lock/v100-gpu.lock"
 # ConnectTimeout: the comma is off or away (car on the road). ServerAlive: the comma goes away in
 # the middle of a copy; without it rsync would wait for minutes. Keepalives are answered by sshd,
 # so a long compile that prints nothing is not cut.
+# shellcheck disable=SC2034  # used by the scripts that source this file
 DISTILL_SSH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+# shellcheck disable=SC2034  # used by the scripts that source this file
 DISTILL_RSYNC_SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 
 # Run directly (helpers/common.sh --help): print the comment block above.
