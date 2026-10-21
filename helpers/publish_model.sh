@@ -19,7 +19,7 @@
 #      the comma's own driving_supercombo.onnx as reference for inputs and output layout.
 #      Skipped when an .onnx is given.
 #   2. PyTorch weights: the supercombo.pt (the one given, or the one next to the given .onnx) as
-#      training/releases/<nome>/supercombo.pt + manifest.json, with scripts/publish_training_weights.py.
+#      training/releases/<nome>/supercombo.pt + manifest.json, with helpers/publish_training_weights.py.
 #      Only the weights: a supercombo.training.pt (with the optimizer) is refused. A release with
 #      this name already on Hugging Face is left as it is when the weights are the same, refused
 #      when they differ. Skipped for --stock and for an .onnx without supercombo.pt next to it.
@@ -279,7 +279,7 @@ if [ -n "$weights" ]; then
   if [ "$stable" -eq 1 ]; then
     stable_args=(--stable)
   fi
-  (cd "$ROOT" && uv run python scripts/publish_training_weights.py --repo "$HF_REPO" --release "$slug" \
+  (cd "$ROOT" && uv run python -m helpers.publish_training_weights --repo "$HF_REPO" --release "$slug" \
     --model "supercombo=$weights" --stage-dir "$stage" "${stable_args[@]}") \
     || die "pesi PyTorch non pubblicabili (errore sopra)"
 else

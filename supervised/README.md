@@ -46,14 +46,14 @@ Every `--checkpoint-interval` steps (default 500) and on successful completion, 
 
 ### Publishing community fine-tuning weights
 
-`scripts/publish_training_weights.py` stages independently versioned, model-only `.pt` weights. **Dry run is the default**, and neither it nor training uploads private recordings or a full optimizer checkpoint:
+`helpers/publish_training_weights.py` stages independently versioned, model-only `.pt` weights. **Dry run is the default**, and neither it nor training uploads private recordings or a full optimizer checkpoint:
 
 ```bash
-python scripts/publish_training_weights.py --repo OWNER/MODEL_REPO \
+uv run python -m helpers.publish_training_weights --repo OWNER/MODEL_REPO \
   --release v1 --model supercombo=outputs/supervised/v1.pt
 
 # After validating the model and checking its redistribution rights:
-python scripts/publish_training_weights.py --repo OWNER/MODEL_REPO \
+uv run python -m helpers.publish_training_weights --repo OWNER/MODEL_REPO \
   --release v1 --model supercombo=outputs/supervised/v1.pt --upload --stable
 ```
 

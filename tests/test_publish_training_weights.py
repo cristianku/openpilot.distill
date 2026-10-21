@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/publish_training_weights.py"
-spec = importlib.util.spec_from_file_location("publish_training_weights", SCRIPT)
-publish = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(publish)
+from helpers import publish_training_weights as publish
 
 
 class StageReleaseTest(unittest.TestCase):
