@@ -82,7 +82,10 @@ def _correct_epochs(dog: AstroDog, initial_position: np.ndarray, epochs: list[np
     values = np.asarray([measurement.as_array() for measurement in corrected], dtype=np.float64).reshape(-1, 14)
     corrected_epochs.append(values)
   if not any(len(epoch) >= 4 for epoch in corrected_epochs):
-    raise RuntimeError("fewer than four corrected GPS satellites are available")
+    raise RuntimeError(
+      "GNSS correction discarded satellites: fewer than four corrected satellites remain in every epoch; "
+      "check orbit/ephemeris and IONEX availability and retry"
+    )
   return corrected_epochs
 
 
@@ -211,6 +214,8 @@ def localize_raw_gnss(
   if initial_position.shape != (3,) or not np.all(np.isfinite(initial_position)):
     raise UnusableSegment("the initial GPS position must be a finite ECEF vector")
   gps_epochs = [epoch[epoch[:, GNSSMeasurement.PRN] <= GPS_MAX_PRN] for epoch in epochs]
+  if not any(len(epoch) >= 4 for epoch in gps_epochs):
+    raise UnusableSegment("fewer than four GPS satellites in every epoch of the segment")
   ionex_used: dict[str, str] = {}
   dog_options = {
     "dgps": False,

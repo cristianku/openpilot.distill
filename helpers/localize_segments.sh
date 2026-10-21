@@ -24,7 +24,8 @@
 # Segments done before localizer.ionex existed have no record and are left alone.
 #
 # Unusable segments: when the localizer fails because of the data itself (car never above
-# 18 km/h, no GPS, no calibration yet, incomplete segment: exit code 3, see localizer/errors.py)
+# 18 km/h, no GPS fix, fewer than four raw GPS satellites in every epoch, no calibration yet,
+# incomplete segment: exit code 3, see localizer/errors.py)
 # the folder is moved to data_scartati/, so the training never sees it. The reason stays in
 # its localizer.failed. Network or GNSS map problems stay in data/ as "failed" and are retried.
 # To take a segment back: mv data_scartati/<name> data/

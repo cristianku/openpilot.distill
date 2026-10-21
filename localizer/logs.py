@@ -9,7 +9,6 @@ from openpilot.tools.lib.framereader import get_video_index
 from .errors import UnusableSegment
 from .localizer import LocalizationInput
 
-SUPPORTED_LOG = "only comma four (mici) segments with gpsLocationExternal are supported"
 CAMERA_STREAMS = {
   "fcamera": "narrowRoadEncodeIdx",
   "ecamera": "wideRoadEncodeIdx",
@@ -76,8 +75,14 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
       and str(event.initData.deviceType) != "mici"
     )
     wrong_gps = which == "gpsLocation" and event.valid and event.gpsLocation.hasFix
-    if wrong_device or wrong_gps:
-      raise UnusableSegment(SUPPORTED_LOG)
+    if wrong_device:
+      raise UnusableSegment(
+        f"only comma four (mici) segments are supported, this one is {event.initData.deviceType}"
+      )
+    if wrong_gps:
+      raise UnusableSegment(
+        "GPS comes from gpsLocation, not gpsLocationExternal: only comma four (mici) segments are supported"
+      )
     streams[which].append(event)
 
   device_types = {
@@ -89,8 +94,15 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
     event for event in streams["gpsLocationExternal"]
     if event.valid and event.gpsLocationExternal.hasFix
   ]
-  if device_types != {"mici"} or not gps_events:
-    raise UnusableSegment(SUPPORTED_LOG)
+  if not device_types:
+    raise UnusableSegment("no valid initData in the log")
+  if not streams["gpsLocationExternal"]:
+    raise UnusableSegment("no gpsLocationExternal messages in the log")
+  if not gps_events:
+    raise UnusableSegment(
+      f"no GPS fix in the segment ({len(streams['gpsLocationExternal'])} gpsLocationExternal messages, "
+      "none valid with hasFix)"
+    )
 
   missing = [
     name for name in (POSE_STREAM, CALIBRATION_STREAM, *CAMERA_STREAMS.values()) if not streams[name]
