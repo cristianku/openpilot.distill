@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Publish a trained model on Hugging Face (cristianku/openpilot-distill-models), so that sunnypilot
 # can offer it in the Models menu: export to ONNX, compile it on the comma for sunnypilot's
-# modeld_v2, upload ONNX + compiled model + the catalog driving_models.json in one commit.
+# modeld_v2, upload ONNX + compiled model + the catalog driving_models.json in one commit,
+# together with the PyTorch weights that helpers/train_supervised.sh --continue starts from.
 #
-# Usage: helpers/publish_model.sh [--host=<ip|nome>] [--name=<nome>] [--no-upload] [<supercombo.pt|file.onnx>]
+# Usage: helpers/publish_model.sh [--host=<ip|nome>] [--name=<nome>] [--stable] [--no-upload]
+#                                 [<supercombo.pt|file.onnx>]
 #        helpers/publish_model.sh [--host=<ip|nome>] [--name=<nome>] [--no-upload] --stock
 #   helpers/publish_model.sh                       (l'ultimo outputs/supervised/*/supercombo.pt)
 #   helpers/publish_model.sh outputs/supervised/2026-10-20_1855/supercombo.pt --name=prova
+#   helpers/publish_model.sh outputs/supervised/2026-10-20_1855/supercombo.pt --stable  (base di --continue)
 #   helpers/publish_model.sh outputs/supervised/2026-10-20_1855/driving_supercombo.onnx   (solo ricompila)
 #   helpers/publish_model.sh --stock               (il modello originale del comma, es. cd210-native)
 #   helpers/publish_model.sh --no-upload           (prepara tutto, non carica niente)
@@ -15,13 +18,19 @@
 #   1. export: supercombo.pt -> driving_supercombo.onnx next to it, with helpers/export_onnx.py and
 #      the comma's own driving_supercombo.onnx as reference for inputs and output layout.
 #      Skipped when an .onnx is given.
-#   2. compile on the comma (offroad) with sunnypilot's compile_modeld_v2.py: modeld_v2 loads only
+#   2. PyTorch weights: the supercombo.pt (the one given, or the one next to the given .onnx) as
+#      training/releases/<nome>/supercombo.pt + manifest.json, with scripts/publish_training_weights.py.
+#      Only the weights: a supercombo.training.pt (with the optimizer) is refused. A release with
+#      this name already on Hugging Face is left as it is when the weights are the same, refused
+#      when they differ. Skipped for --stock and for an .onnx without supercombo.pt next to it.
+#   3. compile on the comma (offroad) with sunnypilot's compile_modeld_v2.py: modeld_v2 loads only
 #      that format, not the pickle of compile_onnx.py. It uses the comma's tinygrad: after a
 #      sunnypilot update that changes tinygrad, run again with the .onnx.
-#   3. catalog: downloads driving_models.json from Hugging Face and adds/replaces this model
+#   4. catalog: downloads driving_models.json from Hugging Face and adds/replaces this model
 #      (helpers/model_catalog.py) with the sha256 of the compiled file.
-#   4. one Hugging Face commit with models/<nome>/driving_supercombo.onnx, models/<nome>/<file.pkl>
-#      and driving_models.json. Everything is also left in outputs/publish/<nome>/.
+#   5. one Hugging Face commit with models/<nome>/driving_supercombo.onnx, models/<nome>/<file.pkl>,
+#      driving_models.json and the training/ files of step 2. Everything is also left in
+#      outputs/publish/<nome>/.
 # Nothing is installed on the comma: the build folder there is removed at the end. The model shows
 # up in the Models menu only with the sunnypilot patch that reads this catalog.
 #
@@ -37,6 +46,9 @@
 #          tell problems of this compile path from problems of a trained model. Taken from the comma
 #          (or from /data/driving_supercombo.onnx.orig when a trained model was installed in its
 #          place); kept in outputs/stock/<nome>/.
+# --stable: also points training/stable.json to these PyTorch weights, so the next
+#           helpers/train_supervised.sh --continue starts from this model. Without it the pointer
+#           stays where it is: a model published only to try it in the car does not become the base.
 # --no-upload: stops before Hugging Face.
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # -h, --help: this help.
@@ -110,6 +122,7 @@ EOF
 name=""
 upload=1
 stock=0
+stable=0
 input=""
 
 while [ $# -gt 0 ]; do
@@ -119,6 +132,8 @@ while [ $# -gt 0 ]; do
     upload=0
   elif [ "$1" = "--stock" ]; then
     stock=1
+  elif [ "$1" = "--stable" ]; then
+    stable=1
   elif [ "$1" = "--name" ]; then
     shift
     name="${1:-}"
@@ -143,6 +158,7 @@ done
 
 if [ "$stock" -eq 1 ]; then
   [ -z "$input" ] || die "--stock non vuole un file: prende il modello originale dal comma"
+  [ "$stable" -eq 0 ] || die "--stable con --stock non ha senso: il modello del comma non ha pesi PyTorch"
 elif [ -z "$input" ]; then
   input="$(ls -t "$ROOT"/outputs/supervised/*/supercombo.pt 2>/dev/null | head -1 || true)"
   [ -n "$input" ] || die "nessun outputs/supervised/*/supercombo.pt: passa il .pt o l'.onnx"
@@ -215,6 +231,17 @@ fi
 input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
 run_dir="$(dirname "$input")"
 
+# PyTorch weights for helpers/train_supervised.sh --continue: the .pt given, or the one of the
+# run of the given .onnx. The comma's own model (--stock) has none.
+weights=""
+if [ "$stock" -eq 0 ] && [[ "$input" != *.onnx ]]; then
+  weights="$input"
+elif [ "$stock" -eq 0 ] && [ -f "$run_dir/supercombo.pt" ]; then
+  weights="$run_dir/supercombo.pt"
+fi
+[ -n "$weights" ] || [ "$stable" -eq 0 ] \
+  || die "--stable vuole i pesi PyTorch: passa il supercombo.pt (o un .onnx con supercombo.pt accanto)"
+
 if [ -z "$name" ]; then
   name="$(basename "$run_dir")"
 fi
@@ -243,9 +270,25 @@ else
 fi
 cp "$onnx" "$stage/models/$slug/driving_supercombo.onnx"
 
-# 2. Compile on the comma, flags as sunnypilot CI (TG_FLAGS_QCOM in .github/workflows/sunnypilot-build-model.yaml).
+# 2. PyTorch weights into $stage/training/, uploaded in the same commit. Before the compile:
+# a .pt that cannot be published (training checkpoint, release name taken by other weights)
+# stops here instead of after minutes on the comma.
+if [ -n "$weights" ]; then
+  echo "== 2. pesi PyTorch $weights -> training/releases/$slug/"
+  stable_args=()
+  if [ "$stable" -eq 1 ]; then
+    stable_args=(--stable)
+  fi
+  (cd "$ROOT" && uv run python scripts/publish_training_weights.py --repo "$HF_REPO" --release "$slug" \
+    --model "supercombo=$weights" --stage-dir "$stage" "${stable_args[@]}") \
+    || die "pesi PyTorch non pubblicabili (errore sopra)"
+else
+  echo "== 2. pesi PyTorch saltati: nessun supercombo.pt, --continue non potra' partire da questo modello"
+fi
+
+# 3. Compile on the comma, flags as sunnypilot CI (TG_FLAGS_QCOM in .github/workflows/sunnypilot-build-model.yaml).
 # No taskset: this comma has only CPUs 0-3 online. compile_modeld_v2 writes a temporary file in the cwd.
-echo "== 2. compilo sul comma (qualche minuto)"
+echo "== 3. compilo sul comma (qualche minuto)"
 ssh "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
 rsync -a "$onnx" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
 ssh "$COMMA_HOST" "cd $BUILD_DIR && env DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 OPENPILOT_HACKS=1 \
@@ -257,8 +300,8 @@ ssh "$COMMA_HOST" "rm -rf $BUILD_DIR"
 sha256="$(sha256sum "$stage/models/$slug/$pkl_name" | cut -d' ' -f1)"
 echo "Compilato: $pkl_name sha256 $sha256"
 
-# 3. Catalog: the one on Hugging Face plus this model.
-echo "== 3. catalogo"
+# 4. Catalog: the one on Hugging Face plus this model.
+echo "== 4. catalogo"
 catalog_url="https://huggingface.co/$HF_REPO/resolve/main/driving_models.json"
 http_code="$(curl -sS -L -w '%{http_code}' -o "$stage/driving_models.json" "$catalog_url" || true)"
 if [ "$http_code" = "404" ]; then
@@ -277,8 +320,13 @@ if [ "$upload" -eq 0 ]; then
   exit 0
 fi
 
-# 4. One commit with the model files and the new catalog.
-echo "== 4. carico su https://huggingface.co/$HF_REPO"
+# 5. One commit with the model files, the new catalog and the PyTorch weights.
+echo "== 5. carico su https://huggingface.co/$HF_REPO"
 (cd "$ROOT" && uv run hf upload "$HF_REPO" "$stage" . --commit-message "Publish model $name")
 
 echo "Pubblicato. Catalogo: $catalog_url"
+if [ -n "$weights" ] && [ "$stable" -eq 1 ]; then
+  echo "Pesi PyTorch: training/releases/$slug/supercombo.pt, ora stable: helpers/train_supervised.sh --continue parte da qui."
+elif [ -n "$weights" ]; then
+  echo "Pesi PyTorch: training/releases/$slug/supercombo.pt (stable non spostato: con --stable diventa la base di --continue)."
+fi

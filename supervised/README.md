@@ -58,3 +58,7 @@ python scripts/publish_training_weights.py --repo OWNER/MODEL_REPO \
 ```
 
 The optional `--stable` updates `training/stable.json` in the same Hugging Face commit as the new immutable release, retaining other model entries. `continue` requires that manifest to exist; it never silently falls back to random weights. Uploading and advancing `stable` is a separate, explicit action following testing. Check weights, training data rights and provenance before publishing.
+
+### From the helpers
+
+`helpers/publish_model.sh` publishes the `supercombo.pt` as `training/releases/<name>/supercombo.pt` in the same commit as the ONNX/compiled model (`--stage-dir` of the script above); `--stable` also moves `training/stable.json` to it. `helpers/train_supervised.sh --continue` then starts a new run from those weights, and `helpers/train_supervised.sh --resume=outputs/supervised/<run>` restarts an interrupted run from its `supercombo.training.pt`.
