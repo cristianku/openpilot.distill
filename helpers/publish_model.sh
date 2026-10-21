@@ -16,7 +16,8 @@
 #
 # Steps:
 #   1. export: supercombo.pt -> driving_supercombo.onnx next to it, with helpers/export_onnx.py and
-#      the comma's own driving_supercombo.onnx as reference for inputs and output layout.
+#      the comma's original driving_supercombo.onnx as reference for inputs and output layout
+#      (from /data/driving_supercombo.onnx.orig when a trained model is installed in its place).
 #      Skipped when an .onnx is given.
 #   2. PyTorch weights: the supercombo.pt (the one given, or the one next to the given .onnx) as
 #      training/releases/<nome>/supercombo.pt + manifest.json, with helpers/publish_training_weights.py.
@@ -83,8 +84,9 @@ add_comma_user() {
 
 # Prints "key=value" lines read from the comma: onroad state and where this openpilot keeps the
 # files used here (paths asked to git, the layout changes between versions). For --stock also the
-# name of the default model and the sha256 of the original model of this openpilot version (from
-# git, the onnx is in LFS), of the current one and of the backup.
+# name of the default model. To find the original model (--stock and the export reference): the
+# sha256 of the original of this openpilot version (from git, the onnx is in LFS), of the current
+# one and of the backup.
 read_comma_info() {
   ssh "$COMMA_HOST" bash -s -- "$BACKUP" <<'EOF'
 backup="$1"
@@ -136,9 +138,11 @@ while [ $# -gt 0 ]; do
     stable=1
   elif [ "$1" = "--name" ]; then
     shift
-    name="${1:-}"
+    [ -n "${1:-}" ] || die "--name vuole un nome"
+    name="$1"
   elif [[ "$1" == --name=* ]]; then
     name="${1#--name=}"
+    [ -n "$name" ] || die "--name vuole un nome"
   elif [ "$1" = "--host" ]; then
     shift
     [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
@@ -208,23 +212,27 @@ done <<< "$info"
 [ -n "$selector_version" ] || die "sul comma non trovo REQUIRED_JSON_VERSION (sunnypilot/models/helpers.py)"
 [ -n "$python" ] || die "sul comma non c'e' /usr/local/venv/bin/python3"
 
-# --stock: the original model of this openpilot version, from its place or from the backup.
+# The original model of this openpilot version, from its place or from the backup that
+# helpers/install_model_on_comma.sh keeps while a trained model is installed in its place.
+# Used by --stock and as the export reference.
+original_source=""
+if [ -n "$original" ] && [ "$current" = "$original" ]; then
+  original_source="$REMOTE_OP/$reference"
+elif [ -n "$original" ] && [ "$backup" = "$original" ]; then
+  original_source="$BACKUP"
+fi
+
+# --stock: the original model of this openpilot version.
 if [ "$stock" -eq 1 ]; then
   [ -n "$default_model" ] || die "sul comma non trovo DEFAULT_MODEL (sunnypilot/models/model_name.py)"
+  [ -n "$original_source" ] || die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP)"
   if [ -z "$name" ]; then
     name="$(echo "$default_model" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')-native"
   fi
-  if [ -n "$original" ] && [ "$current" = "$original" ]; then
-    stock_source="$REMOTE_OP/$reference"
-  elif [ -n "$original" ] && [ "$backup" = "$original" ]; then
-    stock_source="$BACKUP"
-  else
-    die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP)"
-  fi
   input="$ROOT/outputs/stock/$name/driving_supercombo.onnx"
   mkdir -p "$(dirname "$input")"
-  rsync -a "$COMMA_HOST:$stock_source" "$input"
-  echo "Originale del comma: $default_model ($stock_source)"
+  rsync -a "$COMMA_HOST:$original_source" "$input"
+  echo "Originale del comma: $default_model ($original_source)"
 fi
 
 [ -f "$input" ] || die "$input non esiste"
@@ -263,8 +271,10 @@ if [[ "$input" == *.onnx ]]; then
   echo "== 1. export saltato, uso $onnx"
 else
   onnx="$run_dir/driving_supercombo.onnx"
-  echo "== 1. export $input -> $onnx"
-  rsync -a "$COMMA_HOST:$REMOTE_OP/$reference" "$stage/reference.onnx"
+  [ -n "$original_source" ] \
+    || die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP): serve come riferimento per l'export"
+  echo "== 1. export $input -> $onnx (riferimento $original_source)"
+  rsync -a "$COMMA_HOST:$original_source" "$stage/reference.onnx"
   (cd "$ROOT" && uv run python -m helpers.export_onnx "$input" --reference "$stage/reference.onnx" --output "$onnx")
   rm -f "$stage/reference.onnx"
 fi
