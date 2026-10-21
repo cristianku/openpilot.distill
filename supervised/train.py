@@ -176,6 +176,9 @@ def main() -> None:
             parser.error("invalid resume step")
         raw_model.load_state_dict(model_weights(saved), strict=True)
         optimizer.load_state_dict(saved["optimizer"])
+        # Checkpoints written before the fp16 scaler was saved restart from its default scale.
+        if "scaler" in saved:
+            scaler.load_state_dict(saved["scaler"])
         if is_main:
             print(f"resume local training from step {starting_step}/{args.steps}")
 
@@ -196,6 +199,7 @@ def main() -> None:
                 "teacher": args.teacher,
                 "state_dict": {key: value.detach().cpu() for key, value in raw_model.state_dict().items()},
                 "optimizer": optimizer.state_dict(),
+                "scaler": scaler.state_dict(),
             }, checkpoint_path)
 
     if is_main and args.mode != "resume":
