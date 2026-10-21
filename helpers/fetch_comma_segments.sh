@@ -39,10 +39,19 @@
 # with agent forwarding (ssh -A) so the Mac's key is used.
 #
 # Without a route (automatic): every route on the comma with a segment written on or
-# after --since (default 2026-10-20, date of the segment folder on the comma) is checked
-# for dashcam mode (carParams.dashcamOnly in the qlog of its first segment, via
-# helpers/dashcam_mode.py); the dashcam ones are downloaded with --strip-ends.
-# Already downloaded files are skipped by rsync, so it can be run again after every drive.
+# after --since (default 2026-10-20) is checked for dashcam mode. Before fetching,
+# exclude whole trips lasting less than 300 seconds (measured from the very first
+# to the very last qlog, INCLUDING the first/last two segments). Then discard
+# first two + last two segments and any remaining segment whose rlog contains
+# carState.gearShifter=reverse. Missing/unreadable logs are skipped, never assumed safe.
+# Explicit route/segment selection remains manual and does not apply these automatic filters.
+# The script is kept BYTE-IDENTICAL in openpilot.distill/v100 and
+# sunnypilot.speedlimits/main. In speedlimits its data links use raw/routes/<route>/<segment>/
+# rather than Distill's hex segment folders, while both share COMMA_VIDEOS_DIR.
+# Requires a Python log reader: Distill uses uv run python; speedlimits can use
+# its .venv with [log-reader], NNSLR_OPENPILOT_ROOT and NNSLR_OPENDBC_ROOT.
+# COMMA_FETCH_PYTHON can override the Python interpreter (speedlimits).
+# Already downloaded files are skipped by rsync, so it can be run after every drive.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
@@ -62,9 +71,30 @@ set -euo pipefail
 COMMA_HOST="${COMMA_HOST:-comma}"
 REMOTE_DIR="/data/media/0/realdata"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DATA_DIR="$ROOT/data"
+# Distill's localizer wants flat hex folders; speedlimits' reader wants raw/routes.
+if [ -d "$ROOT/src/nnslr_tools" ]; then
+  DATA_LAYOUT="speedlimits"
+  DATA_DIR="${NNSLR_DATA_ROOT:-$ROOT/data}/raw/routes"
+else
+  DATA_LAYOUT="distill"
+  DATA_DIR="$ROOT/data"
+fi
 VIDEOS_DIR="${COMMA_VIDEOS_DIR:-$(dirname "$ROOT")/comma-videos}"
 FILES="rlog.zst fcamera.hevc ecamera.hevc"
+
+if [ -n "${COMMA_FETCH_PYTHON:-}" ]; then
+  FETCH_PYTHON=("$COMMA_FETCH_PYTHON")
+elif [ "$DATA_LAYOUT" = "distill" ]; then
+  FETCH_PYTHON=(uv run python)
+elif [ -x "$ROOT/.venv/bin/python" ]; then
+  FETCH_PYTHON=("$ROOT/.venv/bin/python")
+else
+  FETCH_PYTHON=(python3)
+fi
+
+inspect_log() {
+  (cd "$ROOT" && "${FETCH_PYTHON[@]}" "$ROOT/helpers/comma_fetch_log.py" "$@")
+}
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -236,9 +266,13 @@ download_segments() {
     src="$REMOTE_DIR/$route--$s"
     shared="$VIDEOS_DIR/$route--$s"
     name="$route_hex$(printf %02d "$s")"
-    dst="$DATA_DIR/$name"
-    # Discarded by localize_segments.sh (data unusable for the localizer): not again.
-    if [ -d "$ROOT/data_scartati/$name" ]; then
+    if [ "$DATA_LAYOUT" = "speedlimits" ]; then
+      dst="$DATA_DIR/$route/$s"
+    else
+      dst="$DATA_DIR/$name"
+    fi
+    # Discarded by localize_segments.sh (Distill only): not again.
+    if [ "$DATA_LAYOUT" = "distill" ] && [ -d "$ROOT/data_scartati/$name" ]; then
       echo "== $route--$s: scartato dal localizer (data_scartati/$name), salto"
       continue
     fi
@@ -327,15 +361,68 @@ find_dashcam_routes() {
     return 0
   fi
 
-  # Lines "<qlog_dir>/<route>.qlog.zst dashcam|normal|unknown".
-  states="$(cd "$ROOT" && uv run python -m helpers.dashcam_mode $qlogs)"
-  while read -r qlog state; do
-    r="$(basename "$qlog" .qlog.zst)"
+  for r in $recent_routes; do
+    if [ ! -f "$qlog_dir/$r.qlog.zst" ]; then
+      continue
+    fi
+    state="$(inspect_log dashcam "$qlog_dir/$r.qlog.zst")" || state="unknown"
     echo "  $r: $state"
     if [ "$state" = "dashcam" ]; then
       dashcam_routes="$dashcam_routes $r"
     fi
-  done <<< "$states"
+  done
+}
+
+# Called in automatic mode after select_segments: $found contains ALL indices
+# including the four that are removed from the training set.
+route_is_long_enough() {
+  local first_segment="" last_segment="" s seconds temp
+  for s in $found; do
+    [ -n "$first_segment" ] || first_segment="$s"
+    last_segment="$s"
+  done
+  [ -n "$first_segment" ] || return 1
+
+  temp="$(mktemp -d)"
+  # Both endpoints are needed to measure true duration; number of folders alone
+  # would wrongly accept a five-segment route ending before 5 minutes.
+  if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$first_segment/qlog.zst" "$temp/first.zst" \
+       || ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$last_segment/qlog.zst" "$temp/last.zst"; then
+    echo "$route: qlog iniziale/finale non disponibili, giro escluso" >&2
+    rm -rf "$temp"
+    return 1
+  fi
+  seconds="$(inspect_log duration "$temp/first.zst" "$temp/last.zst")" || seconds="unknown"
+  rm -rf "$temp"
+  if [[ "$seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "${seconds%%.*}" -ge 300 ]; then
+    echo "$route: durata completa ${seconds}s (>= 300s), ok"
+    return 0
+  fi
+  echo "$route: durata ${seconds}s (< 300s o sconosciuta), giro escluso"
+  return 1
+}
+
+# Scan full rlogs, not just qlogs: a single reverse gear event rejects the
+# entire segment. We never include an unreadable segment in automatic mode.
+filter_reverse_segments() {
+  local temp s state remaining=""
+  temp="$(mktemp -d)"
+  for s in $segments; do
+    if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$temp/$s.rlog.zst"; then
+      echo "$route--$s: rlog non disponibile, segmento escluso" >&2
+      continue
+    fi
+    state="$(inspect_log reverse "$temp/$s.rlog.zst")" || state="unknown"
+    case "$state" in
+      forward) remaining="$remaining $s" ;;
+      reverse) echo "$route--$s: retromarcia rilevata, segmento escluso" ;;
+      *) echo "$route--$s: retromarcia non verificabile, segmento escluso" >&2 ;;
+    esac
+    rm -f "$temp/$s.rlog.zst"
+  done
+  rm -rf "$temp"
+  segments="$remaining"
+  [ -n "$segments" ]
 }
 
 while [ $# -gt 0 ]; do
@@ -401,7 +488,11 @@ elif [ -z "$segments" ]; then
   add_skip_list "0,1,last-1,last"
 fi
 
-# Absolute path: the links in data/ must keep working when a folder is moved to data_scartati/.
+if [ "$DATA_LAYOUT" = "speedlimits" ] && [ "$run_localizer" -eq 1 ]; then
+  die "--localizer e' disponibile solo in openpilot.distill"
+fi
+
+# Absolute path: Distill links must keep working when a folder moves to data_scartati/.
 mkdir -p "$VIDEOS_DIR" || die "non riesco a creare la cartella comune $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
 
@@ -421,8 +512,10 @@ if [ "$auto_mode" -eq 1 ]; then
     segments=""
     skip=""
     add_skip_list "0,1,last-1,last"
-    if select_segments; then
+    if select_segments && route_is_long_enough && filter_reverse_segments; then
       download_segments
+    else
+      echo "$route: nessun segmento idoneo da scaricare"
     fi
   done
 else
