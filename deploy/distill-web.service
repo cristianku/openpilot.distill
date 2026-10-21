@@ -1,0 +1,38 @@
+# systemd unit of distill-web, the control site of openpilot.distill (python -m web.server).
+#
+# Do not copy this file by hand: deploy/install_web_service.sh fills in the two placeholders
+# (the path of the clone and the token file, /etc/distill-web.env) and installs the result as
+# /etc/systemd/system/distill-web.service.
+#
+# User=root is acceptable on the dedicated LXC: the jobs need root's ssh key for the comma,
+# ~/.cache/huggingface/token for the publish and the GPU. To run it as another account: create it,
+# give it the clone (chown -R <user>: <repo>), set User= and Group= below and the PATH to its
+# ~/.local/bin, run the install script again and make the token file readable by that account only.
+
+[Unit]
+Description=distill-web: sito di controllo di openpilot.distill
+Documentation=file://__DISTILL_REPO__/docs/INSTALL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__DISTILL_REPO__
+# DISTILL_WEB_TOKEN comes from this file, mode 600.
+EnvironmentFile=__DISTILL_ENV_FILE__
+# uv lives in /root/.local/bin: without it every helper the site starts fails on "uv run".
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__DISTILL_REPO__/.venv/bin/python -m web.server --host 0.0.0.0 --port 8766
+Restart=on-failure
+RestartSec=5
+# Stop/restart only the web server: a training or a fetch started from the site keeps running and
+# the site finds it again after the restart (helpers/update.sh restarts the service).
+KillMode=process
+NoNewPrivileges=yes
+# A private /tmp is deleted on restart under the jobs that survive it (laika, torchrun use /tmp).
+PrivateTmp=no
+
+[Install]
+WantedBy=multi-user.target

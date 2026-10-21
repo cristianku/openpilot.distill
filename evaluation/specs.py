@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+# Always fullmatch(): with match() the "$" also accepts a trailing newline ("stock\n").
 SPEC_PATTERN = re.compile(r"^(stock|teacher|logged|run:[A-Za-z0-9_.-]+|hf:[a-z0-9_]+)$")
 SEGMENT_PATTERN = re.compile(r"^[0-9a-f]{20}$")
 
@@ -79,7 +80,7 @@ class ResolvedModel:
 
 def parse_model_spec(text: str) -> ModelSpec:
     """Validate a spec string; ValueError with an Italian message when it is not one."""
-    if not isinstance(text, str) or not SPEC_PATTERN.match(text):
+    if not isinstance(text, str) or not SPEC_PATTERN.fullmatch(text):
         raise ValueError(f"modello '{text}' non valido: usa stock, teacher, logged, run:<cartella> o hf:<nome>")
     if ":" not in text:
         return ModelSpec(text=text, kind=text, value="")
@@ -91,7 +92,7 @@ def parse_model_spec(text: str) -> ModelSpec:
 
 
 def validate_segment_name(name: str) -> str:
-    if not isinstance(name, str) or not SEGMENT_PATTERN.match(name):
+    if not isinstance(name, str) or not SEGMENT_PATTERN.fullmatch(name):
         raise ValueError(f"segmento '{name}' non valido: 20 caratteri esadecimali (es. 00000126f84ad127f010)")
     return name
 

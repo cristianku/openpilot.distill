@@ -255,7 +255,8 @@ def run_param(repo: Path, value, need: str) -> str:
     checkpoint = folder / 'supercombo.training.pt'
     if need == 'final':
         if not final.is_file() or not inside(folder, final):
-            raise WebError(409, 'run_not_finished', 'Il run ' + value + ' non ha ancora supercombo.pt (non e\' finito).')
+            raise WebError(409, 'run_not_finished',
+                           'Il run ' + value + ' non ha ancora supercombo.pt (non e\' finito).')
     elif need == 'model':
         has_final = final.is_file() and inside(folder, final)
         has_checkpoint = checkpoint.is_file() and inside(folder, checkpoint)

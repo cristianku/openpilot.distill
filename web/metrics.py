@@ -14,7 +14,7 @@ import json
 import math
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from web.common import RUN_RE, inside
@@ -313,7 +313,7 @@ def time_from_name(name: str) -> float | None:
             moment = datetime.strptime(name, pattern)
         except ValueError:
             continue
-        return moment.replace(tzinfo=timezone.utc).timestamp()
+        return moment.replace(tzinfo=UTC).timestamp()
     return None
 
 

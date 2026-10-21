@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import re
 import shutil
@@ -75,7 +76,8 @@ def process_command_line(pid: int) -> str | None:
             return None
         return raw.replace(b'\0', b' ').decode('utf-8', 'replace').strip()
     try:
-        result = subprocess.run(['ps', '-o', 'command=', '-p', str(pid)], capture_output=True, text=True,
+        # -ww: the whole command line, never cut to a terminal width.
+        result = subprocess.run(['ps', '-ww', '-o', 'command=', '-p', str(pid)], capture_output=True, text=True,
                                 timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -151,7 +153,7 @@ def _number(text: str):
         value = float(text)
     except ValueError:
         return None
-    if value != value:
+    if not math.isfinite(value):
         return None
     return value
 
@@ -426,7 +428,8 @@ def _first_number(data: dict, keys: tuple[str, ...]):
         if isinstance(value, bool):
             continue
         if isinstance(value, int) or isinstance(value, float):
-            if value == value:
+            # nan/inf cannot go into the JSON of the page.
+            if math.isfinite(value):
                 return float(value)
     return None
 

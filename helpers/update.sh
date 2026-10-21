@@ -69,6 +69,7 @@ if command -v flock > /dev/null 2>&1 && [ -d "$(dirname "$DISTILL_GPU_LOCK_FILE"
 fi
 
 cd "$ROOT"
+git rev-parse --is-inside-work-tree > /dev/null 2>&1 || die "$ROOT non e' un clone git: niente da aggiornare"
 
 # 1. git pull.
 modified="$(git status --porcelain --untracked-files=no)"
