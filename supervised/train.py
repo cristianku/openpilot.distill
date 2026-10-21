@@ -16,7 +16,7 @@ import wandb
 
 from .checkpoints import atomic_torch_save, model_weights, stable_weights, torch_load
 from .dataset import Comma1MDataset, DatasetConfig, prefill_supercombo_batch
-from .model import Supercombo
+from .model import Supercombo, SupercomboConfig, VisionConfig
 from .model_for_inference import InputQueues, ORTSupercomboForInference
 
 
@@ -146,7 +146,7 @@ def main() -> None:
         )
     )
 
-    raw_model = Supercombo().to(device)
+    raw_model = Supercombo(SupercomboConfig(vision=VisionConfig(pretrained=args.mode == "fresh"))).to(device)
     model = DDP(raw_model, device_ids=[local_rank]) if distributed else raw_model
     optimizer = torch.optim.AdamW(
         raw_model.parameters(),
