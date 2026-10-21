@@ -1,9 +1,12 @@
 import argparse
+import sys
 from pathlib import Path
 
 from openpilot.tools.lib.logreader import LogReader
 from safetensors.numpy import save_file
 
+from .errors import UNUSABLE_SEGMENT_EXIT_CODE, UnusableSegment
+from .ionex import write_ionex_file
 from .localizer import localize
 from .logs import FRAME_INFO_METADATA, read_log
 
@@ -18,15 +21,24 @@ def main() -> None:
   args = parser.parse_args()
   data_dir = PROJECT_ROOT / "data" / args.segment
 
-  localization_input, output_frame_info = read_log(
-    LogReader(str(data_dir / "rlog.zst"), sort_by_time=True, only_union_types=True), data_dir
-  )
-  output_localization = localize(localization_input)
+  try:
+    localization_input, output_frame_info = read_log(
+      LogReader(str(data_dir / "rlog.zst"), sort_by_time=True, only_union_types=True), data_dir
+    )
+    output_localization, ionex_used = localize(localization_input)
+  except UnusableSegment as error:
+    # The data of the segment cannot be localized: a dedicated exit code tells
+    # helpers/localize_segments.sh to move it out of data/.
+    print(f"UnusableSegment: {error}", file=sys.stderr)
+    sys.exit(UNUSABLE_SEGMENT_EXIT_CODE)
 
   save_file(output_localization, data_dir / "localizer.safetensors", metadata={"schema_version": "1"})
   save_file(output_frame_info, data_dir / "frame_info.safetensors", metadata=FRAME_INFO_METADATA)
+  # Which ionosphere map was used (P1D/RAP/FIN): localize_segments.sh refines it later.
+  write_ionex_file(data_dir, ionex_used)
 
   print(f"segment={args.segment}")
+  print(f"ionex={ionex_used}")
   print(f"states={output_localization['states'].shape} frame_states={output_localization['frame_states'].shape}")
   print(f"outputs={data_dir}")
 

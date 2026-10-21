@@ -6,9 +6,9 @@ import laika.raw_gnss as raw
 import numpy as np
 from openpilot.tools.lib.framereader import get_video_index
 
+from .errors import UnusableSegment
 from .localizer import LocalizationInput
 
-SUPPORTED_LOG = "only comma four (mici) segments with gpsLocationExternal are supported"
 CAMERA_STREAMS = {
   "fcamera": "narrowRoadEncodeIdx",
   "ecamera": "wideRoadEncodeIdx",
@@ -45,14 +45,14 @@ def _frame_info(streams, device_type: int, video_dir: Path) -> dict[str, np.ndar
              for event, index in zip(events, indexes, strict=True))
       or not np.array_equal(segment_ids, np.arange(len(indexes)))
     ):
-      raise RuntimeError(f"{stream} must contain a complete fullHEVC segment")
+      raise UnusableSegment(f"{stream} must contain a complete fullHEVC segment")
 
     video = get_video_index(str(video_dir / f"{camera}.hevc"))
     video_index = video["index"]
     video_stream = video["probe"]["streams"][0]
     prefix = video["global_prefix"]
     if len(video_index) != len(indexes) + 1:
-      raise RuntimeError(f"{camera}.hevc does not match {stream}")
+      raise UnusableSegment(f"{camera}.hevc does not match {stream}")
     codec = np.asarray([video_stream["codec_name"]], dtype="<U4").view(np.uint8).reshape(1, -1)
     frame_info.update({
       f"{camera}/codec_name": codec.copy(),
@@ -75,8 +75,14 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
       and str(event.initData.deviceType) != "mici"
     )
     wrong_gps = which == "gpsLocation" and event.valid and event.gpsLocation.hasFix
-    if wrong_device or wrong_gps:
-      raise ValueError(SUPPORTED_LOG)
+    if wrong_device:
+      raise UnusableSegment(
+        f"only comma four (mici) segments are supported, this one is {event.initData.deviceType}"
+      )
+    if wrong_gps:
+      raise UnusableSegment(
+        "GPS comes from gpsLocation, not gpsLocationExternal: only comma four (mici) segments are supported"
+      )
     streams[which].append(event)
 
   device_types = {
@@ -88,14 +94,21 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
     event for event in streams["gpsLocationExternal"]
     if event.valid and event.gpsLocationExternal.hasFix
   ]
-  if device_types != {"mici"} or not gps_events:
-    raise ValueError(SUPPORTED_LOG)
+  if not device_types:
+    raise UnusableSegment("no valid initData in the log")
+  if not streams["gpsLocationExternal"]:
+    raise UnusableSegment("no gpsLocationExternal messages in the log")
+  if not gps_events:
+    raise UnusableSegment(
+      f"no GPS fix in the segment ({len(streams['gpsLocationExternal'])} gpsLocationExternal messages, "
+      "none valid with hasFix)"
+    )
 
   missing = [
     name for name in (POSE_STREAM, CALIBRATION_STREAM, *CAMERA_STREAMS.values()) if not streams[name]
   ]
   if missing:
-    raise RuntimeError(f"missing required log streams: {', '.join(missing)}")
+    raise UnusableSegment(f"missing required log streams: {', '.join(missing)}")
 
   device_motion = []
   for event in streams[POSE_STREAM]:
@@ -113,14 +126,14 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
         _xyz(pose.angularVelocityDevice),
       ))
   if not device_motion:
-    raise RuntimeError(f"no valid {POSE_STREAM} stream found in the log")
+    raise UnusableSegment(f"no valid {POSE_STREAM} stream found in the log")
 
   gps_positions = []
   for event in gps_events:
     gps = event.gpsLocationExternal
     position = [gps.latitude, gps.longitude, gps.altitude]
     if not np.all(np.isfinite(position)):
-      raise RuntimeError("gpsLocationExternal requires a finite position")
+      raise UnusableSegment("gpsLocationExternal requires a finite position")
     gps_positions.append(position)
 
   raw_gnss_t = []
@@ -132,7 +145,7 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
       raw_gnss_t.append(event.logMonoTime * 1e-9)
       raw_gnss_measurements.append(raw.array_from_normal_meas(measurement))
   if not raw_gnss_measurements:
-    raise RuntimeError("no raw UBlox measurement reports found in the log")
+    raise UnusableSegment("no raw UBlox measurement reports found in the log")
 
   calibration_values = wide_values = None
   last_valid_blocks = None
@@ -153,7 +166,7 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
       wide_values = np.asarray(wide, dtype=np.float64)
       last_valid_blocks = calibration.validBlocks
   if calibration_values is None:
-    raise RuntimeError(f"no stable calibrated {CALIBRATION_STREAM} for the segment")
+    raise UnusableSegment(f"no stable calibrated {CALIBRATION_STREAM} for the segment")
 
   device_type = next(
     event.initData.deviceType.raw

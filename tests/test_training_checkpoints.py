@@ -10,10 +10,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-try:
-    from nnslr_tools import checkpoints
-except ImportError:
-    from supervised import checkpoints
+from supervised import checkpoints
 
 
 class CheckpointHelpersTest(unittest.TestCase):

@@ -310,10 +310,38 @@ class ORTSupercomboForInference(SupercomboForInference):
     def _session(model: str | Path | object, providers: list[object] | None):
         if hasattr(model, "run"):
             return model
+        import os
+        import sys
+
         import onnxruntime as ort
 
+        # Only real errors from onnxruntime: its warnings are noise here (e.g. 1.29 prints
+        # "No registered plugin EP device found" and then loads CUDA anyway). Whether CUDA
+        # really loaded is checked below instead.
+        ort.set_default_logger_severity(3)
+        options = ort.SessionOptions()
+        # An explicit thread count stops onnxruntime from pinning its threads to cores, which an
+        # LXC container refuses ("pthread_setaffinity_np failed" once per thread).
+        if hasattr(os, "sched_getaffinity"):
+            options.intra_op_num_threads = len(os.sched_getaffinity(0))
+        else:
+            options.intra_op_num_threads = os.cpu_count() or 1
+
         source = model.SerializeToString() if hasattr(model, "SerializeToString") else str(model)
-        return ort.InferenceSession(source, providers=providers)
+        session = ort.InferenceSession(source, sess_options=options, providers=providers)
+
+        cuda_wanted = False
+        for provider in providers or []:
+            if provider == "CUDAExecutionProvider":
+                cuda_wanted = True
+            elif isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider":
+                cuda_wanted = True
+        if cuda_wanted and "CUDAExecutionProvider" not in session.get_providers():
+            print(
+                "WARNING: onnxruntime could not load CUDA, this model runs on CPU (very slow, lots of RAM)",
+                file=sys.stderr,
+            )
+        return session
 
     @classmethod
     def from_supercombo(

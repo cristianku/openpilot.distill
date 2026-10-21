@@ -46,15 +46,19 @@ Every `--checkpoint-interval` steps (default 500) and on successful completion, 
 
 ### Publishing community fine-tuning weights
 
-`scripts/publish_training_weights.py` stages independently versioned, model-only `.pt` weights. **Dry run is the default**, and neither it nor training uploads private recordings or a full optimizer checkpoint:
+`helpers/publish_training_weights.py` stages independently versioned, model-only `.pt` weights. **Dry run is the default**, and neither it nor training uploads private recordings or a full optimizer checkpoint:
 
 ```bash
-python scripts/publish_training_weights.py --repo OWNER/MODEL_REPO \
+uv run python -m helpers.publish_training_weights --repo OWNER/MODEL_REPO \
   --release v1 --model supercombo=outputs/supervised/v1.pt
 
 # After validating the model and checking its redistribution rights:
-python scripts/publish_training_weights.py --repo OWNER/MODEL_REPO \
+uv run python -m helpers.publish_training_weights --repo OWNER/MODEL_REPO \
   --release v1 --model supercombo=outputs/supervised/v1.pt --upload --stable
 ```
 
 The optional `--stable` updates `training/stable.json` in the same Hugging Face commit as the new immutable release, retaining other model entries. `continue` requires that manifest to exist; it never silently falls back to random weights. Uploading and advancing `stable` is a separate, explicit action following testing. Check weights, training data rights and provenance before publishing.
+
+### From the helpers
+
+`helpers/publish_model.sh` publishes the `supercombo.pt` as `training/releases/<name>/supercombo.pt` in the same commit as the ONNX/compiled model (`--stage-dir` of the script above); `--stable` also moves `training/stable.json` to it. `helpers/train_supervised.sh --continue` then starts a new run from those weights, and `helpers/train_supervised.sh --resume=outputs/supervised/<run>` restarts an interrupted run from its `supercombo.training.pt`.
