@@ -14,6 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 import wandb
 
+from .checkpoints import atomic_torch_save, model_weights, stable_weights, torch_load
 from .dataset import Comma1MDataset, DatasetConfig, prefill_supercombo_batch
 from .model import Supercombo
 from .model_for_inference import InputQueues, ORTSupercomboForInference
@@ -64,7 +65,14 @@ def main() -> None:
         default=str(ROOT / "models/big_driving_supercombo.onnx"),
         help="teacher Supercombo ONNX model",
     )
-    parser.add_argument("--steps", type=int, default=1, help="training steps")
+    parser.add_argument("--steps", type=int, default=1, help="total training steps for this run")
+    parser.add_argument("--mode", choices=("fresh", "continue", "resume"), default="fresh",
+                        help="fresh: new model; continue: stable HF weights; resume: local interrupted run")
+    parser.add_argument("--hf-repo", default=os.environ.get("HF_REPO"),
+                        help="Hugging Face model repository containing training/stable.json (continue only)")
+    parser.add_argument("--hf-revision", default="main", help="Hugging Face revision for stable manifest")
+    parser.add_argument("--checkpoint-interval", type=int, default=500,
+                        help="write resumable state every N steps (in addition to final state)")
     parser.add_argument("--batch-size", type=int, default=8, help="samples per training batch")
     parser.add_argument("--workers", type=int, default=0, help="data-loader workers")
     parser.add_argument("--learning-rate", type=float, default=3e-4, help="AdamW learning rate")
@@ -82,6 +90,16 @@ def main() -> None:
         help="autocast dtype; auto picks fp16 on GPUs without native bf16 (e.g. Tesla V100)",
     )
     args = parser.parse_args()
+    if args.steps < 1 or args.checkpoint_interval < 1:
+        parser.error("--steps and --checkpoint-interval must be positive")
+    if args.mode == "continue" and not args.hf_repo:
+        parser.error("continue requires --hf-repo or HF_REPO")
+    checkpoint_path = args.output.with_suffix(".training.pt")
+    if args.mode == "resume":
+        if not checkpoint_path.is_file():
+            parser.error(f"no resumable training checkpoint: {checkpoint_path}")
+    elif checkpoint_path.exists() or args.output.exists():
+        parser.error(f"output already exists; choose a new --output (found {checkpoint_path} or {args.output})")
 
     distributed = "RANK" in os.environ
     rank = int(os.environ.get("RANK", 0))
@@ -137,10 +155,49 @@ def main() -> None:
         fused=True,
     )
 
+    starting_step = 0
+    if args.mode == "continue":
+        saved, origin = stable_weights(args.hf_repo, "supercombo", revision=args.hf_revision)
+        raw_model.load_state_dict(model_weights(saved), strict=True)
+        if is_main:
+            print(f"continue from verified stable Hugging Face weights: {origin}")
+    elif args.mode == "resume":
+        saved = torch_load(checkpoint_path)
+        if saved.get("task") != "supercombo" or saved.get("format_version") != 1:
+            parser.error("invalid supercombo training checkpoint")
+        if saved.get("status") == "completed":
+            parser.error("training already completed; use --mode continue for a new run")
+        if saved.get("status") != "in_progress" or saved.get("total_steps") != args.steps:
+            parser.error("resume requires an interrupted run with the same --steps")
+        if saved.get("teacher") != args.teacher or saved.get("dataset") != args.dataset:
+            parser.error("resume requires the same --teacher and --dataset")
+        starting_step = saved["step"]
+        if not isinstance(starting_step, int) or not 0 <= starting_step < args.steps:
+            parser.error("invalid resume step")
+        raw_model.load_state_dict(model_weights(saved), strict=True)
+        optimizer.load_state_dict(saved["optimizer"])
+        if is_main:
+            print(f"resume local training from step {starting_step}/{args.steps}")
+
     if is_main:
         print(f"student: {sum(p.numel() for p in raw_model.parameters()) / 1e6:.1f}M parameters")
         print(f"precision: {precision}")
         args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_training_state(step: int, status: str) -> None:
+        if is_main:
+            atomic_torch_save({
+                "format_version": 1,
+                "task": "supercombo",
+                "status": status,
+                "step": step,
+                "total_steps": args.steps,
+                "dataset": args.dataset,
+                "teacher": args.teacher,
+                "state_dict": {key: value.detach().cpu() for key, value in raw_model.state_dict().items()},
+                "optimizer": optimizer.state_dict(),
+            }, checkpoint_path)
+
     teacher = ORTSupercomboForInference.from_supercombo(
         args.teacher,
         providers=[("CUDAExecutionProvider", {"device_id": local_rank}), "CPUExecutionProvider"],
@@ -157,7 +214,7 @@ def main() -> None:
         else None
     )
 
-    for step in range(1, args.steps + 1):
+    for step in range(starting_step + 1, args.steps + 1):
         step_start = time.perf_counter()
         inputs, targets = next(batch_iterator)
         while not len(inputs["img"]):
@@ -211,12 +268,15 @@ def main() -> None:
                 f"time={metrics['step_time']:.2f}s"
             )
             run.log(metrics, step=step)
+            if step % args.checkpoint_interval == 0:
+                save_training_state(step, "in_progress")
 
     if is_main:
-        torch.save(
+        atomic_torch_save(
             {name: value.detach().cpu() for name, value in raw_model.state_dict().items()},
             args.output,
         )
+        save_training_state(args.steps, "completed")
         run.finish()
     if distributed:
         dist.destroy_process_group()
