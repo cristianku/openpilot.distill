@@ -420,22 +420,30 @@ route_is_long_enough() {
 # Scan full rlogs, not just qlogs: a single reverse gear event rejects the
 # entire segment. We never include an unreadable segment in automatic mode.
 filter_reverse_segments() {
-  local temp s state remaining=""
-  temp="$(mktemp -d)"
+  local s state remaining="" shared logfile
   for s in $segments; do
-    if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$temp/$s.rlog.zst"; then
-      echo "$route--$s: rlog non disponibile, segmento escluso" >&2
+    shared="$VIDEOS_DIR/$route--$s"
+    logfile="$shared/rlog.zst"
+    if [ -L "$shared" ] || [ -L "$logfile" ]; then
+      echo "$route--$s: link non sicuro nella cartella comune, segmento escluso" >&2
       continue
     fi
-    state="$(inspect_log reverse "$temp/$s.rlog.zst")" || state="unknown"
+    # Cache the full log once in COMMA_VIDEOS_DIR: repeated automatic fetches
+    # do not transfer the same (potentially large) rlog on every run.
+    if [ ! -s "$logfile" ]; then
+      mkdir -p "$shared"
+      if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
+        echo "$route--$s: rlog non disponibile, segmento escluso" >&2
+        continue
+      fi
+    fi
+    state="$(inspect_log reverse "$logfile")" || state="unknown"
     case "$state" in
       forward) remaining="$remaining $s" ;;
       reverse) echo "$route--$s: retromarcia rilevata, segmento escluso" ;;
       *) echo "$route--$s: retromarcia non verificabile, segmento escluso" >&2 ;;
     esac
-    rm -f "$temp/$s.rlog.zst"
   done
-  rm -rf "$temp"
   segments="$remaining"
   [ -n "$segments" ]
 }
