@@ -6,6 +6,8 @@ With a comma four, and a few logged segments, distill the openpilot driving mode
 
 Drop your segments video files and rlogs into the `data/` folder.
 
+From your own comma, `helpers/fetch_comma_segments.sh` downloads them (`--help` for the options). The raw files (`rlog.zst`, `fcamera.hevc`, `ecamera.hevc`) are stored once in a shared folder, `COMMA_VIDEOS_DIR` (default `comma-videos` next to this repo), one `<route>--<segment>/` folder per segment as on the comma, so other projects can use the same files. `data/<segment>/` only holds absolute links to them, plus the localizer outputs.
+
 You don't have a comma four, no problem! You can still download videos and labels from https://huggingface.co/datasets/commaai/comma1M and train your own driving models.
 
 ## Step 1: Run a simple localization pipeline

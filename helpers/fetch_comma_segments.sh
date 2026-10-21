@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Copy selected segments of a route straight from the comma device into data/,
-# renamed to the hex folder name the dataset expects; with --localizer it also runs the localizer on each.
+# Copy selected segments of a route straight from the comma device into the shared folder of the
+# comma videos, and link them into data/ under the hex folder name the dataset expects;
+# with --localizer it also runs the localizer on each.
 #
 # Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] [--since=<AAAA-MM-GG>] [--localizer]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
@@ -19,7 +20,16 @@
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 0 1 2
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 2-9
 #
-# Folder name: route without dashes + segment number on two digits
+# Where the files go: rlog.zst, fcamera.hevc and ecamera.hevc are downloaded once into the
+# shared folder (COMMA_VIDEOS_DIR, default comma-videos next to this repo, e.g. /root/comma-videos),
+# one folder per segment as on the comma; sunnypilot.speedlimits uses the same files.
+# data/<folder>/ only has absolute links to them, plus what the localizer writes (never shared).
+#   <COMMA_VIDEOS_DIR>/0000011c--8152ba83cf--3/fcamera.hevc        (the file)
+#   data/0000011c8152ba83cf03/fcamera.hevc -> the file above       (the link)
+# A file still downloaded straight into data/ (old layout) is moved into the shared folder and
+# replaced by the link; if the shared folder already has a different copy it stops, nothing deleted.
+#
+# Folder name in data/: route without dashes + segment number on two digits
 #   0000011c--8152ba83cf--3  ->  data/0000011c8152ba83cf03
 # (supervised/dataset.py does int(segment, 16): dashes would crash it.)
 #
@@ -43,6 +53,7 @@
 # -h, --help: this help.
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
+#      COMMA_VIDEOS_DIR (default comma-videos next to this repo), shared folder of the comma files
 
 set -euo pipefail
 
@@ -50,9 +61,51 @@ COMMA_HOST="${COMMA_HOST:-comma}"
 REMOTE_DIR="/data/media/0/realdata"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="$ROOT/data"
+VIDEOS_DIR="${COMMA_VIDEOS_DIR:-$(dirname "$ROOT")/comma-videos}"
 FILES="rlog.zst fcamera.hevc ecamera.hevc"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# Size in bytes of a file.
+file_size() {
+  wc -c < "$1" | tr -d ' '
+}
+
+# Old layout: $1 (in data/) still a regular file downloaded there. It goes to $2 (shared
+# folder): moved when the shared folder does not have it yet, removed when the shared copy
+# is identical. A shared copy that differs is left to the user: stop, nothing deleted.
+move_old_file() {
+  local old="$1"
+  local shared="$2"
+  if [ -L "$old" ] || [ ! -e "$old" ]; then
+    return 0
+  fi
+  if [ ! -f "$old" ]; then
+    die "$old non e' ne' un file ne' un link: controlla a mano"
+  fi
+  if [ ! -e "$shared" ]; then
+    mv "$old" "$shared"
+    echo "  $(basename "$old"): spostato da data/ nella cartella comune"
+  elif cmp -s "$old" "$shared"; then
+    rm "$old"
+    echo "  $(basename "$old"): uguale a quello nella cartella comune, tolto da data/"
+  else
+    die "$old ($(file_size "$old") byte) e $shared ($(file_size "$shared") byte) sono diversi: non cancello niente, controlla a mano"
+  fi
+}
+
+# Makes $2 (in data/) an absolute link to $1 (in the shared folder).
+link_file() {
+  local target="$1"
+  local link="$2"
+  if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then
+    return 0
+  fi
+  if [ -L "$link" ]; then
+    rm "$link"
+  fi
+  ln -s "$target" "$link"
+}
 
 # Prints the comment block at the top of this file.
 usage() {
@@ -169,11 +222,13 @@ select_segments() {
   echo "$route sul comma: $(echo $found). Salto:$skip_numbers. Scarico:$segments"
 }
 
-# Copies $segments of $route into data/, then runs the localizer when asked.
+# Copies $segments of $route into the shared folder, links them into data/, then runs the
+# localizer when asked.
 download_segments() {
   route_hex="$(echo "$route" | tr -d '-')"
   for s in $segments; do
     src="$REMOTE_DIR/$route--$s"
+    shared="$VIDEOS_DIR/$route--$s"
     name="$route_hex$(printf %02d "$s")"
     dst="$DATA_DIR/$name"
     # Discarded by localize_segments.sh (data unusable for the localizer): not again.
@@ -181,7 +236,7 @@ download_segments() {
       echo "== $route--$s: scartato dal localizer (data_scartati/$name), salto"
       continue
     fi
-    echo "== $route--$s -> data/$name"
+    echo "== $route--$s -> $shared (link in data/$name)"
 
     for f in $FILES; do
       if ! ssh "$COMMA_HOST" "test -f $src/$f"; then
@@ -189,9 +244,11 @@ download_segments() {
       fi
     done
 
-    mkdir -p "$dst"
+    mkdir -p "$shared" "$dst"
     for f in $FILES; do
-      rsync -avP "$COMMA_HOST:$src/$f" "$dst/"
+      move_old_file "$dst/$f" "$shared/$f"
+      rsync -avP "$COMMA_HOST:$src/$f" "$shared/"
+      link_file "$shared/$f" "$dst/$f"
     done
 
     if [ "$run_localizer" -eq 1 ]; then
@@ -328,6 +385,10 @@ elif [ -z "$segments" ]; then
   # No segments and no --skip: the default is --strip-ends.
   add_skip_list "0,1,last-1,last"
 fi
+
+# Absolute path: the links in data/ must keep working when a folder is moved to data_scartati/.
+mkdir -p "$VIDEOS_DIR" || die "non riesco a creare la cartella comune $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
+VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
 
 ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
   || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
