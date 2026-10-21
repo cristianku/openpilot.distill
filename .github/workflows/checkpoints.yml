@@ -15,4 +15,4 @@ jobs:
       - name: Check Python syntax (no GPU dependencies)
         run: python -m compileall -q supervised scripts/publish_training_weights.py tests
       - name: Check stable manifests and training checkpoint helpers
-        run: python -m unittest discover -s tests -p test_training_checkpoints.py -v
+        run: python -m unittest discover -s tests -p "test_*.py" -v
