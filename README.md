@@ -8,6 +8,37 @@ Drop your segments video files and rlogs into the `data/` folder.
 
 You don't have a comma four, no problem! You can still download videos and labels from https://huggingface.co/datasets/commaai/comma1M and train your own driving models.
 
+## Get started and find the helpers
+
+Use [`uv`](https://docs.astral.sh/uv/) and Python **3.12.3 or newer, but below 3.13**, as specified in [`pyproject.toml`](pyproject.toml). From a clean checkout:
+
+```bash
+git clone https://github.com/cristianku/openpilot.distill.git
+cd openpilot.distill
+uv sync
+```
+
+For a **supported comma four** segment, prepare `data/<segment-id>/fcamera.hevc`, `data/<segment-id>/ecamera.hevc` and `data/<segment-id>/rlog.zst`, then:
+
+```bash
+uv run python -m localizer.run --segment <segment-id>
+```
+
+This produces `frame_info.safetensors` (including the video byte-offset indices) and `localizer.safetensors` in the segment folder. Local localization currently requires a complete comma-four (`mici`) full-HEVC log with external GNSS; other device/log formats are not silently supported.
+
+| Where | What to run or read |
+| --- | --- |
+| [`localizer/README.md`](localizer/README.md) | Prepare localization and frame metadata for a recorded segment. |
+| [`helpers/README.md`](helpers/README.md) | **Python video/calibration helpers**, function signatures, NVDEC requirements, runnable examples and troubleshooting. These are imports, not executable scripts. |
+| [`supervised/README.md`](supervised/README.md) | Download the ONNX teacher model and start supervised training with `uv run torchrun ...`. |
+| [`rl/README.md`](rl/README.md) | Start the world-model server and optional simulator/post-training workflows. |
+
+The `supervised/dataset.py` loader already imports the functions in `helpers/video_helpers.py`; you do **not** run the helper module as a separate training stage. Training/video decoding requires a compatible NVIDIA GPU/driver (NVDEC), not just a Python virtual environment. For external data such as comma1M, follow the relevant dataset preparation steps; raw video alone is insufficient for the supervised loader.
+
+### Training repo vs. installable Sunnypilot branch
+
+This repository contains Distill training and experiment code. The separate [`openpilot_scripts`](https://github.com/cristianku/openpilot_scripts) automation repository maintains the [`OP-update-distilled`](https://github.com/cristianku/openpilot_scripts/blob/main/OP-update-distilled/SKILL.md) skill: it syncs `cristianku/sunnypilot:distilled` from the official Sunnypilot master, then mirrors the same commit to `cristianku/openpilot:distilled` for installation. **That skill does not train or export this repository's weights.** Verify the source branch, installable mirror and model publication separately before claiming a model is available on-device.
+
 ## Step 1: Run a simple localization pipeline
 
 Run the localizer.
