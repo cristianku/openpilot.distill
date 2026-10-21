@@ -1,0 +1,18 @@
+name: checkpoint helpers
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check Python syntax (no GPU dependencies)
+        run: python -m compileall -q supervised scripts/publish_training_weights.py tests
+      - name: Check stable manifests and training checkpoint helpers
+        run: python -m unittest discover -s tests -p test_training_checkpoints.py -v
