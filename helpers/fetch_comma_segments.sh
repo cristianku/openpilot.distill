@@ -56,7 +56,7 @@
 # --skip: every segment of the route found on the comma, except the listed ones.
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
 #         and "last-N" (N segments before the last one).
-# --strip-ends: same as --skip=0,1,last-1,last (first two and last two). No segment list needed.
+# --strip-ends: skip first two and last two AVAILABLE segment folders (even with gaps). No list needed.
 #               It is the default when neither segments nor --skip are given.
 # --localizer: also run the localizer on each segment (off by default: helpers/localize_segments.sh
 #              does it later and redoes it when a better ionosphere map comes out).
@@ -186,7 +186,7 @@ add_skip_list() {
   [ -n "$1" ] || die "--skip vuole una lista (es. --skip=0,1,last)"
   IFS=',' read -r -a items <<< "$1"
   for item in "${items[@]}"; do
-    if [ "$item" = "last" ]; then
+    if [ "$item" = "first" ] || [ "$item" = "second" ] || [ "$item" = "second_last" ] || [ "$item" = "last" ]; then
       skip="$skip last"
     elif [[ "$item" =~ ^last-[0-9]+$ ]]; then
       skip="$skip $item"
@@ -222,15 +222,30 @@ select_segments() {
     return 1
   fi
 
+  first_segment=""
+  second_segment=""
+  second_last_segment=""
   last_segment=""
   for s in $found; do
+    if [ -z "$first_segment" ]; then
+      first_segment="$s"
+    elif [ -z "$second_segment" ]; then
+      second_segment="$s"
+    fi
+    second_last_segment="$last_segment"
     last_segment="$s"
   done
 
   # "last" becomes the highest segment found on the comma, "last-N" that minus N.
   skip_numbers=""
   for k in $skip; do
-    if [ "$k" = "last" ]; then
+    if [ "$k" = "first" ]; then
+      skip_numbers="$skip_numbers $first_segment"
+    elif [ "$k" = "second" ]; then
+      [ -z "$second_segment" ] || skip_numbers="$skip_numbers $second_segment"
+    elif [ "$k" = "second_last" ]; then
+      [ -z "$second_last_segment" ] || skip_numbers="$skip_numbers $second_last_segment"
+    elif [ "$k" = "last" ]; then
       skip_numbers="$skip_numbers $last_segment"
     elif [[ "$k" =~ ^last-[0-9]+$ ]]; then
       skip_numbers="$skip_numbers $((last_segment - ${k#last-}))"
@@ -276,7 +291,7 @@ download_segments() {
       echo "== $route--$s: scartato dal localizer (data_scartati/$name), salto"
       continue
     fi
-    echo "== $route--$s -> $shared (link in data/$name)"
+    echo "== $route--$s -> $shared (link in $dst)"
 
     for f in $FILES; do
       if ! ssh "$COMMA_HOST" "test -f $src/$f"; then
@@ -440,7 +455,7 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--no-localizer" ]; then
     run_localizer=0
   elif [ "$1" = "--strip-ends" ]; then
-    add_skip_list "0,1,last-1,last"
+    add_skip_list "first,second,second_last,last"
   elif [ "$1" = "--skip" ]; then
     shift
     add_skip_list "${1:-}"
@@ -485,7 +500,7 @@ elif [ "$skip_mode" -eq 1 ]; then
   [ -z "$segments" ] || die "--skip/--strip-ends non va insieme a una lista di segmenti"
 elif [ -z "$segments" ]; then
   # No segments and no --skip: the default is --strip-ends.
-  add_skip_list "0,1,last-1,last"
+  add_skip_list "first,second,second_last,last"
 fi
 
 if [ "$DATA_LAYOUT" = "speedlimits" ] && [ "$run_localizer" -eq 1 ]; then
@@ -511,7 +526,7 @@ if [ "$auto_mode" -eq 1 ]; then
     route="$r"
     segments=""
     skip=""
-    add_skip_list "0,1,last-1,last"
+    add_skip_list "first,second,second_last,last"
     if select_segments && route_is_long_enough && filter_reverse_segments; then
       download_segments
     else
