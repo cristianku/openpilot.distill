@@ -27,8 +27,9 @@
 #   3. compile on the comma (offroad) with sunnypilot's compile_modeld_v2.py: modeld_v2 loads only
 #      that format, not the pickle of compile_onnx.py. It uses the comma's tinygrad: after a
 #      sunnypilot update that changes tinygrad, run again with the .onnx.
-#   4. catalog: downloads driving_models.json from Hugging Face and adds/replaces this model
-#      (helpers/model_catalog.py) with the sha256 of the compiled file.
+#   4. catalog: a new driving_models.json with only this model (helpers/model_catalog.py) and the
+#      sha256 of the compiled file. The models published before (--stock included) leave the menu,
+#      their files stay on Hugging Face.
 #   5. one Hugging Face commit with models/<nome>/driving_supercombo.onnx, models/<nome>/<file.pkl>,
 #      driving_models.json and the training/ files of step 2. Everything is also left in
 #      outputs/publish/<nome>/.
@@ -310,16 +311,9 @@ ssh "$COMMA_HOST" "rm -rf $BUILD_DIR"
 sha256="$(sha256sum "$stage/models/$slug/$pkl_name" | cut -d' ' -f1)"
 echo "Compilato: $pkl_name sha256 $sha256"
 
-# 4. Catalog: the one on Hugging Face plus this model.
+# 4. Catalog: only this model, the menu shows the last one published.
 echo "== 4. catalogo"
 catalog_url="https://huggingface.co/$HF_REPO/resolve/main/driving_models.json"
-http_code="$(curl -sS -L -w '%{http_code}' -o "$stage/driving_models.json" "$catalog_url" || true)"
-if [ "$http_code" = "404" ]; then
-  rm -f "$stage/driving_models.json"
-  echo "Nessun catalogo su $HF_REPO: ne creo uno nuovo"
-elif [ "$http_code" != "200" ]; then
-  die "non riesco a scaricare $catalog_url (HTTP $http_code)"
-fi
 (cd "$ROOT" && uv run python -m helpers.model_catalog "$stage/driving_models.json" \
   --name "$name" --file-name "$pkl_name" \
   --url "https://huggingface.co/$HF_REPO/resolve/main/models/$slug/$pkl_name" \

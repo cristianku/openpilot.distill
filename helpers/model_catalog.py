@@ -1,13 +1,13 @@
-"""Add or replace one model in the catalog that the sunnypilot Models menu reads.
+"""Write the catalog that the sunnypilot Models menu reads, with only this model.
 
 Usage: uv run python -m helpers.model_catalog <driving_models.json> --name <nome> --file-name <file.pkl>
            --url <url> --sha256 <hex> --selector-version <n> [--tinygrad-ref <sha>]
 
 Same layout as sunnypilot's driving_models_vNN.json ({"bundles": [...]}), parsed by the same ModelParser
-(openpilot/sunnypilot/models/fetcher.py). A missing file starts a new catalog; the bundle with the same
-ref (distill-<name>) is replaced in place, keeping its index.
-Republishing a name that is selected on a comma changes its sha256: sunnypilot resets that comma to
-Default at the next start, select it again.
+(openpilot/sunnypilot/models/fetcher.py). The file is overwritten: the models published before leave the
+menu, their files stay on Hugging Face.
+When the model selected on a comma leaves the catalog, or is republished with the same name (new sha256),
+sunnypilot resets that comma to Default at the next start: select the new one.
 
 The values follow the default model CD210: generation 12, 20 Hz, runner tinygrad, and the smoothing of
 stock openpilot (lat .0, long .3; without "long" modeld_v2 uses 0).
@@ -59,7 +59,7 @@ def make_bundle(args: argparse.Namespace, index: int) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("catalog", type=Path, help="driving_models.json to update (created if missing)")
+    parser.add_argument("catalog", type=Path, help="driving_models.json to write (overwritten)")
     parser.add_argument("--name", required=True, help="model name: letters, digits, _ . -")
     parser.add_argument("--file-name", required=True, help="compiled file name in /data/media/0/models")
     parser.add_argument("--url", required=True, help="download url of the compiled file")
@@ -74,29 +74,9 @@ def main() -> None:
     if not re.fullmatch(r"[0-9a-f]{64}", args.sha256):
         raise SystemExit(f"sha256 non valido: {args.sha256}")
 
-    if args.catalog.exists():
-        catalog = json.loads(args.catalog.read_text())
-    else:
-        catalog = {"bundles": []}
-
-    ref = f"distill-{args.name}"
-    position = None
-    highest = FIRST_INDEX - 1
-    for number, bundle in enumerate(catalog["bundles"]):
-        if bundle["ref"] == ref:
-            position = number
-        if int(bundle["index"]) > highest:
-            highest = int(bundle["index"])
-
-    if position is None:
-        catalog["bundles"].append(make_bundle(args, highest + 1))
-        print(f"catalogo: aggiunto {ref}")
-    else:
-        index = int(catalog["bundles"][position]["index"])
-        catalog["bundles"][position] = make_bundle(args, index)
-        print(f"catalogo: sostituito {ref}")
-
+    catalog = {"bundles": [make_bundle(args, FIRST_INDEX)]}
     args.catalog.write_text(json.dumps(catalog, indent=2) + "\n")
+    print(f"catalogo: solo distill-{args.name}")
 
 
 if __name__ == "__main__":
