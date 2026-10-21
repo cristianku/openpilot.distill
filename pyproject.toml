@@ -30,6 +30,16 @@ dependencies = [
   "onnxruntime-gpu",
 ]
 
+[project.optional-dependencies]
+# Tesla V100 / Volta (sm_70): `uv sync --extra v100`, and then `uv run --extra v100 ...` (a plain
+# `uv run` re-syncs the default CUDA 13 stack, which has no sm_70 kernels). The helpers do this
+# through DISTILL_UV_EXTRA=v100 in the repo .env (helpers/common.sh).
+# Same packages as the base dependencies, taken from CUDA 12 builds that still ship sm_70 kernels
+# (see [tool.uv.sources]). A package must be listed here for its extra-scoped source to apply.
+v100 = ["torch==2.13.0", "torchvision", "onnxruntime-gpu"]
+# The default CUDA 13 stack. Empty: it only exists because a conflict set needs two entries.
+cuda13 = []
+
 [dependency-groups]
 dev = [
   "ruff>=0.11",
@@ -37,9 +47,14 @@ dev = [
 
 [tool.uv]
 package = false
-# torch cu126 pins nvidia-cuda-runtime-cu12==12.6.77, but onnxruntime-gpu 1.29 (CUDA 12 feed) needs
-# libcudart >= 12.8 (cudaLibraryGetKernel & co.): with 12.6 its CUDA provider does not load and the
-# teacher runs on CPU (~300 s/step, >12 GB RAM). A 12.9 runtime still runs torch cu126 and Volta.
+# Without this conflict uv merges the extra-scoped sources into the default resolution and every
+# Linux user silently gets the cu126 builds. With it, plain `uv sync` resolves exactly like upstream.
+conflicts = [[{ extra = "v100" }, { extra = "cuda13" }]]
+# Only reached through the v100 extra: torch cu126 pins nvidia-cuda-runtime-cu12==12.6.77, but
+# onnxruntime-gpu 1.29 (CUDA 12 feed) needs libcudart >= 12.8 (cudaLibraryGetKernel & co.): with 12.6
+# its CUDA provider does not load and the teacher runs on CPU (~300 s/step, >12 GB RAM). A 12.9 runtime
+# still runs torch cu126 and Volta. The default CUDA 13 stack has no *-cu12 package, so this does not
+# change it. Do not scope it with `; extra == 'v100'`: uv then drops cudart altogether (broken env).
 override-dependencies = ["nvidia-cuda-runtime-cu12==12.9.79"]
 
 # Tesla V100 (Volta, sm_70): the default PyPI torch is built for CUDA 13, which dropped Volta.
@@ -55,10 +70,11 @@ name = "onnxruntime-cuda-12"
 url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"
 explicit = true
 
+# Applied only with the v100 extra, on Linux.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
-torchvision = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
-onnxruntime-gpu = [{ index = "onnxruntime-cuda-12", marker = "sys_platform == 'linux'" }]
+torch = [{ index = "pytorch-cu126", extra = "v100", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu126", extra = "v100", marker = "sys_platform == 'linux'" }]
+onnxruntime-gpu = [{ index = "onnxruntime-cuda-12", extra = "v100", marker = "sys_platform == 'linux'" }]
 
 [tool.ruff]
 line-length = 120

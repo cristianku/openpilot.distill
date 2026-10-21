@@ -7,3 +7,7 @@ scripts/
 data/
 models/.cache/
 models/model.fp8_nvfp4.torchpackage
+.env
+data_scartati/
+worldmodel-inspected/
+worldmodel-inspection.txt
