@@ -143,10 +143,10 @@ def check_segments() -> int:
         raise TaskError('videos missing in the shared folder of the segments (disk not mounted or segment '
                         'removed), the training would stop: ' + ' '.join(broken))
     if total == 0:
-        raise TaskError('no segment in data/: download them from the comma first (Data)')
+        raise TaskError('no segment in data/: download them from the comma first (Preprocessing)')
     if missing:
         raise TaskError('segments not localized, they would stop the training: ' + ' '.join(missing)
-                        + '. Localize them first (Data).')
+                        + '. Localize them first (Preprocessing).')
     return total
 
 

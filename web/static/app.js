@@ -2,14 +2,14 @@
 (function () {
   'use strict';
 
-  const TABS = ['status', 'data', 'training', 'evaluation', 'compare', 'publish', 'comma', 'jobs'];
+  const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'comma', 'jobs'];
   const JOB_PILL = {running: 'run', ok: 'ok', failed: 'bad', stopped: 'todo', unknown: 'muted'};
   const RUN_STATE = {running: ['running', 'run'], finished: ['finished', 'ok'], interrupted: ['interrupted', 'todo']};
   const SEGMENT_STATE = {localized: ['localized', 'ok'], failed: ['failed', 'bad'], todo: ['to localize', 'todo']};
   const CHART_TITLES = {'loss': 'loss', 'gt': 'gt (your driving)', 'distill': 'distill (the teacher)',
     'gt/plan': 'gt/plan (path)', 'grad_norm': 'grad_norm', 'step_time': 'time per step (s)'};
   // How often (ms) the data of each tab is read again while the tab is open.
-  const TAB_PERIOD = {data: 15000, training: 10000, evaluation: 30000, compare: 30000, publish: 15000,
+  const TAB_PERIOD = {preprocessing: 15000, training: 10000, evaluation: 30000, compare: 30000, publish: 15000,
     comma: 0, jobs: 0, status: 0};
   const STATUS_PERIOD = 4000;
   const SMOOTHING = 0.85;
@@ -159,6 +159,8 @@
       if (name.slice(0, slash) === 'training') openRun = decodeURIComponent(name.slice(slash + 1)) || null;
       name = name.slice(0, slash);
     }
+    // The tab was called Data before: old bookmarks still land on it.
+    if (name === 'data') name = 'preprocessing';
     if (TABS.indexOf(name) < 0) name = 'status';
     currentTab = name;
     for (const tab of TABS) {
@@ -188,7 +190,7 @@
 
   // Which data each tab needs.
   function needs(tab) {
-    if (tab === 'data') return ['segments', 'drives'];
+    if (tab === 'preprocessing') return ['segments', 'drives'];
     if (tab === 'training') return ['runs', 'hf'];
     if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
     if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos', 'drives'];
@@ -231,7 +233,7 @@
   }
 
   function renderTab() {
-    if (currentTab === 'data') renderData();
+    if (currentTab === 'preprocessing') renderData();
     else if (currentTab === 'training') renderTraining();
     else if (currentTab === 'evaluation') renderEval();
     else if (currentTab === 'compare') renderCompare();
@@ -677,7 +679,7 @@
     if (status.test_actions) setAction('btn-selftest', 'selftest');
   }
 
-  // -- Data ------------------------------------------------------------------------------------
+  // -- Preprocessing ---------------------------------------------------------------------------
   // GPS map quality of the localized segments (web/status.py map_of).
   const GPS_ORDER = ['final', 'rapid', 'prediction', 'unknown'];
   const GPS_LABEL = {final: 'final', rapid: 'rapid', prediction: 'prediction', unknown: 'not recorded'};
@@ -797,7 +799,7 @@
       box.appendChild(card);
     });
     if (data.drives && data.drives.pending) {
-      setTimeout(() => { if (currentTab === 'data') load('drives').then(() => renderRoutes(routes)); }, 4000);
+      setTimeout(() => { if (currentTab === 'preprocessing') load('drives').then(() => renderRoutes(routes)); }, 4000);
     }
   }
 
@@ -2114,7 +2116,7 @@
   byId('info-close').addEventListener('click', closeSheet);
   byId('sheet-backdrop').addEventListener('click', closeSheet);
 
-  // -- explanations of the Data numbers, in a sheet ---------------------------------------------
+  // -- explanations of the Preprocessing numbers, in a sheet ---------------------------------------------
   function openInfo(title, sub, build) {
     byId('info-title').textContent = title;
     byId('info-sub').textContent = sub;
