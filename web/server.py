@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from web import actions as actions_module
 from web.actions import ACTIONS, TEST_ACTIONS, build_job, script_missing, slug_of
 from web.comma import CommaMonitor
+from web.drives import DriveIndex
 from web.common import CODE_ROOT, RUN_RE, WebError, comma_host, hf_repo, short_text
 from web.hf import HfCatalog
 from web.jobs import JOB_ID_RE, JobManager, describe
@@ -209,6 +210,7 @@ class App:
             hf = HfCatalog(hf_repo(repo))
         self.hf = hf
         self.runs = RunReader(repo)
+        self.drives = DriveIndex(repo)
         self._machine = Cache(3.0)
 
     # -- access ------------------------------------------------------------------------------------
@@ -566,6 +568,18 @@ def make_handler(app: App):
             match = re.fullmatch(r'/video/([^/]+)', path)
             if match:
                 self._send_video(match.group(1))
+                return
+            if path == '/api/drives':
+                self._json(200, app.drives.drives())
+                return
+            match = re.fullmatch(r'/thumb/([0-9a-f]{20})\.jpg', path)
+            if match:
+                thumbnail = app.drives.thumbnail(match.group(1))
+                if thumbnail is None:
+                    self._problem(404, 'not_found', 'No picture for this segment.', False)
+                    return
+                self._send(200, 'image/jpeg', thumbnail.read_bytes(),
+                           extra=[('Cache-Control', 'private, max-age=86400')])
                 return
             if path.startswith('/api/run/') or re.fullmatch(r'/api/jobs/[^/]+/stop', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)

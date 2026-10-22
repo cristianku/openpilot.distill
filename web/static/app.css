@@ -290,7 +290,10 @@ font-size:11px;font-weight:700;vertical-align:2px}
 .gps-legend li{display:flex;align-items:center;gap:6px}
 .gps-legend strong{font-variant-numeric:tabular-nums}
 .gps-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
-.gps-callout{margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--todo-soft);color:var(--fg);font-size:14px}
+.gps-callout{margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--todo-soft);color:var(--fg);font-size:14px;
+display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.gps-callout span{flex:1;min-width:200px}
+.gps-callout .btn{flex:none}
 
 /* the picker as a dropdown that slides open */
 .picker{position:relative}
@@ -332,9 +335,63 @@ animation-delay:calc(var(--i) * 70ms + .1s)}
 animation-delay:calc(var(--i) * 25ms)}
 .dot-label{flex:none;width:96px;font-family:var(--font-data);font-size:11.5px;color:var(--muted)}
 .dot-lane{position:relative;flex:1;height:24px;border-bottom:1px solid var(--surface-2)}
-.dot{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;transform:translate(-50%,-50%);
+.plot-dot{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;transform:translate(-50%,-50%);
 box-shadow:0 0 0 2px var(--surface)}
 .dot-span{position:absolute;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
 .dot-axis{position:relative;height:20px;margin-left:106px;font-size:11px;color:var(--muted)}
 .dot-axis span{position:absolute;transform:translateX(-50%)}
 @media (prefers-reduced-motion:reduce){.rank-row,.rank-fill,.dot-row{animation:none}}
+
+/* drive picker: outings with a strip of segment cards */
+.drive-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:6px}
+.switch{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted);cursor:pointer}
+.switch input{position:absolute;opacity:0;pointer-events:none}
+.switch-track{width:40px;height:24px;border-radius:12px;background:var(--line);position:relative;transition:background .2s;flex:none}
+.switch-track::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;
+box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+.switch input:checked + .switch-track{background:var(--ok)}
+.switch input:checked + .switch-track::after{transform:translateX(16px)}
+.switch input:focus-visible + .switch-track{outline:3px solid var(--focus);outline-offset:2px}
+.drive-picker{display:flex;flex-direction:column;gap:18px;margin:8px 0 16px}
+.drive-group{animation:picker-in .4s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 60ms)}
+.drive-group-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 2px 8px;font-size:14px}
+.drive-group-head strong{font-size:16px}
+.drive-group-head span{color:var(--muted)}
+.drive-strip{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 8px;
+-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.drive-strip::-webkit-scrollbar{display:none}
+.drive-card{appearance:none;flex:none;width:220px;scroll-snap-align:start;border:2px solid transparent;border-radius:16px;
+background:var(--surface-2);padding:0;overflow:hidden;cursor:pointer;text-align:left;color:var(--fg);font:inherit;
+transition:transform .2s ease,border-color .2s,box-shadow .2s}
+.drive-card:active{transform:scale(.97)}
+.drive-card[aria-checked="true"]{border-color:var(--rev);box-shadow:0 0 0 4px var(--rev-soft)}
+.drive-picture{position:relative;aspect-ratio:384/242;background:var(--line)}
+.drive-picture img{display:block;width:100%;height:100%;object-fit:cover}
+.drive-time{position:absolute;left:8px;bottom:8px;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;
+font-size:13px;font-weight:700;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.drive-star{position:absolute;right:8px;top:8px;padding:2px 8px;border-radius:8px;background:rgba(255,204,0,.92);color:#3a2b00;
+font-size:11.5px;font-weight:700}
+.drive-body{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.drive-text{flex:1;min-width:0}
+.drive-facts{font-weight:600;font-size:14px}
+.drive-sub{color:var(--muted);font-size:12.5px}
+.drive-trace{width:44px;height:44px;flex:none}
+.drive-trace polyline{fill:none;stroke:var(--rev);stroke-width:.07;stroke-linecap:round;stroke-linejoin:round}
+.drive-trace circle{fill:var(--rev)}
+@media (prefers-reduced-motion:reduce){.drive-group{animation:none}.drive-card,.switch-track::after{transition:none}}
+
+/* drives in the Data tab */
+.route-list{display:flex;flex-direction:column;gap:12px}
+.route-card{display:flex;gap:14px;align-items:stretch;padding:10px;border-radius:16px;background:var(--surface-2);
+animation:picker-in .4s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 50ms)}
+.route-picture{flex:none;width:132px;border-radius:12px;overflow:hidden;background:var(--line);display:grid;place-items:center;
+aspect-ratio:384/242;align-self:center}
+.route-picture img{width:100%;height:100%;object-fit:cover;display:block}
+.route-placeholder{font-size:28px;opacity:.6}
+.route-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;justify-content:center}
+.route-title{font-weight:700;font-size:15.5px}
+.route-time{font-size:14px}
+.route-facts,.route-state{color:var(--muted);font-size:13px}
+.gps-bar.route{height:6px;margin:6px 0 0;width:100%;max-width:220px}
+@media (max-width:420px){.route-picture{width:108px}}
+@media (prefers-reduced-motion:reduce){.route-card{animation:none}}

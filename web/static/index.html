@@ -100,12 +100,8 @@
       <div class="job-live" data-actions="fetch,localize"></div>
     </div>
     <div class="card">
-      <h2>Routes</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Route</th><th>GPS map</th><th class="num">Segments</th><th class="num">Localized</th><th class="num">Failed</th>
-          <th class="num">To do</th><th class="num">Hold-out</th></tr></thead>
-        <tbody id="routes"></tbody>
-      </table></div>
+      <h2>Your drives</h2>
+      <div class="route-list" id="routes"></div>
       <p class="empty" id="routes-empty" hidden>No segments in data/: download them from the comma.</p>
       <p class="note">Hold-out: the segments training never uses (same rule as supervised/dataset.py). They are the right ones for evaluation.</p>
     </div>
@@ -229,9 +225,7 @@
   <section class="panel" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
     <div class="card">
       <h2>New comparison video</h2>
-      <div class="form-grid wide">
-        <label class="field">Segment<select id="cmp-segment"></select></label>
-      </div>
+      <select id="cmp-segment" hidden aria-hidden="true"></select>
       <select id="cmp-student" hidden aria-hidden="true"></select>
       <div class="field-label" id="cmp-student-label">Your model (bottom of the video)</div><div class="picker" id="cmp-student-picker" role="radiogroup" aria-labelledby="cmp-student-label"></div>
       <select id="cmp-reference" hidden aria-hidden="true">
@@ -240,6 +234,12 @@
         <option value="logged">Logged</option>
       </select>
       <div class="field-label" id="cmp-reference-label">Compare it with (top of the video)</div><div class="picker" id="cmp-reference-picker" role="radiogroup" aria-labelledby="cmp-reference-label"></div>
+      <div class="drive-head">
+        <div class="field-label" id="drive-label">On which drive</div>
+        <label class="switch"><input type="checkbox" id="drive-all"><span class="switch-track"></span> Also drives used in training</label>
+      </div>
+      <p class="note" id="drive-note"></p>
+      <div class="drive-picker" id="drive-picker" role="radiogroup" aria-labelledby="drive-label"></div>
       <div class="form-grid">
         <label class="field">Start (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
         <label class="field">Duration (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>

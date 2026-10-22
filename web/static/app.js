@@ -17,7 +17,7 @@
   let status = null;
   let firstCode = null;
   let currentTab = 'status';
-  const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null};
+  const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null, drives: null};
   const loadedAt = {};
   let selectedRun = null;
   // The run opened from the list of the Training tab (#training/<run>); null = the one in progress.
@@ -188,10 +188,10 @@
 
   // Which data each tab needs.
   function needs(tab) {
-    if (tab === 'data') return ['segments'];
+    if (tab === 'data') return ['segments', 'drives'];
     if (tab === 'training') return ['runs', 'hf'];
     if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
-    if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos'];
+    if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos', 'drives'];
     if (tab === 'publish') return ['runs', 'hf'];
     if (tab === 'comma') return ['runs'];
     return [];
@@ -203,6 +203,7 @@
       else if (what === 'runs') data.runs = (await api('/api/runs')).runs;
       else if (what === 'evalResults') data.evalResults = (await api('/api/eval')).results;
       else if (what === 'videos') data.videos = (await api('/api/compare')).videos;
+      else if (what === 'drives') data.drives = await api('/api/drives');
       else if (what === 'hf') data.hf = await api('/api/hf');
       loadedAt[what] = Date.now();
     } catch (error) {
@@ -625,14 +626,99 @@
       item.appendChild(node('span', '', GPS_LABEL[key]));
       legend.appendChild(item);
     }
+    // Localize does both: the new segments and the ones a better map is out for.
     const callout = byId('gps-callout');
-    callout.hidden = !counts.refinable;
-    callout.textContent = counts.refinable + (counts.refinable === 1 ? ' segment' : ' segments')
-      + ' can probably get a better map now: tap Localize to refine them.';
+    const work = (counts.refinable || 0) + (counts.todo || 0);
+    callout.hidden = work === 0;
+    if (!same('gps-callout', [counts.refinable, counts.todo])) {
+      callout.replaceChildren();
+      const parts = [];
+      if (counts.todo) parts.push(counts.todo + (counts.todo === 1 ? ' new segment' : ' new segments') + ' to localize');
+      if (counts.refinable) {
+        parts.push(counts.refinable + (counts.refinable === 1 ? ' segment' : ' segments')
+          + ' can probably get a more accurate map');
+      }
+      callout.appendChild(node('span', '', parts.join(', ') + '.'));
+      const button = node('button', 'btn primary small', 'Localize now');
+      button.type = 'button';
+      button.id = 'btn-localize-gps';
+      button.addEventListener('click', () => runAction('localize', {},
+        'Localize ' + parts.join(' and ') + '? It runs in the background; you can follow it below.'));
+      callout.appendChild(button);
+    }
+    setAction('btn-localize-gps', 'localize');
+  }
+
+  // The drives (routes) of data/ as cards: a picture, when, how long, how far, how fast, and the state
+  // of their segments. Times and pictures come from /api/drives (localized segments only).
+  function renderRoutes(routes) {
+    const box = byId('routes');
+    const drives = data.drives ? data.drives.drives : [];
+    if (same('routes', [routes, drives])) return;
+    box.replaceChildren();
+    byId('routes-empty').hidden = routes.length > 0;
+    const byRoute = new Map();
+    for (const drive of drives) {
+      if (!byRoute.has(drive.route)) byRoute.set(drive.route, []);
+      byRoute.get(drive.route).push(drive);
+    }
+    const cards = routes.map((route) => {
+      const list = (byRoute.get(route.route) || []).filter((drive) => drive.start);
+      list.sort((a, b) => a.start - b.start);
+      // Not localized yet = just downloaded: the newest, on top.
+      return {route: route, list: list, start: list.length ? list[0].start : Infinity};
+    });
+    cards.sort((a, b) => b.start - a.start);
+    cards.forEach((item, index) => {
+      const route = item.route;
+      const list = item.list;
+      const card = node('div', 'route-card');
+      card.style.setProperty('--i', String(index));
+      const picture = node('div', 'route-picture');
+      if (list.length) {
+        const image = document.createElement('img');
+        image.loading = 'lazy';
+        image.alt = '';
+        image.src = '/thumb/' + list[Math.floor(list.length / 2)].segment + '.jpg';
+        picture.appendChild(image);
+      } else {
+        picture.appendChild(node('span', 'route-placeholder', '\u{1F697}'));
+      }
+      card.appendChild(picture);
+      const body = node('div', 'route-body');
+      if (list.length) {
+        const last = list[list.length - 1];
+        const end = last.start + (last.duration_s || 60);
+        body.appendChild(node('div', 'route-title', fmtDate(list[0].start)));
+        body.appendChild(node('div', 'route-time', fmtClock(list[0].start) + ' \u2013 ' + fmtClock(end)));
+        const km = list.reduce((sum, drive) => sum + (drive.distance_km || 0), 0);
+        const speeds = list.map((drive) => drive.avg_kmh).filter((value) => value !== undefined);
+        const facts = [list.length + ' min'];
+        if (km) facts.push(km.toFixed(1) + ' km');
+        if (speeds.length) facts.push(Math.round(speeds.reduce((a, b) => a + b, 0) / speeds.length) + ' km/h avg');
+        body.appendChild(node('div', 'route-facts', facts.join(' \u00b7 ')));
+      } else {
+        body.appendChild(node('div', 'route-title', 'Not localized yet'));
+        body.appendChild(node('div', 'route-time', route.segments + ' segments downloaded'));
+      }
+      const state = [];
+      if (route.localized) state.push(route.localized + ' localized');
+      if (route.todo) state.push(route.todo + ' to localize');
+      if (route.failed) state.push(route.failed + ' failed');
+      if (route.heldout) state.push(route.heldout + ' \u2605 hold-out');
+      body.appendChild(node('div', 'route-state', state.join(' \u00b7 ')));
+      if (route.localized) body.appendChild(gpsBar(route.map, 'gps-bar route'));
+      card.appendChild(body);
+      box.appendChild(card);
+    });
+    if (data.drives && data.drives.pending) {
+      setTimeout(() => { if (currentTab === 'data') load('drives').then(() => renderRoutes(routes)); }, 4000);
+    }
   }
 
   function renderData() {
     const segments = data.segments;
+    if (segments) renderRoutes(segments.routes);
     if (!segments || same('data', segments)) return;
     const counts = segments.counts;
     const tiles = byId('data-tiles');
@@ -646,20 +732,7 @@
       tiles.appendChild(tile);
     }
     renderGps(counts);
-    const routes = byId('routes');
-    routes.replaceChildren();
-    byId('routes-empty').hidden = segments.routes.length > 0;
-    for (const route of segments.routes) {
-      const row = node('tr');
-      row.appendChild(node('td', 'mono', route.route));
-      const mapCell = node('td');
-      mapCell.appendChild(gpsBar(route.map, 'gps-bar mini'));
-      row.appendChild(mapCell);
-      for (const value of [route.segments, route.localized, route.failed, route.todo, route.heldout]) {
-        row.appendChild(node('td', 'num', String(value)));
-      }
-      routes.appendChild(row);
-    }
+    renderRoutes(segments.routes);
     const discarded = byId('discarded');
     discarded.replaceChildren();
     byId('discarded-empty').hidden = segments.discarded_reasons.length > 0;
@@ -1401,7 +1474,7 @@
         const entry = result.per_segment.find((item) => item.segment === segment);
         if (!entry || entry.avg_miss_m === null) return;
         const index = results.indexOf(result);
-        const dot = node('span', 'dot');
+        const dot = node('span', 'plot-dot');
         dot.style.left = (entry.avg_miss_m * 100 / scale) + '%';
         dot.style.background = MODEL_COLORS[index % MODEL_COLORS.length];
         dot.title = modelInfo(result.model).title + ': ' + entry.avg_miss_m.toFixed(2) + ' m';
@@ -1430,6 +1503,124 @@
     runAction('eval', {model: model}, 'Evaluate ' + model + ' on the hold-out segments (uses the GPU). Start?');
   });
 
+  // -- drive picker --------------------------------------------------------------------------
+  // The segments as drives a person recognises: grouped by outing (route), newest first, every
+  // segment a card with a picture, the time of day, speed, how curvy and the shape of the road.
+  function fmtClock(unix) {
+    return new Date(unix * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+  }
+  function fmtDate(unix) {
+    return new Date(unix * 1000).toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+  }
+  function roadKind(drive) {
+    if (drive.avg_kmh !== undefined && drive.avg_kmh < 8) return 'standing';
+    if (drive.turn_deg === undefined || !drive.distance_km) return '';
+    // Degrees of turning per km of road.
+    const bends = drive.turn_deg / Math.max(drive.distance_km, 0.2);
+    if (bends < 45) return 'straight';
+    if (bends < 160) return 'a few bends';
+    return 'curvy';
+  }
+
+  function traceSvg(trace) {
+    const SVG = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '-0.08 -0.08 1.16 1.16');
+    svg.setAttribute('class', 'drive-trace');
+    svg.setAttribute('aria-hidden', 'true');
+    const line = document.createElementNS(SVG, 'polyline');
+    // North up: y grows downwards on screen.
+    line.setAttribute('points', trace.map((point) => point[0] + ',' + (1 - point[1])).join(' '));
+    svg.appendChild(line);
+    const end = document.createElementNS(SVG, 'circle');
+    const last = trace[trace.length - 1];
+    end.setAttribute('cx', last[0]);
+    end.setAttribute('cy', 1 - last[1]);
+    end.setAttribute('r', '0.07');
+    svg.appendChild(end);
+    return svg;
+  }
+
+  function renderDrives() {
+    const select = byId('cmp-segment');
+    const box = byId('drive-picker');
+    const all = byId('drive-all').checked;
+    const info = data.drives ? data.drives.drives : [];
+    const pending = data.drives ? data.drives.pending : 0;
+    if (same('drives', [info, pending, all, select.value])) return;
+    const localized = new Set(Array.from(select.options).map((option) => option.value));
+    const drives = info.filter((drive) => localized.has(drive.segment) && (all || drive.heldout));
+    byId('drive-note').textContent = (pending ? 'Reading ' + pending + ' more drives… ' : '')
+      + (all ? 'Drives used in training are easy for the model: the hold-out ones (★) are the fair test.'
+        : 'Only the drives the models never saw in training: the fair test.');
+    const routes = new Map();
+    for (const drive of drives) {
+      if (!routes.has(drive.route)) routes.set(drive.route, []);
+      routes.get(drive.route).push(drive);
+    }
+    const ordered = Array.from(routes.values()).map((list) => list.sort((a, b) => a.number - b.number));
+    ordered.sort((a, b) => (b[0].start || 0) - (a[0].start || 0));
+    box.replaceChildren();
+    if (!ordered.length) box.appendChild(node('p', 'empty', pending ? 'Reading the drives…' : 'No drives to show.'));
+    ordered.forEach((list, groupIndex) => {
+      const group = node('section', 'drive-group');
+      group.style.setProperty('--i', String(groupIndex));
+      const first = list[0];
+      const last = list[list.length - 1];
+      const head = node('div', 'drive-group-head');
+      if (first.start) {
+        head.appendChild(node('strong', '', fmtDate(first.start)));
+        const end = (last.start || first.start) + (last.duration_s || 60);
+        head.appendChild(node('span', '', fmtClock(first.start) + ' – ' + fmtClock(end) + ' · ' + list.length
+          + (list.length === 1 ? ' minute shown' : ' minutes shown')));
+      } else {
+        head.appendChild(node('strong', '', 'Drive ' + first.route.slice(0, 8)));
+      }
+      group.appendChild(head);
+      const strip = node('div', 'drive-strip');
+      for (const drive of list) {
+        const card = node('button', 'drive-card');
+        card.type = 'button';
+        card.setAttribute('role', 'radio');
+        card.setAttribute('aria-checked', String(drive.segment === select.value));
+        const picture = node('div', 'drive-picture');
+        const image = document.createElement('img');
+        image.loading = 'lazy';
+        image.alt = '';
+        image.src = '/thumb/' + drive.segment + '.jpg';
+        picture.appendChild(image);
+        if (drive.start) picture.appendChild(node('span', 'drive-time', fmtClock(drive.start)));
+        if (drive.heldout) picture.appendChild(node('span', 'drive-star', '\u2605 never seen'));
+        card.appendChild(picture);
+        const body = node('div', 'drive-body');
+        const text = node('div', 'drive-text');
+        const facts = [];
+        if (drive.avg_kmh !== undefined) facts.push(Math.round(drive.avg_kmh) + ' km/h');
+        const kind = roadKind(drive);
+        if (kind) facts.push(kind);
+        text.appendChild(node('div', 'drive-facts', facts.join(' \u00b7 ') || 'minute ' + drive.number));
+        if (drive.distance_km !== undefined) text.appendChild(node('div', 'drive-sub', drive.distance_km.toFixed(1) + ' km'));
+        body.appendChild(text);
+        if (drive.trace && drive.trace.length > 1) body.appendChild(traceSvg(drive.trace));
+        card.appendChild(body);
+        card.addEventListener('click', () => {
+          select.value = drive.segment;
+          select.dispatchEvent(new Event('change'));
+          renderDrives();
+        });
+        strip.appendChild(card);
+      }
+      group.appendChild(strip);
+      box.appendChild(group);
+    });
+    // Bring the chosen card into view inside its strip.
+    const chosen = box.querySelector('.drive-card[aria-checked="true"]');
+    if (chosen && chosen.parentElement) chosen.parentElement.scrollLeft = chosen.offsetLeft - 16;
+    // Still computing: ask again soon.
+    if (pending) setTimeout(() => { if (currentTab === 'compare') load('drives').then(renderDrives); }, 4000);
+  }
+  byId('drive-all').addEventListener('change', renderDrives);
+
   // -- Comparison video ---------------------------------------------------------------------------
   function compareFormReason() {
     if (!byId('cmp-segment').value) return 'no localized segment';
@@ -1451,6 +1642,7 @@
       if (!segment.heldout) options.push({value: segment.name, label: segment.name, group: 'Used in training'});
     }
     fillSelect(byId('cmp-segment'), options, firstHeldout);
+    renderDrives();
     const students = runModelOptions().concat(hfModelOptions());
     fillSelect(byId('cmp-student'), students);
     renderPicker('cmp-student');
