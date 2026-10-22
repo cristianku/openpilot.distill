@@ -74,7 +74,7 @@ object DistillApi {
             commaJson.optBoolean("onroad") -> "On road"
             else -> "Reachable"
         }
-        Dashboard(metrics, training, jobs, comma, payload.optString("code", "unknown"))
+        return Dashboard(metrics, training, jobs, comma, payload.optString("code", "unknown"))
     }
 
     private fun JSONObject?.number(key: String): Double? {
