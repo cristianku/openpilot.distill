@@ -261,12 +261,32 @@ class DataTest(unittest.TestCase):
         self.assertEqual(rows['0000011e0c8825628a01']['reason'], 'RuntimeError: no network')
         self.assertTrue(rows['0000011e0c8825628a01']['broken_video'])
         self.assertEqual(result['routes'][0], {'route': '0000011e--0c8825628a', 'segments': 2, 'localized': 1,
-                                               'failed': 1, 'todo': 0, 'heldout': 1})
+                                               'failed': 1, 'todo': 0, 'heldout': 1,
+                                               'map': {'final': 0, 'rapid': 1, 'prediction': 0, 'unknown': 0}})
+        self.assertEqual(rows['0000011e0c8825628a08']['map_quality'], 'rapid')
+        self.assertEqual(result['counts']['map']['rapid'], 1)
         self.assertEqual(result['discarded_reasons'][0], {'reason': 'UnusableSegment: only comma four', 'count': 2})
         reasons = []
         for item in result['discarded_reasons']:
             reasons.append(item['reason'])
         self.assertIn('reason not recorded', reasons)
+
+    def test_map_quality(self):
+        from datetime import datetime
+
+        from web.status import map_of
+        folder = Path(self.directory.name) / 'segment'
+        folder.mkdir()
+        self.assertEqual(map_of(folder), ('unknown', False))
+        today = datetime(2026, 10, 22, 20, 0)
+        (folder / 'localizer.ionex').write_text('2026/294 P1D\n')
+        self.assertEqual(map_of(folder, today), ('prediction', True))
+        self.assertEqual(map_of(folder, datetime(2026, 10, 21, 20, 0)), ('prediction', False))
+        # A drive across midnight: the worst day counts.
+        (folder / 'localizer.ionex').write_text('2026/270 FIN\n2026/271 RAP\n')
+        self.assertEqual(map_of(folder, today), ('rapid', True))
+        (folder / 'localizer.ionex').write_text('2026/280 FIN\n')
+        self.assertEqual(map_of(folder, today), ('final', False))
 
     def test_failure_reason_without_date(self):
         path = self.repo / 'x.failed'

@@ -78,6 +78,15 @@
   <!-- DATA -->
   <section class="panel" id="panel-data" role="tabpanel" aria-labelledby="tab-data" hidden>
     <div class="tiles" id="data-tiles"></div>
+    <div class="card" id="gps-card">
+      <h2>GPS accuracy</h2>
+      <p class="lead">The localizer corrects the GPS with a map of the ionosphere. A drive is first localized with the
+        <b>prediction</b> made before it, then a <b>rapid</b> map comes about a day later and the <b>final</b> one about
+        two weeks later. Better map, more accurate path for training.</p>
+      <div class="gps-bar" id="gps-bar" aria-hidden="true"></div>
+      <ul class="gps-legend" id="gps-legend"></ul>
+      <div class="gps-callout" id="gps-callout" hidden></div>
+    </div>
     <div class="card">
       <h2>Download and localize</h2>
       <p class="lead">Download new drives from the comma (dashcam only, at least 5 minutes, without the first and last two segments), then localize them: a segment that is not localized is left out of training.</p>
@@ -93,7 +102,7 @@
     <div class="card">
       <h2>Routes</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Route</th><th class="num">Segments</th><th class="num">Localized</th><th class="num">Failed</th>
+        <thead><tr><th>Route</th><th>GPS map</th><th class="num">Segments</th><th class="num">Localized</th><th class="num">Failed</th>
           <th class="num">To do</th><th class="num">Hold-out</th></tr></thead>
         <tbody id="routes"></tbody>
       </table></div>
@@ -108,7 +117,7 @@
     <details class="card">
       <summary>All segments</summary>
       <div class="table-wrap"><table>
-        <thead><tr><th>Segment</th><th>State</th><th>Map</th><th>Notes</th></tr></thead>
+        <thead><tr><th>Segment</th><th>State</th><th>GPS map</th><th>Notes</th></tr></thead>
         <tbody id="segments"></tbody>
       </table></div>
     </details>

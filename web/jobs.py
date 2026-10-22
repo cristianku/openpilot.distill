@@ -39,6 +39,9 @@ STOP_GRACE_SECONDS = 20
 WRAPPER_READY_SECONDS = 5
 PROGRESS_RE = re.compile(r'^PROGRESS (\d+)/(\d+)\s*$')
 STEP_RE = re.compile(r'^step (\d+)/(\d+):')
+# rsync --info=progress2: "<bytes>  <percent>%  <speed>  <eta> ...", speed in 1024-based units.
+RSYNC_RATE_RE = re.compile(r'^[\d,]+\s+\d+%\s+([\d.]+)([kMG]B)/s')
+RSYNC_UNITS = {'kB': 1 / 1024, 'MB': 1.0, 'GB': 1024.0}
 RUN_DIR_RE = re.compile(r'^RUN_DIR=(.+)$')
 VIDEO_RE = re.compile(r'/outputs/compare/([A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.mp4)$')
 OUTPUT_MP4_RE = re.compile(r'^OUTPUT_MP4=(.+)$')
@@ -77,10 +80,19 @@ def log_lines(text: str) -> list[str]:
 
 
 def parse_progress(text: str) -> dict | None:
-    """The last "PROGRESS a/b" (evaluation, compare) or "step a/b:" (training) line of a log."""
+    """The last "PROGRESS a/b" (evaluation, compare) or "step a/b:" (training) line of a log, with the
+    last transfer speed rsync printed (copies from the comma) as rate_mb_s."""
     found = None
+    rate = None
     for line in log_lines(text):
         line = line.strip()
+        transfer = RSYNC_RATE_RE.match(line)
+        if transfer is not None:
+            value = float(transfer.group(1)) * RSYNC_UNITS[transfer.group(2)]
+            # A file already there is "copied" at 0 B/s: that is not the speed of the link.
+            if value > 0:
+                rate = round(value, 1)
+            continue
         match = PROGRESS_RE.match(line)
         if match is None:
             match = STEP_RE.match(line)
@@ -93,7 +105,7 @@ def parse_progress(text: str) -> dict | None:
     percent = None
     if total > 0:
         percent = round(min(done, total) * 100 / total, 1)
-    return {'done': done, 'total': total, 'percent': percent}
+    return {'done': done, 'total': total, 'percent': percent, 'rate_mb_s': rate}
 
 
 def parse_run_dir(text: str, repo: Path) -> str | None:

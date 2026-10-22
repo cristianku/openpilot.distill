@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from web.actions import GPU_LOCK_FILE
@@ -315,13 +316,52 @@ def failure_reason(path: Path) -> str:
     return FAILED_DATE_PREFIX_RE.sub('', line, count=1)
 
 
+# The ionosphere map a localized segment used: localizer.ionex has one "YYYY/DDD PRODUCT" line per day
+# of the drive and the worst day counts. P1D (P2D) is a prediction made before the drive, RAP comes
+# about one day later, FIN about two weeks later (localizer/ionex.py); the localization re-runs a
+# segment when a better map is out.
+MAP_QUALITY = {'FIN': 'final', 'RAP': 'rapid', 'P1D': 'prediction', 'P2D': 'prediction'}
+MAP_RANK = {'prediction': 0, 'rapid': 1, 'final': 2}
+# Days after the drive when the next map is normally out: a guess, so the page says "probably".
+RAPID_AFTER_DAYS = 1
+FINAL_AFTER_DAYS = 15
+
+
+def map_of(segment_dir: Path, today: datetime | None = None) -> tuple[str, bool]:
+    """('final' | 'rapid' | 'prediction' | 'unknown', whether a better map is probably out now)."""
+    worst = None
+    worst_day = None
+    try:
+        lines = (segment_dir / 'localizer.ionex').read_text(encoding='utf-8', errors='replace').splitlines()
+    except OSError:
+        return 'unknown', False
+    for line in lines[:10]:
+        parts = line.split()
+        if len(parts) != 2 or parts[1] not in MAP_QUALITY:
+            continue
+        try:
+            day = datetime.strptime(parts[0], '%Y/%j')
+        except ValueError:
+            continue
+        quality = MAP_QUALITY[parts[1]]
+        if worst is None or MAP_RANK[quality] < MAP_RANK[worst]:
+            worst = quality
+            worst_day = day
+    if worst is None:
+        return 'unknown', False
+    age = ((today or datetime.now(UTC).replace(tzinfo=None)) - worst_day).days
+    better = (worst == 'prediction' and age >= RAPID_AFTER_DAYS) or (worst != 'final' and age >= FINAL_AFTER_DAYS)
+    return worst, better
+
+
 def segments(repo: Path) -> dict:
     """The segment folders of data/ and data_scartati/ with their localizer state."""
     data_dir = repo / 'data'
     rows = []
     routes = {}
     counts = {'total': 0, 'localized': 0, 'failed': 0, 'todo': 0, 'heldout': 0, 'heldout_localized': 0,
-              'broken_video': 0, 'discarded': 0}
+              'broken_video': 0, 'discarded': 0, 'refinable': 0,
+              'map': {'final': 0, 'rapid': 0, 'prediction': 0, 'unknown': 0}}
     entries = []
     if data_dir.is_dir():
         entries = sorted(data_dir.iterdir())
@@ -349,8 +389,11 @@ def segments(repo: Path) -> dict:
         else:
             row['route'] = name
             row['number'] = None
+        row['map_quality'] = ''
+        row['refinable'] = False
         if localized:
             row['map'] = _first_line(entry / 'localizer.ionex', 40)
+            row['map_quality'], row['refinable'] = map_of(entry)
         elif failed:
             row['reason'] = failure_reason(entry / 'localizer.failed')
         rows.append(row)
@@ -358,6 +401,9 @@ def segments(repo: Path) -> dict:
         counts['total'] = counts['total'] + 1
         if state == 'localized':
             counts['localized'] = counts['localized'] + 1
+            counts['map'][row['map_quality']] = counts['map'][row['map_quality']] + 1
+            if row['refinable']:
+                counts['refinable'] = counts['refinable'] + 1
         elif state == 'failed':
             counts['failed'] = counts['failed'] + 1
         else:
@@ -371,11 +417,13 @@ def segments(repo: Path) -> dict:
 
         route = routes.get(row['route'])
         if route is None:
-            route = {'route': row['route'], 'segments': 0, 'localized': 0, 'failed': 0, 'todo': 0, 'heldout': 0}
+            route = {'route': row['route'], 'segments': 0, 'localized': 0, 'failed': 0, 'todo': 0, 'heldout': 0,
+                     'map': {'final': 0, 'rapid': 0, 'prediction': 0, 'unknown': 0}}
             routes[row['route']] = route
         route['segments'] = route['segments'] + 1
         if state == 'localized':
             route['localized'] = route['localized'] + 1
+            route['map'][row['map_quality']] = route['map'][row['map_quality']] + 1
         elif state == 'failed':
             route['failed'] = route['failed'] + 1
         else:

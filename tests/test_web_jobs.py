@@ -56,6 +56,15 @@ class JobTestCase(unittest.TestCase):
         return view
 
 
+class ProgressTest(unittest.TestCase):
+    def test_rsync_speed(self):
+        from web.jobs import parse_progress
+        text = ('PROGRESS 3/10\n  1,234,567  45%   12.34MB/s    0:00:12\r  2,000,000 80%  0.00kB/s 0:00:00\n'
+                'PROGRESS 4/10\n')
+        self.assertEqual(parse_progress(text), {'done': 4, 'total': 10, 'percent': 40.0, 'rate_mb_s': 12.3})
+        self.assertEqual(parse_progress('  1,000 100%  512.00kB/s  0:00:00\nPROGRESS 1/2\n')['rate_mb_s'], 0.5)
+
+
 class LifecycleTest(JobTestCase):
     def test_job_runs_and_records_its_exit_code(self):
         manager = self.manager()
@@ -65,7 +74,7 @@ class LifecycleTest(JobTestCase):
         self.assertRegex(job['id'], r'^[0-9]{8}-[0-9]{6}-fetch$')
         time.sleep(0.5)
         running = manager.get(job['id'])
-        self.assertEqual(running['progress'], {'done': 3, 'total': 10, 'percent': 30.0})
+        self.assertEqual(running['progress'], {'done': 3, 'total': 10, 'percent': 30.0, 'rate_mb_s': None})
         done = self.wait_state(manager, job['id'], ('ok', 'failed'))
         self.assertEqual(done['state'], 'ok')
         self.assertEqual(done['exit_code'], 0)
@@ -310,7 +319,8 @@ class ListAndLogTest(JobTestCase):
 class ParseTest(unittest.TestCase):
     def test_progress(self):
         self.assertIsNone(parse_progress('nothing here\n'))
-        self.assertEqual(parse_progress('PROGRESS 1/4\nPROGRESS 2/4\n'), {'done': 2, 'total': 4, 'percent': 50.0})
+        self.assertEqual(parse_progress('PROGRESS 1/4\nPROGRESS 2/4\n'),
+                         {'done': 2, 'total': 4, 'percent': 50.0, 'rate_mb_s': None})
         self.assertEqual(parse_progress('a\rPROGRESS 5/5\r')['percent'], 100.0)
         text = 'step 10/5000: loss=1 gt=1 distill=1 time=0.70s\nstep 11/5000: loss=1 gt=1 distill=1 time=0.70s\n'
         self.assertEqual(parse_progress(text)['done'], 11)

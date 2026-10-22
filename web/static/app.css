@@ -279,3 +279,32 @@ font-size:11px;font-weight:700;vertical-align:2px}
 .picker-score strong{display:block;font-size:16px}
 .picker-score small{color:var(--muted);font-size:12px}
 .picker-check{width:18px;flex:none;color:var(--rev);font-weight:800;font-size:17px;text-align:center}
+
+/* GPS accuracy: share of localized segments by ionosphere map */
+.gps-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line);margin:14px 0 12px;gap:2px}
+.gps-bar.mini{height:8px;width:90px;margin:0;border-radius:4px}
+.gps-bar span{display:block;height:100%;min-width:3px}
+.gps-final{background:var(--ok)}.gps-rapid{background:var(--rev)}.gps-prediction{background:var(--todo)}
+.gps-unknown{background:var(--muted)}
+.gps-legend{list-style:none;margin:0;padding:0;display:flex;gap:18px;flex-wrap:wrap;font-size:14px}
+.gps-legend li{display:flex;align-items:center;gap:6px}
+.gps-legend strong{font-variant-numeric:tabular-nums}
+.gps-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.gps-callout{margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--todo-soft);color:var(--fg);font-size:14px}
+
+/* the picker as a dropdown that slides open */
+.picker{position:relative}
+.picker-toggle{appearance:none;display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border:1px solid var(--line);
+border-radius:16px;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer;min-height:64px;
+box-shadow:0 1px 2px rgba(0,0,0,.06),0 4px 14px rgba(0,0,0,.05);transition:box-shadow .2s,border-color .2s}
+.picker.open .picker-toggle{border-color:var(--rev);box-shadow:0 0 0 4px var(--rev-soft)}
+.picker-chevron{flex:none;width:28px;height:28px;border-radius:50%;background:var(--surface-2);color:var(--muted);display:grid;
+place-items:center;font-size:16px;line-height:1;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.picker.open .picker-chevron{transform:rotate(180deg);color:var(--rev)}
+.picker-drawer{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .38s cubic-bezier(.2,.8,.2,1),opacity .25s ease}
+.picker.open .picker-drawer{grid-template-rows:1fr;opacity:1}
+.picker-inner{overflow:hidden;min-height:0}
+.picker.open .picker-row{animation:picker-in .34s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 28ms)}
+@keyframes picker-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.picker-row:active{background:var(--surface)}
+@media (prefers-reduced-motion:reduce){.picker-drawer,.picker-chevron{transition:none}.picker.open .picker-row{animation:none}}

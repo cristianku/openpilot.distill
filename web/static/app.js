@@ -474,6 +474,7 @@
     if (!progress || !progress.total) return {head: 'Starting…', sub: fmtDuration(elapsed) + ' elapsed'};
     let sub = progress.done.toLocaleString('en-GB') + ' of ' + progress.total.toLocaleString('en-GB')
       + ' · ' + fmtDuration(elapsed) + ' elapsed';
+    if (progress.rate_mb_s) sub += ' · ' + progress.rate_mb_s.toFixed(1) + ' MB/s';
     if (progress.done >= progress.total) sub += ' · finishing';
     else if (progress.done > 0 && progress.percent >= 1) {
       sub += ' · about ' + fmtDuration(Math.max(1, elapsed * (progress.total - progress.done) / progress.done)) + ' left';
@@ -591,6 +592,45 @@
   }
 
   // -- Data ------------------------------------------------------------------------------------
+  // GPS map quality of the localized segments (web/status.py map_of).
+  const GPS_ORDER = ['final', 'rapid', 'prediction', 'unknown'];
+  const GPS_LABEL = {final: 'final', rapid: 'rapid', prediction: 'prediction', unknown: 'not recorded'};
+  const GPS_PILL = {final: 'ok', rapid: 'run', prediction: 'todo', unknown: 'muted'};
+
+  function gpsBar(map, className) {
+    const bar = node('div', className);
+    const total = GPS_ORDER.reduce((sum, key) => sum + (map[key] || 0), 0);
+    bar.title = GPS_ORDER.filter((key) => map[key]).map((key) => map[key] + ' ' + GPS_LABEL[key]).join(', ');
+    for (const key of GPS_ORDER) {
+      if (!map[key]) continue;
+      const part = node('span', 'gps-' + key);
+      part.style.flexGrow = String(map[key] / total);
+      bar.appendChild(part);
+    }
+    return bar;
+  }
+
+  function renderGps(counts) {
+    const map = counts.map || {};
+    const localized = GPS_ORDER.reduce((sum, key) => sum + (map[key] || 0), 0);
+    byId('gps-card').hidden = localized === 0;
+    byId('gps-bar').replaceWith(Object.assign(gpsBar(map, 'gps-bar'), {id: 'gps-bar'}));
+    const legend = byId('gps-legend');
+    legend.replaceChildren();
+    for (const key of GPS_ORDER) {
+      if (key === 'unknown' && !map[key]) continue;
+      const item = node('li');
+      item.appendChild(node('span', 'gps-dot gps-' + key));
+      item.appendChild(node('strong', '', String(map[key] || 0)));
+      item.appendChild(node('span', '', GPS_LABEL[key]));
+      legend.appendChild(item);
+    }
+    const callout = byId('gps-callout');
+    callout.hidden = !counts.refinable;
+    callout.textContent = counts.refinable + (counts.refinable === 1 ? ' segment' : ' segments')
+      + ' can probably get a better map now: tap Localize to refine them.';
+  }
+
   function renderData() {
     const segments = data.segments;
     if (!segments || same('data', segments)) return;
@@ -605,12 +645,16 @@
       tile.appendChild(node('div', 'what', label));
       tiles.appendChild(tile);
     }
+    renderGps(counts);
     const routes = byId('routes');
     routes.replaceChildren();
     byId('routes-empty').hidden = segments.routes.length > 0;
     for (const route of segments.routes) {
       const row = node('tr');
       row.appendChild(node('td', 'mono', route.route));
+      const mapCell = node('td');
+      mapCell.appendChild(gpsBar(route.map, 'gps-bar mini'));
+      row.appendChild(mapCell);
       for (const value of [route.segments, route.localized, route.failed, route.todo, route.heldout]) {
         row.appendChild(node('td', 'num', String(value)));
       }
@@ -638,7 +682,14 @@
         cell.appendChild(pill('hold-out', 'imp'));
       }
       row.appendChild(cell);
-      row.appendChild(node('td', 'mono', segment.map || '–'));
+      const mapCell = node('td');
+      if (segment.map_quality) {
+        mapCell.appendChild(pill(GPS_LABEL[segment.map_quality] || segment.map_quality, GPS_PILL[segment.map_quality] || 'muted'));
+        if (segment.refinable) mapCell.appendChild(node('span', 'note', ' better one out'));
+      } else {
+        mapCell.textContent = '–';
+      }
+      row.appendChild(mapCell);
       let note = segment.reason || '';
       if (segment.broken_video) note = 'video missing from the shared folder. ' + note;
       row.appendChild(node('td', 'note', note));
@@ -1164,6 +1215,37 @@
     return {title: spec, detail: '', badge: ''};
   }
 
+  // Which pickers are open: a refresh rebuilds a picker, it must not close it under the finger.
+  const pickerOpen = {};
+
+  function pickerRowContent(row, spec, checked) {
+    const info = modelInfo(spec);
+    const text = node('div', 'picker-text');
+    const title = node('div', 'picker-title', info.title);
+    if (info.badge) title.appendChild(node('span', 'picker-badge', info.badge));
+    text.appendChild(title);
+    if (info.detail) text.appendChild(node('div', 'picker-detail', info.detail));
+    row.appendChild(text);
+    const result = evalResultOf(spec);
+    const score = node('div', 'picker-score');
+    if (result && result.avg_miss_m !== null) {
+      score.appendChild(node('strong', '', result.avg_miss_m.toFixed(2) + ' m'));
+      score.appendChild(node('small', '', 'avg miss'));
+    } else {
+      score.appendChild(node('small', '', 'not evaluated'));
+    }
+    row.appendChild(score);
+    if (checked !== undefined) row.appendChild(node('span', 'picker-check', checked ? '\u2713' : ''));
+  }
+
+  function setPickerOpen(selectId, open) {
+    pickerOpen[selectId] = open;
+    const box = byId(selectId + '-picker');
+    box.classList.toggle('open', open);
+    const toggle = box.querySelector('.picker-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', String(open));
+  }
+
   function renderPicker(selectId) {
     const select = byId(selectId);
     const box = byId(selectId + '-picker');
@@ -1171,50 +1253,63 @@
       group: option.parentElement.tagName === 'OPTGROUP' ? option.parentElement.label : ''}));
     if (same('picker:' + selectId, [options, select.value, data.runs, data.evalResults])) return;
     box.replaceChildren();
+    box.classList.toggle('open', !!pickerOpen[selectId]);
     if (!options.length) {
       box.appendChild(node('p', 'empty', 'No models yet.'));
       return;
     }
+
+    // Closed: the chosen model, with a chevron. Open: the whole list slides down under it.
+    const toggle = node('button', 'picker-toggle');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(!!pickerOpen[selectId]));
+    pickerRowContent(toggle, select.value);
+    toggle.appendChild(node('span', 'picker-chevron', '\u2304'));
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setPickerOpen(selectId, !pickerOpen[selectId]);
+    });
+    box.appendChild(toggle);
+
+    const drawer = node('div', 'picker-drawer');
+    const inner = node('div', 'picker-inner');
+    drawer.appendChild(inner);
+    box.appendChild(drawer);
     let list = null;
     let group = null;
+    let index = 0;
     for (const option of options) {
       if (list === null || option.group !== group) {
         group = option.group;
-        if (group) box.appendChild(node('div', 'picker-group', group));
+        if (group) inner.appendChild(node('div', 'picker-group', group));
         list = node('div', 'picker-list');
-        box.appendChild(list);
+        inner.appendChild(list);
       }
-      const info = modelInfo(option.value);
       const row = node('button', 'picker-row');
       row.type = 'button';
       row.setAttribute('role', 'radio');
       row.setAttribute('aria-checked', String(option.value === select.value));
-      const text = node('div', 'picker-text');
-      const title = node('div', 'picker-title', info.title);
-      if (info.badge) title.appendChild(node('span', 'picker-badge', info.badge));
-      text.appendChild(title);
-      if (info.detail) text.appendChild(node('div', 'picker-detail', info.detail));
-      row.appendChild(text);
-      const result = evalResultOf(option.value);
-      const score = node('div', 'picker-score');
-      if (result && result.avg_miss_m !== null) {
-        score.appendChild(node('strong', '', result.avg_miss_m.toFixed(2) + ' m'));
-        score.appendChild(node('small', '', 'avg miss'));
-      } else {
-        score.appendChild(node('small', '', 'not evaluated'));
-      }
-      row.appendChild(score);
-      row.appendChild(node('span', 'picker-check', option.value === select.value ? '\u2713' : ''));
-      row.addEventListener('click', () => {
+      row.style.setProperty('--i', String(index));
+      index = index + 1;
+      pickerRowContent(row, option.value, option.value === select.value);
+      row.addEventListener('click', (event) => {
+        event.stopPropagation();
         select.value = option.value;
         select.dispatchEvent(new Event('change'));
-        renderPicker(selectId);
+        // Close with the animation first, then show the new choice.
+        setPickerOpen(selectId, false);
+        setTimeout(() => { same.cache['picker:' + selectId] = ''; renderPicker(selectId); }, 320);
       });
       list.appendChild(row);
     }
   }
+  document.addEventListener('click', (event) => {
+    for (const id of Object.keys(pickerOpen)) {
+      if (pickerOpen[id] && !byId(id + '-picker').contains(event.target)) setPickerOpen(id, false);
+    }
+  });
   for (const id of ['eval-model', 'cmp-student', 'cmp-reference']) {
-    byId(id).addEventListener('change', () => { renderPicker(id); updateButtons(); });
+    byId(id).addEventListener('change', () => { if (!pickerOpen[id]) renderPicker(id); updateButtons(); });
   }
 
   // -- Evaluation -------------------------------------------------------------------------------
@@ -1502,6 +1597,8 @@
   const MACHINE_LINE = /^(RUN_DIR|OUTPUT_MP4|OUTPUT_JSON)=/;
   const PROGRESS_LINE = /^PROGRESS (\d+)\/(\d+)$/;
   const STEP_LINE = /^step (\d+)\/(\d+):/;
+  // rsync's progress lines: the speed is shown in the progress, not as messages.
+  const TRANSFER_LINE = /^[\d,]+\s+\d+%\s+[\d.]+[kMG]B\/s/;
   const MAX_MESSAGES = 400;
 
   function readLog(text) {
@@ -1510,7 +1607,7 @@
     for (const raw of text.split('\n')) {
       const parts = raw.split('\r');
       let line = parts[parts.length - 1].trim() || parts.map((part) => part.trim()).filter(Boolean).pop() || '';
-      if (!line || MACHINE_LINE.test(line)) continue;
+      if (!line || MACHINE_LINE.test(line) || TRANSFER_LINE.test(line)) continue;
       const match = PROGRESS_LINE.exec(line) || STEP_LINE.exec(line);
       if (match) progress = {done: Number(match[1]), total: Number(match[2])};
       if (PROGRESS_LINE.test(line)) continue;
@@ -1575,6 +1672,7 @@
       byId('term-percent').textContent = Math.floor(percent) + '%';
       byId('term-bar').style.width = Math.max(0, Math.min(100, percent)) + '%';
       let eta = progress.done.toLocaleString('en-GB') + ' of ' + progress.total.toLocaleString('en-GB');
+      if (job.state === 'running' && progress.rate_mb_s) eta += ' · ' + progress.rate_mb_s.toFixed(1) + ' MB/s';
       if (job.state === 'running' && progress.done >= progress.total) eta += ' · finishing';
       else if (job.state === 'running' && progress.done > 0) {
         eta += ' · about ' + fmtDuration(Math.max(1, (now - job.started) * (progress.total - progress.done) / progress.done))
