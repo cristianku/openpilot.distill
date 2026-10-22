@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Export a trained model (supercombo.pt) to the driving_supercombo.onnx that openpilot runs on the comma.
 #
-# Usage: helpers/export_onnx.sh [--host=<ip|nome>] [<supercombo.pt>]
-#   helpers/export_onnx.sh                 (l'ultimo outputs/supervised/*/supercombo.pt)
+# Usage: helpers/export_onnx.sh [--host=<ip|name>] [<supercombo.pt>]
+#   helpers/export_onnx.sh                 (the latest outputs/supervised/*/supercombo.pt)
 #   helpers/export_onnx.sh outputs/supervised/2026-10-20_1910/supercombo.pt
 #
-# The ONNX is written next to the .pt: outputs/supervised/<data_ora>/driving_supercombo.onnx
+# The ONNX is written next to the .pt: outputs/supervised/<date_time>/driving_supercombo.onnx
 # It needs the comma's ORIGINAL driving_supercombo.onnx as reference (inputs and output layout of
 # the openpilot version on the comma): it is copied from the comma into
 # models/comma_driving_supercombo.onnx and reused from there when the comma is off.
@@ -79,26 +79,26 @@ while [ $# -gt 0 ]; do
     usage
   elif [ "$1" = "--host" ]; then
     shift
-    [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
+    [ -n "${1:-}" ] || die "--host needs an IP or a name"
     COMMA_HOST="$1"
     add_comma_user
   elif [[ "$1" == --host=* ]]; then
     COMMA_HOST="${1#--host=}"
-    [ -n "$COMMA_HOST" ] || die "--host vuole un IP o un nome"
+    [ -n "$COMMA_HOST" ] || die "--host needs an IP or a name"
     add_comma_user
   elif [ -z "$input" ]; then
     input="$1"
   else
-    die "argomento in piu': $1"
+    die "extra argument: $1"
   fi
   shift
 done
 
 if [ -z "$input" ]; then
   input="$(ls -t "$ROOT"/outputs/supervised/*/supercombo.pt 2>/dev/null | head -1 || true)"
-  [ -n "$input" ] || die "nessun outputs/supervised/*/supercombo.pt: passa il .pt"
+  [ -n "$input" ] || die "no outputs/supervised/*/supercombo.pt: pass the .pt"
 fi
-[ -f "$input" ] || die "$input non esiste"
+[ -f "$input" ] || die "$input does not exist"
 input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
 output="$(dirname "$input")/driving_supercombo.onnx"
 
@@ -108,7 +108,7 @@ if ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true 2>/dev/null; then
   original=""
   current=""
   backup=""
-  info="$(read_comma_info)" || die "non riesco a leggere /data/openpilot sul comma"
+  info="$(read_comma_info)" || die "cannot read /data/openpilot on the comma"
   while IFS='=' read -r key value; do
     if [ "$key" = "reference" ]; then
       reference="$value"
@@ -135,28 +135,28 @@ if ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true 2>/dev/null; then
     cached="$(sha256sum "$REFERENCE" | cut -d' ' -f1)"
   fi
   if [ -n "$original" ] && [ "$cached" = "$original" ]; then
-    echo "Riferimento: $REFERENCE, gia' uguale all'originale del comma"
+    echo "Reference: $REFERENCE, already identical to the comma's original"
   elif [ -n "$original_source" ]; then
     # Into a temporary file first, kept only when it is really the original.
     rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$original_source" "$REFERENCE.new"
     copied="$(sha256sum "$REFERENCE.new" | cut -d' ' -f1)"
     if [ "$copied" != "$original" ]; then
       rm -f "$REFERENCE.new"
-      die "la copia di $original_source non ha lo sha256 dell'originale ($copied invece di $original): $REFERENCE non toccato"
+      die "the copy of $original_source does not have the sha256 of the original ($copied instead of $original): $REFERENCE left untouched"
     fi
     mv "$REFERENCE.new" "$REFERENCE"
-    echo "Riferimento: driving_supercombo.onnx originale del comma ($original_source)"
+    echo "Reference: the comma's original driving_supercombo.onnx ($original_source)"
   elif [ -f "$REFERENCE" ]; then
-    echo "ATTENZIONE: sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP): uso il riferimento gia' copiato ($REFERENCE)"
+    echo "WARNING: the original of this version is not on the comma (neither in its place nor in $BACKUP): using the reference already copied ($REFERENCE)"
   else
-    die "sul comma non trovo l'originale di questa versione (ne' al suo posto ne' in $BACKUP) e non c'e' $REFERENCE"
+    die "the original of this version is not on the comma (neither in its place nor in $BACKUP) and there is no $REFERENCE"
   fi
 elif [ -f "$REFERENCE" ]; then
-  echo "Comma non raggiungibile: uso il riferimento gia' copiato ($REFERENCE)"
+  echo "Comma not reachable: using the reference already copied ($REFERENCE)"
 else
-  die "comma non raggiungibile e nessun $REFERENCE: accendi il comma (chiave ssh registrata? dal Mac serve ssh -A)"
+  die "comma not reachable and no $REFERENCE: turn the comma on (ssh key registered? from the Mac use ssh -A)"
 fi
 
 echo "Export: $input"
 (cd "$ROOT" && distill_uv_run python -m helpers.export_onnx "$input" --reference "$REFERENCE" --output "$output")
-echo "Fatto: $output"
+echo "Done: $output"

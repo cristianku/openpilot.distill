@@ -90,13 +90,13 @@ class SegmentCheckTest(unittest.TestCase):
     def test_not_localized(self):
         self.segment('a')
         self.segment('b', localized=False)
-        with self.assertRaisesRegex(TaskError, 'fermerebbero il training: b'):
+        with self.assertRaisesRegex(TaskError, 'would stop the training: b'):
             train_task.check_segments()
 
     def test_broken_link(self):
         folder = self.segment('a')
         os.symlink(self.data / 'missing.hevc', folder / 'ecamera.hevc')
-        with self.assertRaisesRegex(TaskError, 'video mancanti'):
+        with self.assertRaisesRegex(TaskError, 'videos missing'):
             train_task.check_segments()
 
 
@@ -112,16 +112,16 @@ class ResumeTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_refused(self):
-        with self.assertRaisesRegex(TaskError, 'non esiste'):
+        with self.assertRaisesRegex(TaskError, 'does not exist'):
             train_task.resume_info('2026-10-22_101530')
         (self.runs / '2026-10-22_101530').mkdir()
         with self.assertRaisesRegex(TaskError, 'checkpoint'):
             train_task.resume_info('2026-10-22_101530')
         (self.runs / '2026-10-22_101530' / 'supercombo.training.pt').write_bytes(b'x')
         (self.runs / '2026-10-22_101530' / 'supercombo.pt').write_bytes(b'x')
-        with self.assertRaisesRegex(TaskError, 'gia\' finito'):
+        with self.assertRaisesRegex(TaskError, 'already finished'):
             train_task.resume_info('2026-10-22_101530')
-        with self.assertRaisesRegex(TaskError, 'non esiste'):
+        with self.assertRaisesRegex(TaskError, 'does not exist'):
             train_task.resume_info('../2026-10-22_101530')
 
 

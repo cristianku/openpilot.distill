@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Distill · Controllo</title>
+<title>Distill · Control</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -13,29 +13,29 @@
   <div class="topbar-inner">
     <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 18 9 2M13 18 11 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></span>
     <h1>Distill</h1>
-    <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">connessione…</span></span>
+    <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">connecting…</span></span>
   </div>
-  <nav class="tabs" role="tablist" aria-label="Sezioni">
-    <button type="button" role="tab" id="tab-stato" data-tab="stato" aria-controls="panel-stato" aria-selected="true">Stato</button>
-    <button type="button" role="tab" id="tab-dati" data-tab="dati" aria-controls="panel-dati" aria-selected="false">Dati</button>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-status" data-tab="status" aria-controls="panel-status" aria-selected="true">Status</button>
+    <button type="button" role="tab" id="tab-data" data-tab="data" aria-controls="panel-data" aria-selected="false">Data</button>
     <button type="button" role="tab" id="tab-training" data-tab="training" aria-controls="panel-training" aria-selected="false">Training</button>
-    <button type="button" role="tab" id="tab-valutazione" data-tab="valutazione" aria-controls="panel-valutazione" aria-selected="false">Valutazione</button>
-    <button type="button" role="tab" id="tab-confronto" data-tab="confronto" aria-controls="panel-confronto" aria-selected="false">Confronto video</button>
-    <button type="button" role="tab" id="tab-pubblica" data-tab="pubblica" aria-controls="panel-pubblica" aria-selected="false">Pubblica</button>
+    <button type="button" role="tab" id="tab-evaluation" data-tab="evaluation" aria-controls="panel-evaluation" aria-selected="false">Evaluation</button>
+    <button type="button" role="tab" id="tab-compare" data-tab="compare" aria-controls="panel-compare" aria-selected="false">Comparison</button>
+    <button type="button" role="tab" id="tab-publish" data-tab="publish" aria-controls="panel-publish" aria-selected="false">Publish</button>
     <button type="button" role="tab" id="tab-comma" data-tab="comma" aria-controls="panel-comma" aria-selected="false">Comma</button>
-    <button type="button" role="tab" id="tab-job" data-tab="job" aria-controls="panel-job" aria-selected="false">Job<span class="count" id="running-count" hidden></span></button>
+    <button type="button" role="tab" id="tab-jobs" data-tab="jobs" aria-controls="panel-jobs" aria-selected="false">Jobs<span class="count" id="running-count" hidden></span></button>
   </nav>
 </header>
 
 <div class="banner" id="code-banner" hidden>
-  <span>Il codice del sito è stato aggiornato sul server.</span>
-  <button class="btn small" type="button" id="reload-page">Ricarica la pagina</button>
+  <span>The site code was updated on the server.</span>
+  <button class="btn small" type="button" id="reload-page">Reload the page</button>
 </div>
 
 <main class="page">
 
-  <!-- STATO -->
-  <section class="panel" id="panel-stato" role="tabpanel" aria-labelledby="tab-stato">
+  <!-- STATUS -->
+  <section class="panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status">
     <div class="metrics">
       <div class="card metric"><h2>GPU</h2><div class="value" id="gpu-value">–</div>
         <div class="bar" aria-hidden="true"><span id="gpu-bar"></span></div><div class="sub" id="gpu-sub"></div></div>
@@ -43,21 +43,21 @@
         <div class="bar" aria-hidden="true"><span id="cpu-bar"></span></div><div class="sub" id="cpu-sub"></div></div>
       <div class="card metric"><h2>RAM</h2><div class="value" id="ram-value">–</div>
         <div class="bar" aria-hidden="true"><span id="ram-bar"></span></div><div class="sub" id="ram-sub"></div></div>
-      <div class="card metric"><h2>Disco</h2><div class="value" id="disk-value">–</div>
+      <div class="card metric"><h2>Disk</h2><div class="value" id="disk-value">–</div>
         <div class="bar" aria-hidden="true"><span id="disk-bar"></span></div><div class="sub" id="disk-sub"></div></div>
     </div>
     <div class="card" id="training-card" hidden>
-      <h2>Training in corso</h2>
+      <h2>Training in progress</h2>
       <div id="training-now"></div>
     </div>
     <div class="grid2">
       <div class="card">
-        <h2>In corso</h2>
+        <h2>Running</h2>
         <ul class="list" id="running-jobs"></ul>
-        <p class="empty" id="running-empty">Nessun job avviato dal sito in corso.</p>
-        <h3 class="note" id="activities-title">Altri processi sulla macchina</h3>
+        <p class="empty" id="running-empty">No job started from the site is running.</p>
+        <h3 class="note" id="activities-title">Other processes on the machine</h3>
         <ul class="list" id="activities"></ul>
-        <p class="empty" id="activities-empty">Nessun altro job noto (training, localizzazione, speedlimits).</p>
+        <p class="empty" id="activities-empty">No other known job (training, localization, speedlimits).</p>
       </div>
       <div class="card">
         <h2>Comma</h2>
@@ -65,49 +65,49 @@
       </div>
     </div>
     <div class="card">
-      <h2>Processi sulla GPU</h2>
+      <h2>GPU processes</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Pid</th><th>Nome</th><th class="num">Memoria</th><th>Comando</th></tr></thead>
+        <thead><tr><th>Pid</th><th>Name</th><th class="num">Memory</th><th>Command</th></tr></thead>
         <tbody id="gpu-procs"></tbody>
       </table></div>
-      <p class="empty" id="gpu-procs-empty">Nessun processo sulla GPU.</p>
-      <p class="note">Dentro la LXC nvidia-smi spesso non sa il nome dei processi: i job noti sono elencati in «In corso».</p>
+      <p class="empty" id="gpu-procs-empty">No processes on the GPU.</p>
+      <p class="note">Inside the LXC container nvidia-smi often cannot see process names: known jobs are listed under “Running”.</p>
     </div>
   </section>
 
-  <!-- DATI -->
-  <section class="panel" id="panel-dati" role="tabpanel" aria-labelledby="tab-dati" hidden>
+  <!-- DATA -->
+  <section class="panel" id="panel-data" role="tabpanel" aria-labelledby="tab-data" hidden>
     <div class="tiles" id="data-tiles"></div>
     <div class="card">
-      <h2>Scarica e localizza</h2>
-      <p class="lead">Scarica i giri nuovi dal comma (solo dashcam, almeno 5 minuti, senza i primi e gli ultimi due segmenti), poi localizzali: senza localizzazione un segmento non entra nel training.</p>
+      <h2>Download and localize</h2>
+      <p class="lead">Download new drives from the comma (dashcam only, at least 5 minutes, without the first and last two segments), then localize them: a segment that is not localized is left out of training.</p>
       <div class="form-grid">
-        <label class="field">Dal giorno (facoltativo)<input type="date" id="fetch-since"></label>
+        <label class="field">Since (optional)<input type="date" id="fetch-since"></label>
       </div>
       <div class="buttons">
-        <div class="action"><button class="btn primary" type="button" id="btn-fetch">Scarica dal comma</button><div class="reason" id="reason-fetch"></div></div>
-        <div class="action"><button class="btn" type="button" id="btn-localize">Localizza</button><div class="reason" id="reason-localize"></div></div>
+        <div class="action"><button class="btn primary" type="button" id="btn-fetch">Download from the comma</button><div class="reason" id="reason-fetch"></div></div>
+        <div class="action"><button class="btn" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
       </div>
     </div>
     <div class="card">
-      <h2>Route</h2>
+      <h2>Routes</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Route</th><th class="num">Segmenti</th><th class="num">Localizzati</th><th class="num">Falliti</th>
-          <th class="num">Da fare</th><th class="num">Hold-out</th></tr></thead>
+        <thead><tr><th>Route</th><th class="num">Segments</th><th class="num">Localized</th><th class="num">Failed</th>
+          <th class="num">To do</th><th class="num">Hold-out</th></tr></thead>
         <tbody id="routes"></tbody>
       </table></div>
-      <p class="empty" id="routes-empty" hidden>Nessun segmento in data/: scaricali dal comma.</p>
-      <p class="note">Hold-out: i segmenti che il training non usa mai (stessa regola di supervised/dataset.py). Sono quelli giusti per valutare.</p>
+      <p class="empty" id="routes-empty" hidden>No segments in data/: download them from the comma.</p>
+      <p class="note">Hold-out: the segments training never uses (same rule as supervised/dataset.py). They are the right ones for evaluation.</p>
     </div>
     <div class="card">
-      <h2>Scartati (data_scartati/)</h2>
+      <h2>Discarded (data_scartati/)</h2>
       <ul class="list" id="discarded"></ul>
-      <p class="empty" id="discarded-empty" hidden>Nessun segmento scartato.</p>
+      <p class="empty" id="discarded-empty" hidden>No discarded segments.</p>
     </div>
     <details class="card">
-      <summary>Tutti i segmenti</summary>
+      <summary>All segments</summary>
       <div class="table-wrap"><table>
-        <thead><tr><th>Segmento</th><th>Stato</th><th>Mappa</th><th>Note</th></tr></thead>
+        <thead><tr><th>Segment</th><th>State</th><th>Map</th><th>Notes</th></tr></thead>
         <tbody id="segments"></tbody>
       </table></div>
     </details>
@@ -118,7 +118,7 @@
     <!-- One run, in detail: the training in progress, or the run chosen in the list. -->
     <div class="card" id="run-view" hidden>
       <div class="run-head">
-        <button class="btn small" type="button" id="run-back" hidden>&larr; Indietro</button>
+        <button class="btn small" type="button" id="run-back" hidden>&larr; Back</button>
         <h2 class="grow"><span id="run-view-title">Run</span> <span class="mono" id="run-view-name"></span></h2>
         <span id="run-view-state"></span>
       </div>
@@ -132,111 +132,111 @@
         <dl class="kv" id="run-view-last"></dl>
       </div>
       <div class="chart-head">
-        <h3>Grafici</h3>
-        <label class="check"><input type="checkbox" id="chart-smooth"> Smussa</label>
-        <label class="check"><input type="checkbox" id="chart-log" checked> Scala logaritmica</label>
+        <h3>Charts</h3>
+        <label class="check"><input type="checkbox" id="chart-smooth"> Smooth</label>
+        <label class="check"><input type="checkbox" id="chart-log" checked> Log scale</label>
         <span class="note" id="chart-note"></span>
       </div>
       <div class="charts" id="charts"></div>
-      <p class="empty" id="charts-empty" hidden>Questo run non ha ancora step registrati.</p>
+      <p class="empty" id="charts-empty" hidden>This run has no logged steps yet.</p>
       <details class="run-log" id="run-view-log-box">
-        <summary>Log del training</summary>
+        <summary>Training log</summary>
         <pre id="run-view-log"></pre>
       </details>
     </div>
 
     <div class="card" id="train-new">
-      <h2>Nuovo training</h2>
+      <h2>New training</h2>
       <div class="form-grid">
-        <label class="field">Passi (step)<input type="number" id="train-steps" min="1" max="200000" step="1" value="5000" inputmode="numeric"></label>
+        <label class="field">Steps<input type="number" id="train-steps" min="1" max="200000" step="1" value="5000" inputmode="numeric"></label>
         <label class="field">Batch per GPU<input type="number" id="train-batch" min="1" max="64" step="1" value="8" inputmode="numeric"></label>
         <label class="field">Workers<input type="number" id="train-workers" min="0" max="16" step="1" value="6" inputmode="numeric"></label>
         <label class="field">GPU<select id="train-gpus"></select></label>
         <label class="field">Teacher<select id="train-teacher">
-          <option value="md-v3">MD v3 (big model attuale)</option>
-          <option value="084747c7">084747c7 (big model vecchio)</option>
+          <option value="md-v3">MD v3 (current big model)</option>
+          <option value="084747c7">084747c7 (old big model)</option>
         </select></label>
         <label class="field">wandb<select id="train-wandb">
-          <option value="">automatico (online se configurato)</option>
+          <option value="">automatic (online if configured)</option>
           <option value="online">online (wandb.ai)</option>
-          <option value="offline">offline (solo su disco)</option>
-          <option value="disabled">disattivato</option>
+          <option value="offline">offline (disk only)</option>
+          <option value="disabled">off</option>
         </select></label>
       </div>
       <fieldset class="modes">
-        <legend>Partenza</legend>
-        <label class="check"><input type="radio" name="train-mode" value="fresh" checked> Da zero</label>
-        <label class="check"><input type="radio" name="train-mode" value="continue" id="mode-continue"> Dai pesi «stable» su Hugging Face</label>
+        <legend>Start</legend>
+        <label class="check"><input type="radio" name="train-mode" value="fresh" checked> From scratch</label>
+        <label class="check"><input type="radio" name="train-mode" value="continue" id="mode-continue"> From the “stable” weights on Hugging Face</label>
         <div class="reason indent" id="continue-note"></div>
-        <label class="check"><input type="radio" name="train-mode" value="resume" id="mode-resume"> Riprendi un run interrotto</label>
-        <div class="indent"><select id="train-resume-run" aria-label="Run da riprendere" disabled></select></div>
+        <label class="check"><input type="radio" name="train-mode" value="resume" id="mode-resume"> Resume an interrupted run</label>
+        <div class="indent"><select id="train-resume-run" aria-label="Run to resume" disabled></select></div>
       </fieldset>
       <div class="buttons">
-        <div class="action"><button class="btn primary" type="button" id="btn-train">Avvia il training</button><div class="reason" id="reason-train"></div></div>
-        <div class="action"><button class="btn" type="button" id="btn-train-test">Prova 10 step</button><div class="reason" id="reason-train_test"></div></div>
+        <div class="action"><button class="btn primary" type="button" id="btn-train">Start training</button><div class="reason" id="reason-train"></div></div>
+        <div class="action"><button class="btn" type="button" id="btn-train-test">Test 10 steps</button><div class="reason" id="reason-train_test"></div></div>
       </div>
     </div>
 
     <div class="card">
       <h2>Run</h2>
-      <p class="note">Tocca un run per vederne i dettagli.</p>
+      <p class="note">Tap a run to see its details.</p>
       <div class="table-wrap"><table class="runs-table">
-        <thead><tr><th>Run</th><th>Stato</th><th>Step</th><th class="num">ETA</th><th class="num wide">loss</th><th class="num wide">gt</th>
-          <th class="num wide">distill</th><th class="num wide">gt/plan</th><th class="wide">File</th></tr></thead>
+        <thead><tr><th>Run</th><th>State</th><th>Steps</th><th class="num">ETA</th><th class="num wide">loss</th><th class="num wide">gt</th>
+          <th class="num wide">distill</th><th class="num wide">gt/plan</th><th class="wide">Files</th></tr></thead>
         <tbody id="runs"></tbody>
       </table></div>
-      <p class="empty" id="runs-empty" hidden>Nessun run ancora.</p>
+      <p class="empty" id="runs-empty" hidden>No runs yet.</p>
     </div>
   </section>
 
-  <!-- VALUTAZIONE -->
-  <section class="panel" id="panel-valutazione" role="tabpanel" aria-labelledby="tab-valutazione" hidden>
+  <!-- EVALUATION -->
+  <section class="panel" id="panel-evaluation" role="tabpanel" aria-labelledby="tab-evaluation" hidden>
     <div class="card">
-      <h2>Valuta un modello</h2>
-      <p class="lead">Fa girare il modello sui segmenti hold-out (mai visti nel training) e misura di quanti metri la traiettoria prevista manca quella che hai guidato davvero (prossimi 10 s).</p>
+      <h2>Evaluate a model</h2>
+      <p class="lead">Runs the model on the hold-out segments (never seen in training) and measures by how many metres the predicted path misses the one you actually drove (next 10 s).</p>
       <div class="form-grid wide">
-        <label class="field">Modello<select id="eval-model"></select></label>
+        <label class="field">Model<select id="eval-model"></select></label>
       </div>
-      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-eval">Valuta</button><div class="reason" id="reason-eval"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-eval">Evaluate</button><div class="reason" id="reason-eval"></div></div></div>
     </div>
     <div class="card">
-      <h2>Classifica</h2>
+      <h2>Leaderboard</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th class="num">#</th><th>Modello</th><th class="num">avg miss</th><th class="num">laterale</th>
-          <th class="num">Segmenti</th><th>Data</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>Model</th><th class="num">avg miss</th><th class="num">lateral</th>
+          <th class="num">Segments</th><th>Date</th></tr></thead>
         <tbody id="leaderboard"></tbody>
       </table></div>
-      <p class="empty" id="leaderboard-empty" hidden>Nessuna valutazione ancora.</p>
-      <p class="note">avg miss: distanza media in metri tra la traiettoria prevista e quella vera; più basso è meglio.</p>
+      <p class="empty" id="leaderboard-empty" hidden>No evaluations yet.</p>
+      <p class="note">avg miss: mean distance in metres between the predicted path and the real one; lower is better.</p>
     </div>
   </section>
 
-  <!-- CONFRONTO VIDEO -->
-  <section class="panel" id="panel-confronto" role="tabpanel" aria-labelledby="tab-confronto" hidden>
+  <!-- COMPARISON -->
+  <section class="panel" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
     <div class="card">
-      <h2>Nuovo video di confronto</h2>
+      <h2>New comparison video</h2>
       <div class="form-grid wide">
-        <label class="field">Segmento<select id="cmp-segment"></select></label>
-        <label class="field">Riferimento (sopra)<select id="cmp-reference">
-          <option value="stock">Stock CD210 (il modello del comma)</option>
-          <option value="teacher">Teacher (il modello grande)</option>
-          <option value="logged">Logged (quello che ha guidato nel giro)</option>
+        <label class="field">Segment<select id="cmp-segment"></select></label>
+        <label class="field">Reference (top)<select id="cmp-reference">
+          <option value="stock">Stock CD210 (the comma's model)</option>
+          <option value="teacher">Teacher (the big model)</option>
+          <option value="logged">Logged (the model that drove at the time)</option>
         </select></label>
-        <label class="field">Studente (sotto)<select id="cmp-student"></select></label>
+        <label class="field">Student (bottom)<select id="cmp-student"></select></label>
       </div>
       <div class="form-grid">
-        <label class="field">Inizio (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
-        <label class="field">Durata (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>
-        <label class="field">Velocità<select id="cmp-speed">
+        <label class="field">Start (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
+        <label class="field">Duration (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>
+        <label class="field">Speed<select id="cmp-speed">
           <option value="0.25">0.25×</option><option value="0.5" selected>0.5×</option><option value="1">1×</option>
         </select></label>
       </div>
       <div class="buttons">
-        <label class="check"><input type="checkbox" id="cmp-inset" checked> Vista dall'alto (riquadro)</label>
-        <label class="check"><input type="checkbox" id="cmp-gt"> Mostra la traiettoria vera</label>
+        <label class="check"><input type="checkbox" id="cmp-inset" checked> Top view (inset)</label>
+        <label class="check"><input type="checkbox" id="cmp-gt"> Show the real path</label>
       </div>
-      <p class="note">L'inizio minimo è 5.2 s: prima i modelli si riscaldano (uno più basso viene spostato lì). Sulla GPU un video di 15 s richiede circa un minuto.</p>
-      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-compare">Crea il video</button><div class="reason" id="reason-compare"></div></div></div>
+      <p class="note">The earliest start is 5.2 s: before that the models are warming up (a lower value is moved there). On the GPU a 15 s video takes about a minute.</p>
+      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-compare">Make the video</button><div class="reason" id="reason-compare"></div></div></div>
     </div>
     <div class="card" id="player-card" hidden>
       <h2 id="player-title">Video</h2>
@@ -246,93 +246,93 @@
       </div>
     </div>
     <div class="card">
-      <h2>Video fatti</h2>
+      <h2>Videos</h2>
       <ul class="list" id="videos"></ul>
-      <p class="empty" id="videos-empty" hidden>Nessun video ancora.</p>
+      <p class="empty" id="videos-empty" hidden>No videos yet.</p>
     </div>
   </section>
 
-  <!-- PUBBLICA -->
-  <section class="panel" id="panel-pubblica" role="tabpanel" aria-labelledby="tab-pubblica" hidden>
+  <!-- PUBLISH -->
+  <section class="panel" id="panel-publish" role="tabpanel" aria-labelledby="tab-publish" hidden>
     <div class="card">
       <h2>Export ONNX</h2>
-      <p class="lead">Crea il modello ONNX per il comma da un run finito (serve il modello originale del comma come riferimento).</p>
+      <p class="lead">Builds the ONNX model for the comma from a finished run (needs the comma's original model as a reference).</p>
       <div class="form-grid wide"><label class="field">Run<select id="export-run"></select></label></div>
-      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-export">Esporta ONNX</button><div class="reason" id="reason-export"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-export">Export ONNX</button><div class="reason" id="reason-export"></div></div></div>
     </div>
     <div class="card">
-      <h2>Pubblica su Hugging Face</h2>
-      <p class="lead">Prima la prova: esporta, compila sul comma e prepara tutto senza caricare niente. Se finisce bene, la pubblicazione vera chiede il nome scritto a mano.</p>
+      <h2>Publish to Hugging Face</h2>
+      <p class="lead">Dry run first: it exports, compiles on the comma and prepares everything without uploading anything. If it succeeds, the real publish asks you to type the name.</p>
       <div class="form-grid wide">
         <label class="field">Run<select id="publish-run"></select></label>
-        <label class="field">Nome del modello<input type="text" id="publish-name" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <label class="field">Model name<input type="text" id="publish-name" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       </div>
-      <div class="buttons"><label class="check"><input type="checkbox" id="publish-stable"> Stable (diventa la base di «Dai pesi stable»)</label></div>
+      <div class="buttons"><label class="check"><input type="checkbox" id="publish-stable"> Stable (becomes the base for “From the stable weights”)</label></div>
       <div class="reason" id="publish-name-note"></div>
-      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-publish-dry">Prova (dry run)</button><div class="reason" id="reason-publish_dry"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-publish-dry">Dry run</button><div class="reason" id="reason-publish_dry"></div></div></div>
       <div id="dry-status" class="note"></div>
       <hr class="divider">
       <div class="form-grid wide">
-        <label class="field">Scrivi il nome per confermare<input type="text" id="publish-confirm" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <label class="field">Type the name to confirm<input type="text" id="publish-confirm" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       </div>
-      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Pubblica su Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Publish to Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
     </div>
     <div class="card">
-      <h2>Già su Hugging Face</h2>
+      <h2>Already on Hugging Face</h2>
       <dl class="kv" id="hf-kv"></dl>
       <ul class="list" id="hf-models"></ul>
-      <p class="empty" id="hf-empty" hidden>Nessun modello pubblicato.</p>
+      <p class="empty" id="hf-empty" hidden>No published models.</p>
     </div>
   </section>
 
   <!-- COMMA -->
   <section class="panel" id="panel-comma" role="tabpanel" aria-labelledby="tab-comma" hidden>
     <div class="card">
-      <h2>Stato del comma</h2>
+      <h2>Comma status</h2>
       <dl class="kv" id="comma-kv-comma"></dl>
-      <div class="buttons"><button class="btn small" type="button" id="btn-comma-check">Controlla ora</button></div>
+      <div class="buttons"><button class="btn small" type="button" id="btn-comma-check">Check now</button></div>
     </div>
     <div class="card">
-      <h2>Installa un modello sul comma</h2>
-      <p class="lead">Mette il modello del run al posto di quello di openpilot e riavvia il comma (il primo avvio ricompila, qualche minuto in più). Solo da fermo (offroad) e con il menu Modelli su Default.</p>
+      <h2>Install a model on the comma</h2>
+      <p class="lead">Puts the run's model in place of openpilot's and reboots the comma (the first boot recompiles, a few extra minutes). Only when parked (offroad) and with the Models menu set to Default.</p>
       <div class="form-grid wide">
         <label class="field">Run<select id="install-run"></select></label>
-        <label class="field">Scrivi INSTALLA per confermare<input type="text" id="install-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+        <label class="field">Type INSTALL to confirm<input type="text" id="install-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
       </div>
-      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Installa sul comma</button><div class="reason" id="reason-install"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
     </div>
     <div class="card">
-      <h2>Rimetti il modello originale</h2>
+      <h2>Restore the original model</h2>
       <div class="form-grid wide">
-        <label class="field">Scrivi RIPRISTINA per confermare<input type="text" id="restore-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+        <label class="field">Type RESTORE to confirm<input type="text" id="restore-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
       </div>
-      <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Ripristina e riavvia</button><div class="reason" id="reason-restore"></div></div></div>
+      <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Restore and reboot</button><div class="reason" id="reason-restore"></div></div></div>
     </div>
   </section>
 
-  <!-- JOB -->
-  <section class="panel" id="panel-job" role="tabpanel" aria-labelledby="tab-job" hidden>
+  <!-- JOBS -->
+  <section class="panel" id="panel-jobs" role="tabpanel" aria-labelledby="tab-jobs" hidden>
     <div class="card">
-      <h2>Codice</h2>
-      <p class="lead">Versione sul server: <code id="code-version">–</code>. «Aggiorna il codice» scarica l'ultima versione, aggiorna le librerie e riavvia il sito; parte solo quando non gira nient'altro.</p>
+      <h2>Code</h2>
+      <p class="lead">Version on the server: <code id="code-version">–</code>. “Update the code” pulls the latest version, updates the libraries and restarts the site; it starts only when nothing else is running.</p>
       <div class="buttons">
-        <div class="action"><button class="btn" type="button" id="btn-update">Aggiorna il codice</button><div class="reason" id="reason-update"></div></div>
-        <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Prova del sito</button><div class="reason" id="reason-selftest"></div></div>
+        <div class="action"><button class="btn" type="button" id="btn-update">Update the code</button><div class="reason" id="reason-update"></div></div>
+        <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Site self-test</button><div class="reason" id="reason-selftest"></div></div>
       </div>
     </div>
     <div class="card">
-      <h2>Job</h2>
+      <h2>Jobs</h2>
       <ul class="list" id="jobs"></ul>
-      <p class="empty" id="jobs-empty" hidden>Nessun job ancora: i pulsanti delle altre sezioni li avviano in background.</p>
+      <p class="empty" id="jobs-empty" hidden>No jobs yet: the buttons in the other sections start them in the background.</p>
     </div>
   </section>
 </main>
 
-<section class="terminal" id="terminal" aria-label="Log del job">
-  <header><strong id="term-title">Log</strong><span class="pill run" id="term-state" hidden>in corso</span>
+<section class="terminal" id="terminal" aria-label="Job log">
+  <header><strong id="term-title">Log</strong><span class="pill run" id="term-state" hidden>running</span>
     <span class="grow"></span>
-    <button class="btn small" id="term-follow" type="button" aria-pressed="true">Segui</button>
-    <button class="btn small" id="term-close" type="button">Chiudi</button></header>
+    <button class="btn small" id="term-follow" type="button" aria-pressed="true">Follow</button>
+    <button class="btn small" id="term-close" type="button">Close</button></header>
   <pre id="term-text" tabindex="0"></pre>
 </section>
 <div class="toast" id="toast" role="alert"></div>

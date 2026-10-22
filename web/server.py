@@ -55,9 +55,9 @@ STATIC_FILES = {
     'app.css': 'text/css; charset=utf-8',
     'favicon.svg': 'image/svg+xml',
 }
-BUNDLE_REASON = ('sul comma e\' scelto un modello nel menu Modelli: rimetti Default (Impostazioni > Modelli) '
-                 'e controlla di nuovo')
-TOKEN_MESSAGE = 'Accesso negato: apri il link del sito che contiene il token.'
+BUNDLE_REASON = ('a model is chosen in the Models menu of the comma: set it back to Default (Settings > Models) '
+                 'and check again')
+TOKEN_MESSAGE = 'Access denied: open the site link that contains the token.'
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 PROBLEM_CSP = ("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
                "frame-ancestors 'none'")
@@ -83,7 +83,7 @@ def access_token() -> str:
     configured = os.environ.get(TOKEN_ENV, '')
     if configured:
         if not TOKEN_RE.fullmatch(configured):
-            raise SystemExit(TOKEN_ENV + ' deve avere almeno 16 caratteri tra lettere, cifre, "-" e "_"')
+            raise SystemExit(TOKEN_ENV + ' must have at least 16 characters: letters, digits, "-" and "_"')
         return configured
     return secrets.token_urlsafe(24)
 
@@ -303,7 +303,7 @@ class App:
         gpu_reasons = []
         gpu = machine['system']['gpu']
         if gpu is not None and gpu['processes']:
-            gpu_reasons.append(str(len(gpu['processes'])) + ' processi sulla GPU')
+            gpu_reasons.append(str(len(gpu['processes'])) + ' processes on the GPU')
         for activity in machine['activities']:
             if activity['uses_gpu']:
                 gpu_reasons.append(activity['label'])
@@ -318,16 +318,16 @@ class App:
             if not reason:
                 reason = self.jobs.conflict_reason(action.group, running)
             if not reason and action.needs_gpu and gpu_reasons:
-                reason = 'la GPU e\' occupata (' + ', '.join(gpu_reasons) + ')'
+                reason = 'the GPU is busy (' + ', '.join(gpu_reasons) + ')'
             if not reason and action.needs_comma_offroad:
                 if comma_state.get('reachable') is not True:
-                    reason = 'il comma non e\' raggiungibile'
+                    reason = 'the comma is not reachable'
                 elif comma_state.get('onroad') is True:
-                    reason = 'il comma e\' onroad: spegni l\'auto'
+                    reason = 'the comma is onroad: turn the car off'
                 elif action_id == 'install' and comma_state.get('bundle_default') is False:
                     reason = BUNDLE_REASON
             if not reason and action_id in ('export', 'publish_dry', 'publish', 'install') and not finished_runs:
-                reason = 'nessun run finito (con supercombo.pt)'
+                reason = 'no finished run (with supercombo.pt)'
             states[action_id] = {'label': action.label, 'group': action.group, 'allowed': not reason,
                                  'reason': reason, 'needs_gpu': action.needs_gpu}
         return states
@@ -360,14 +360,14 @@ class App:
         spec = build_job(self.repo, action_id, params, test_actions=self.test_actions)
         missing = script_missing(self.repo, action_id, self.test_actions)
         if missing:
-            raise WebError(409, 'script_missing', 'Non posso: ' + missing + '.')
+            raise WebError(409, 'script_missing', 'Not possible: ' + missing + '.')
         if spec.needs_comma_offroad:
             state = self.comma.probe_now()
             if state.get('reachable') is not True:
                 raise WebError(409, 'comma_unreachable',
-                               'Il comma non e\' raggiungibile: ' + state.get('error', '') + '.')
+                               'The comma is not reachable: ' + state.get('error', '') + '.')
             if state.get('onroad') is True:
-                raise WebError(409, 'comma_onroad', 'Il comma e\' onroad: spegni l\'auto e riprova.')
+                raise WebError(409, 'comma_onroad', 'The comma is onroad: turn the car off and try again.')
             # helpers/install_model_on_comma.sh refuses it too: a model chosen in the Models menu runs
             # in place of openpilot's one, so the installed model would not be used.
             if action_id == 'install' and state.get('bundle_default') is False:
@@ -376,21 +376,21 @@ class App:
             snapshot = self.hf.snapshot(force=True)
             if not snapshot['ok']:
                 raise WebError(503, 'hf_unreachable',
-                               'Non riesco a controllare i nomi su Hugging Face (' + snapshot['error'] + '): riprova.')
+                               'Cannot check the names on Hugging Face (' + snapshot['error'] + '): try again.')
             slug = slug_of(spec.params['name'])
             if slug in snapshot['models'] or slug in snapshot['releases']:
-                raise WebError(409, 'name_taken', 'Su Hugging Face c\'e\' gia\' un modello ' + slug
-                               + ': scegli un altro nome.')
+                raise WebError(409, 'name_taken', 'Hugging Face already has a model ' + slug
+                               + ': choose another name.')
             if self.jobs.last_successful('publish_dry', spec.params) is None:
-                raise WebError(409, 'dry_run_missing', 'Prima fai la prova (dry run) con lo stesso run, nome e '
-                               'stable, e controlla che finisca bene.')
+                raise WebError(409, 'dry_run_missing', 'First run the test publish (dry run) with the same run, '
+                               'name and stable, and check that it succeeds.')
         job = self.jobs.start(spec)
-        print('Job avviato: ' + describe(job), flush=True)
+        print('Job started: ' + describe(job), flush=True)
         return job
 
 
 def render_problem(status: int, message: str) -> str:
-    return ('<!doctype html><html lang="it"><head><meta charset="utf-8">'
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<meta name="color-scheme" content="light dark"><title>Distill</title>'
             '<style>body{margin:0;padding:24px 16px;'
@@ -399,7 +399,7 @@ def render_problem(status: int, message: str) -> str:
             'border:1px solid #cfd4da;border-radius:12px;padding:20px}p{margin:0 0 8px}'
             '@media (prefers-color-scheme:dark){body{background:#111317;color:#e8ebee}'
             'main{background:#191c21;border-color:#2e333a}}</style></head><body><main>'
-            '<p>' + html.escape(message) + '</p><p>Codice HTTP ' + str(status) + '.</p></main></body></html>')
+            '<p>' + html.escape(message) + '</p><p>HTTP code ' + str(status) + '.</p></main></body></html>')
 
 
 def make_handler(app: App):
@@ -434,8 +434,8 @@ def make_handler(app: App):
             except WebError as exc:
                 self._problem(exc.status, exc.reason, exc.message, self._is_api())
             except Exception as exc:
-                print('Errore interno: ' + type(exc).__name__ + ': ' + short_text(exc, 200), flush=True)
-                self._problem(500, 'server_error', 'Errore interno del server: ' + type(exc).__name__ + '.',
+                print('Internal error: ' + type(exc).__name__ + ': ' + short_text(exc, 200), flush=True)
+                self._problem(500, 'server_error', 'Internal server error: ' + type(exc).__name__ + '.',
                               self._is_api())
 
         def _is_api(self):
@@ -446,7 +446,7 @@ def make_handler(app: App):
             path = unquote(parts.path)
             api = path.startswith('/api/')
             if not app.host_allowed(self.headers.get('Host')):
-                self._problem(403, 'host_not_allowed', 'Nome host non consentito per questo server.', api)
+                self._problem(403, 'host_not_allowed', 'Host name not allowed for this server.', api)
                 return
             query = parse_qs(parts.query, keep_blank_values=True)
             if 'token' in query:
@@ -486,7 +486,7 @@ def make_handler(app: App):
                 self._redirect(target, None)
                 return
             if method != 'GET' or not app.token_matches(supplied):
-                self._problem(403, 'invalid_token', 'Token non valido: usa l\'indirizzo stampato da helpers/web.sh.',
+                self._problem(403, 'invalid_token', 'Invalid token: use the address printed by helpers/web.sh.',
                               api)
                 return
             cookie = app.cookie_name + '=' + app.token + '; Path=/; HttpOnly; SameSite=Strict'
@@ -503,7 +503,7 @@ def make_handler(app: App):
             if match:
                 name = match.group(1)
                 if name not in STATIC_FILES:
-                    self._problem(404, 'not_found', 'File non trovato.', False)
+                    self._problem(404, 'not_found', 'File not found.', False)
                     return
                 self._send(200, STATIC_FILES[name], (STATIC_DIR / name).read_bytes())
                 return
@@ -522,21 +522,21 @@ def make_handler(app: App):
                 if RUN_RE.fullmatch(match.group(1)):
                     detail = app.run_detail(match.group(1))
                 if detail is None:
-                    raise WebError(404, 'unknown_run', 'Run sconosciuto.')
+                    raise WebError(404, 'unknown_run', 'Unknown run.')
                 self._json(200, detail)
                 return
             match = re.fullmatch(r'/api/runs/([^/]+)/metrics', path)
             if match:
                 name = match.group(1)
                 if not RUN_RE.fullmatch(name):
-                    raise WebError(404, 'unknown_run', 'Run sconosciuto.')
+                    raise WebError(404, 'unknown_run', 'Unknown run.')
                 points = 800
                 raw_points = query.get('points', [''])[0]
                 if re.fullmatch(r'[0-9]{1,5}', raw_points):
                     points = min(max(int(raw_points), 10), 5000)
                 series = app.runs.series(name, points)
                 if series is None:
-                    raise WebError(404, 'unknown_run', 'Run sconosciuto.')
+                    raise WebError(404, 'unknown_run', 'Unknown run.')
                 self._json(200, series)
                 return
             if path == '/api/eval':
@@ -568,14 +568,14 @@ def make_handler(app: App):
                 self._send_video(match.group(1))
                 return
             if path.startswith('/api/run/') or re.fullmatch(r'/api/jobs/[^/]+/stop', path):
-                self._problem(405, 'method_not_allowed', 'Usa POST.', True)
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
-            self._problem(404, 'not_found', 'Pagina non trovata.', path.startswith('/api/'))
+            self._problem(404, 'not_found', 'Page not found.', path.startswith('/api/'))
 
         def _send_video(self, name):
             path = video_path(app.repo, name)
             if path is None:
-                self._problem(404, 'not_found', 'Video non trovato.', False)
+                self._problem(404, 'not_found', 'Video not found.', False)
                 return
             size = path.stat().st_size
             wanted = parse_range(self.headers.get('Range'), size)
@@ -621,15 +621,15 @@ def make_handler(app: App):
             stop = re.fullmatch(r'/api/jobs/([^/]+)/stop', path)
             check = path == '/api/comma/check'
             if not run and not stop and not check:
-                self._problem(404, 'not_found', 'Indirizzo non valido.', True)
+                self._problem(404, 'not_found', 'Invalid address.', True)
                 return
             # Same origin and JSON only: no other site and no HTML form can start a job.
             if not self._same_origin():
-                self._problem(403, 'cross_origin', 'Richiesta da un\'altra origine rifiutata.', True)
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                 return
             content_type = self.headers.get('Content-Type', '')
             if content_type.split(';')[0].strip().lower() != 'application/json':
-                self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
             body = self._read_json()
             if run:
@@ -638,9 +638,9 @@ def make_handler(app: App):
             elif stop:
                 job_id = stop.group(1)
                 if not JOB_ID_RE.fullmatch(job_id):
-                    raise WebError(404, 'unknown_job', 'Job sconosciuto.')
+                    raise WebError(404, 'unknown_job', 'Unknown job.')
                 job = app.jobs.stop(job_id)
-                print('Job fermato dal sito: ' + describe(job), flush=True)
+                print('Job stopped from the site: ' + describe(job), flush=True)
                 self._json(200, {'ok': True, 'job': job})
             else:
                 self._json(200, {'ok': True, 'comma': app.comma.probe_now()})
@@ -666,25 +666,25 @@ def make_handler(app: App):
 
         def _read_json(self):
             if self.headers.get('Transfer-Encoding') is not None:
-                raise WebError(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise WebError(411, 'length_required', 'Request without Content-Length.')
             raw_length = self.headers.get('Content-Length')
             if raw_length is None or not re.fullmatch(r'[0-9]{1,9}', raw_length.strip()):
-                raise WebError(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise WebError(411, 'length_required', 'Request without Content-Length.')
             length = int(raw_length.strip())
             if length > MAX_BODY_BYTES:
                 self.close_connection = True
-                raise WebError(413, 'too_large', 'Richiesta troppo grande (massimo 64 KiB).')
+                raise WebError(413, 'too_large', 'Request too large (at most 64 KiB).')
             raw = self.rfile.read(length)
             if len(raw) != length:
-                raise WebError(400, 'invalid_json', 'Richiesta incompleta.')
+                raise WebError(400, 'invalid_json', 'Incomplete request.')
             if length == 0:
                 return {}
             try:
                 data = strict_json_loads(raw.decode('utf-8'))
             except (UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
-                raise WebError(400, 'invalid_json', 'Dati JSON non validi.') from exc
+                raise WebError(400, 'invalid_json', 'Invalid JSON data.') from exc
             if not isinstance(data, dict):
-                raise WebError(400, 'invalid_json', 'Serve un oggetto JSON.')
+                raise WebError(400, 'invalid_json', 'A JSON object is required.')
             return data
 
         # -- responses -----------------------------------------------------------------------------
@@ -796,12 +796,12 @@ def base_urls(host: str, port: int) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog='python -m web.server', description='distill-web, il sito di controllo')
-    parser.add_argument('--host', default='127.0.0.1', help='indirizzo (default 127.0.0.1; 0.0.0.0 = rete locale, '
-                        'con token)')
-    parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='porta (default 8766)')
+    parser = argparse.ArgumentParser(prog='python -m web.server', description='distill-web, the control site')
+    parser.add_argument('--host', default='127.0.0.1', help='address (default 127.0.0.1; 0.0.0.0 = local network, '
+                        'with token)')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='port (default 8766)')
     parser.add_argument('--test-actions', action='store_true',
-                        help='aggiunge l\'azione "selftest" (job finto, per provare il sito)')
+                        help='adds the "selftest" action (a fake job, to test the site)')
     options = parser.parse_args(arguments)
 
     repo = CODE_ROOT
@@ -809,7 +809,7 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         server, app = create_server(repo, host=options.host, port=options.port, test_actions=options.test_actions)
     except OSError as exc:
-        print('Non riesco ad avviare il sito su ' + options.host + ':' + str(options.port) + ': ' + str(exc),
+        print('Cannot start the site on ' + options.host + ':' + str(options.port) + ': ' + str(exc),
               file=sys.stderr, flush=True)
         return 1
     app.comma.start()
@@ -821,23 +821,23 @@ def main(arguments: list[str] | None = None) -> int:
                 suffix = '?token=<' + TOKEN_ENV + '>'
             else:
                 suffix = '?token=' + app.token
-        print('distill-web in ascolto su ' + options.host + ':' + str(port), flush=True)
-        print('Apri nel browser:', flush=True)
+        print('distill-web listening on ' + options.host + ':' + str(port), flush=True)
+        print('Open in the browser:', flush=True)
         for base in base_urls(options.host, port):
             print('  ' + base + '/' + suffix, flush=True)
         if app.require_token and token_from_env:
             # A token fixed in the environment (the systemd service) is never printed: the output ends
             # in a log.
-            print('Il token e\' quello di ' + TOKEN_ENV + ' (servizio: /etc/distill-web.env, a mano: .env del clone) '
-                  'e non viene stampato.', flush=True)
+            print('The token is the one of ' + TOKEN_ENV + ' (service: /etc/distill-web.env, by hand: .env of the '
+                  'clone) and is not printed.', flush=True)
         elif app.require_token:
-            print('Il token resta valido finche\' il sito e\' acceso (fissalo con ' + TOKEN_ENV + ').', flush=True)
+            print('The token stays valid while the site is on (fix it with ' + TOKEN_ENV + ').', flush=True)
         else:
-            print('Solo da questo computer. Da un altro: ssh -L ' + str(port) + ':127.0.0.1:' + str(port)
-                  + ' <server>, oppure riavvia con --host 0.0.0.0', flush=True)
+            print('Only from this computer. From another one: ssh -L ' + str(port) + ':127.0.0.1:' + str(port)
+                  + ' <server>, or restart with --host 0.0.0.0', flush=True)
         if options.test_actions:
-            print('Azione di prova "selftest" attiva (--test-actions).', flush=True)
-        print('Job e log in ' + str(app.jobs.jobs_dir) + '. Ctrl+C per fermare (i job continuano).', flush=True)
+            print('Test action "selftest" enabled (--test-actions).', flush=True)
+        print('Jobs and logs in ' + str(app.jobs.jobs_dir) + '. Ctrl+C to stop (the jobs keep running).', flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

@@ -94,7 +94,7 @@ def _download(url: str, partial: Path, size: int) -> None:
             # The server ignored the range: start over.
             done = 0
         elif response.status_code not in (200, 206):
-            raise TaskError('download del teacher fallito (HTTP ' + str(response.status_code) + ')')
+            raise TaskError('teacher download failed (HTTP ' + str(response.status_code) + ')')
         next_report = 0
         with partial.open('ab' if done else 'wb') as handle:
             for chunk in response.iter_content(CHUNK_BYTES):
@@ -104,7 +104,7 @@ def _download(url: str, partial: Path, size: int) -> None:
                 if percent >= next_report:
                     # The PROGRESS line is the progress bar of the site, the other one is for people.
                     say('PROGRESS ' + str(done // 1_000_000) + '/' + str(size // 1_000_000))
-                    say('  ' + str(done // 1_000_000) + ' di ' + str(size // 1_000_000) + ' MB (' + str(percent) + '%)')
+                    say('  ' + str(done // 1_000_000) + ' of ' + str(size // 1_000_000) + ' MB (' + str(percent) + '%)')
                     next_report = percent + 5
 
 
@@ -114,19 +114,19 @@ def ensure_teacher(name: str, repo: Path = REPO) -> Path:
     import requests
 
     if name not in TEACHERS:
-        raise TaskError('teacher sconosciuto: ' + name + ' (ci sono: ' + ', '.join(TEACHERS) + ')')
+        raise TaskError('unknown teacher: ' + name + ' (available: ' + ', '.join(TEACHERS) + ')')
     teacher = TEACHERS[name]
     target = repo / teacher.path
     local_size = target.stat().st_size if target.is_file() else 0
     remote_size = _remote_size(teacher.url)
     if remote_size is None:
         if not target.is_file():
-            raise TaskError('manca il teacher ' + name + ' e ' + teacher.source + ' non risponde per scaricarlo')
-        say('Teacher ' + name + ': ' + teacher.source + ' non risponde, uso il file che c\'e\' ('
-            + str(local_size) + ' byte).')
+            raise TaskError('teacher ' + name + ' is missing and ' + teacher.source + ' does not answer to download it')
+        say('Teacher ' + name + ': ' + teacher.source + ' does not answer, using the file already here ('
+            + str(local_size) + ' bytes).')
         return target
     if local_size == remote_size:
-        say('Teacher ' + name + ': ok (' + str(local_size) + ' byte).')
+        say('Teacher ' + name + ': ok (' + str(local_size) + ' bytes).')
         return target
 
     partial = target.with_name(target.name + '.part')
@@ -136,24 +136,24 @@ def ensure_teacher(name: str, repo: Path = REPO) -> Path:
         partial.unlink()
         partial_size = 0
     if partial_size != remote_size:
-        say('Teacher ' + name + ': ' + str(partial_size) + ' di ' + str(remote_size) + ' byte, scarico da '
+        say('Teacher ' + name + ': ' + str(partial_size) + ' of ' + str(remote_size) + ' bytes, downloading from '
             + teacher.source + '...')
         try:
             _download(teacher.url, partial, remote_size)
         except (requests.RequestException, OSError) as exc:
-            raise TaskError('download del teacher interrotto (' + str(exc) + '): riavvia per completarlo') from exc
+            raise TaskError('teacher download interrupted (' + str(exc) + '): run it again to complete it') from exc
     partial_size = partial.stat().st_size
     if partial_size != remote_size:
-        raise TaskError('teacher scaricato a meta\' (' + str(partial_size) + ' di ' + str(remote_size)
-                        + ' byte): riavvia per completarlo')
-    say('Teacher ' + name + ': scaricato, controllo lo sha256...')
+        raise TaskError('teacher half downloaded (' + str(partial_size) + ' of ' + str(remote_size)
+                        + ' bytes): run it again to complete it')
+    say('Teacher ' + name + ': downloaded, checking the sha256...')
     local_sha256 = sha256_of(partial)
     if local_sha256 != teacher.sha256:
         partial.unlink()
-        raise TaskError('teacher scaricato ma sha256 diverso (' + local_sha256 + ' invece di ' + teacher.sha256
-                        + '): cancellato, riavvia per riscaricarlo')
+        raise TaskError('teacher downloaded but its sha256 differs (' + local_sha256 + ' instead of ' + teacher.sha256
+                        + '): deleted, run it again to download it again')
     os.replace(partial, target)
-    say('Teacher ' + name + ': ok, sha256 giusto (' + str(remote_size) + ' byte).')
+    say('Teacher ' + name + ': ok, sha256 correct (' + str(remote_size) + ' bytes).')
     return target
 
 

@@ -1,9 +1,9 @@
 """Copy segments of the comma into the shared folder of the comma files and link them into data/.
 
-    python -m tasks.fetch [--host=<ip|nome>] [--since=<AAAA-MM-GG>] [--localizer]
-    python -m tasks.fetch [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
-    python -m tasks.fetch [--host=<ip|nome>] <route> --skip=<lista> [--localizer]
-    python -m tasks.fetch [--host=<ip|nome>] <route> [--strip-ends] [--localizer]
+    python -m tasks.fetch [--host=<ip|name>] [--since=<YYYY-MM-DD>] [--localizer]
+    python -m tasks.fetch [--host=<ip|name>] <route> --segments=<list> [--localizer]
+    python -m tasks.fetch [--host=<ip|name>] <route> --skip=<list> [--localizer]
+    python -m tasks.fetch [--host=<ip|name>] <route> [--strip-ends] [--localizer]
   python -m tasks.fetch                                           (automatic, see below)
   python -m tasks.fetch --since=2026-10-25
   python -m tasks.fetch 6616faac453a3064/0000011c--8152ba83cf     (= --strip-ends)
@@ -49,7 +49,7 @@ Already downloaded files are skipped by rsync, so it can be run after every driv
               needed. It is the default when neither segments nor --skip are given.
 --localizer: also run the localizer on each segment (off by default: tasks.localize does it later
              and redoes it when a better ionosphere map comes out). --no-localizer turns it off.
---since: automatic mode only, first day to look at (AAAA-MM-GG).
+--since: automatic mode only, first day to look at (YYYY-MM-DD).
 --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
      COMMA_VIDEOS_DIR (default comma-videos next to this repo), shared folder of the comma files
@@ -125,7 +125,7 @@ def parse_segment(item: str) -> list[int]:
         return list(range(int(first), int(last) + 1))
     if NUMBER_RE.fullmatch(item):
         return [int(item)]
-    raise TaskError('segmento non valido: ' + item)
+    raise TaskError('invalid segment: ' + item)
 
 
 def _list_items(text: str) -> list[str]:
@@ -139,7 +139,7 @@ def _list_items(text: str) -> list[str]:
 def parse_segment_list(text: str) -> list[int]:
     """A comma separated list (1,2,5-9)."""
     if not text:
-        raise TaskError('--segments vuole una lista (es. --segments=1,2,3)')
+        raise TaskError('--segments needs a list (e.g. --segments=1,2,3)')
     segments = []
     for item in _list_items(text):
         segments += parse_segment(item)
@@ -149,7 +149,7 @@ def parse_segment_list(text: str) -> list[int]:
 def parse_skip_list(text: str) -> list:
     """A comma separated skip list (0,1,14 or 0,1,2,last or 2-5); the words stay words."""
     if not text:
-        raise TaskError('--skip vuole una lista (es. --skip=0,1,last)')
+        raise TaskError('--skip needs a list (e.g. --skip=0,1,last)')
     skip = []
     for item in _list_items(text):
         if item in SKIP_WORDS or LAST_MINUS_RE.fullmatch(item):
@@ -157,13 +157,13 @@ def parse_skip_list(text: str) -> list:
         elif RANGE_RE.fullmatch(item) or NUMBER_RE.fullmatch(item):
             skip += parse_segment(item)
         else:
-            raise TaskError('segmento da saltare non valido: ' + item)
+            raise TaskError('invalid segment to skip: ' + item)
     return skip
 
 
 def _check_since(value: str) -> str:
     if not DATE_RE.fullmatch(value):
-        raise TaskError('--since vuole una data AAAA-MM-GG (es. --since=2026-10-20)')
+        raise TaskError('--since needs a YYYY-MM-DD date (e.g. --since=2026-10-20)')
     return value
 
 
@@ -200,7 +200,7 @@ def parse_args(arguments: list[str]) -> Options:
         elif argument == '--host' or argument.startswith('--host='):
             host = value_of_next() if argument == '--host' else argument[len('--host='):]
             if not host:
-                raise TaskError('--host vuole un IP o un nome')
+                raise TaskError('--host needs an IP or a name')
             options.host = host
         elif argument == '--segments':
             options.segments += parse_segment_list(value_of_next())
@@ -213,18 +213,18 @@ def parse_args(arguments: list[str]) -> Options:
         elif not options.route and CONNECT_ROUTE_RE.fullmatch(argument):
             options.route = CONNECT_ROUTE_RE.fullmatch(argument).group(2)
         elif not options.route:
-            raise TaskError('route non valida: ' + argument + ' (es. 6616faac453a3064/0000011c--8152ba83cf)')
+            raise TaskError('invalid route: ' + argument + ' (e.g. 6616faac453a3064/0000011c--8152ba83cf)')
         else:
             options.segments += parse_segment(argument)
         index += 1
 
     if not options.route:
         if options.segments or options.skip_mode:
-            raise TaskError('manca la route (es. 0000011c--8152ba83cf)')
+            raise TaskError('the route is missing (e.g. 0000011c--8152ba83cf)')
         options.auto = True
     elif options.skip_mode:
         if options.segments:
-            raise TaskError('--skip/--strip-ends non va insieme a una lista di segmenti')
+            raise TaskError('--skip/--strip-ends does not go with a list of segments')
     elif not options.segments:
         # No segments and no --skip: the default is --strip-ends.
         options.skip = list(STRIP_ENDS)
@@ -239,9 +239,9 @@ def videos_dir() -> Path:
     try:
         os.makedirs(folder, exist_ok=True)
     except OSError:
-        raise TaskError('non riesco a creare la cartella comune ' + folder + ' (COMMA_VIDEOS_DIR)') from None
+        raise TaskError('cannot create the shared folder ' + folder + ' (COMMA_VIDEOS_DIR)') from None
     if not os.path.isdir(folder):
-        raise TaskError('non riesco a creare la cartella comune ' + folder + ' (COMMA_VIDEOS_DIR)')
+        raise TaskError('cannot create the shared folder ' + folder + ' (COMMA_VIDEOS_DIR)')
     return Path(os.path.abspath(folder))
 
 
@@ -305,7 +305,7 @@ def remote_segments(comma: Comma, route: str) -> list[int]:
     """The segment numbers of a route found on the comma, in order."""
     result = comma.script(ROUTE_SEGMENTS_SCRIPT, route, check=False)
     if result.returncode != 0:
-        raise TaskError('il comma non risponde mentre leggo i segmenti di ' + route)
+        raise TaskError('the comma does not answer while reading the segments of ' + route)
     numbers = []
     for line in result.stdout.splitlines():
         segment = line.strip().rpartition('--')[2]
@@ -344,16 +344,16 @@ def choose_segments(route: str, found: list[int], skip: list) -> list[int] | Non
     """The segments of `found` not skipped, None (with a message) when the route is not there or
     nothing is left."""
     if not found:
-        warn('nessun segmento di ' + route + ' sul comma')
+        warn('no segment of ' + route + ' on the comma')
         return None
     skip_numbers = resolve_skip(found, skip)
     segments = [segment for segment in found if segment not in skip_numbers]
     skip_text = ''.join(' ' + str(number) for number in skip_numbers)
     if not segments:
-        warn(route + ': saltando' + skip_text + ' non resta nessun segmento')
+        warn(route + ': skipping' + skip_text + ' leaves no segment')
         return None
-    say(route + ' sul comma: ' + ' '.join(str(segment) for segment in found) + '. Salto:' + skip_text
-        + '. Scarico:' + ''.join(' ' + str(segment) for segment in segments))
+    say(route + ' on the comma: ' + ' '.join(str(segment) for segment in found) + '. Skipping:' + skip_text
+        + '. Downloading:' + ''.join(' ' + str(segment) for segment in segments))
     return segments
 
 
@@ -363,9 +363,9 @@ def find_dashcam_routes(comma: Comma, since: str) -> list[str]:
     listing = comma.run(LISTING_COMMAND).stdout
     recent, first_segment = parse_listing(listing, since)
     if not recent:
-        say('Nessuna route sul comma dal ' + since + '.')
+        say('No route on the comma since ' + since + '.')
         return []
-    say('Route sul comma dal ' + since + ':' + ''.join(' ' + route for route in recent))
+    say('Routes on the comma since ' + since + ':' + ''.join(' ' + route for route in recent))
 
     dashcam = []
     with tempfile.TemporaryDirectory() as qlog_dir:
@@ -376,7 +376,7 @@ def find_dashcam_routes(comma: Comma, since: str) -> list[str]:
             if _pull(comma, remote, qlog):
                 copied.append(route)
             else:
-                warn(route + ': qlog del segmento ' + str(first_segment[route]) + ' non copiato, salto la route')
+                warn(route + ': qlog of segment ' + str(first_segment[route]) + ' not copied, skipping the route')
         for route in copied:
             qlog = Path(qlog_dir) / (route + '.qlog.zst')
             if not qlog.is_file():
@@ -398,13 +398,13 @@ def route_is_long_enough(comma: Comma, route: str, found: list[int]) -> bool:
         first, last = Path(temp) / 'first.zst', Path(temp) / 'last.zst'
         if not _pull(comma, REMOTE_DIR + '/' + route + '--' + str(found[0]) + '/qlog.zst', first) \
                 or not _pull(comma, REMOTE_DIR + '/' + route + '--' + str(found[-1]) + '/qlog.zst', last):
-            warn(route + ': qlog iniziale/finale non disponibili, giro escluso')
+            warn(route + ': first/last qlog not available, trip excluded')
             return False
         seconds = inspect_log('duration', first, last)
     if SECONDS_RE.fullmatch(seconds) and int(seconds.partition('.')[0]) >= MIN_ROUTE_SECONDS:
-        say(route + ': durata completa ' + seconds + 's (>= ' + str(MIN_ROUTE_SECONDS) + 's), ok')
+        say(route + ': full duration ' + seconds + 's (>= ' + str(MIN_ROUTE_SECONDS) + 's), ok')
         return True
-    say(route + ': durata ' + seconds + 's (< ' + str(MIN_ROUTE_SECONDS) + 's o sconosciuta), giro escluso')
+    say(route + ': duration ' + seconds + 's (< ' + str(MIN_ROUTE_SECONDS) + 's or unknown), trip excluded')
     return False
 
 
@@ -417,20 +417,20 @@ def filter_reverse_segments(comma: Comma, route: str, segments: list[int], video
         shared = videos / (route + '--' + str(segment))
         logfile = shared / 'rlog.zst'
         if shared.is_symlink() or logfile.is_symlink():
-            warn(route + '--' + str(segment) + ': link non sicuro nella cartella comune, segmento escluso')
+            warn(route + '--' + str(segment) + ': unsafe link in the shared folder, segment excluded')
             continue
         if not (logfile.exists() and logfile.stat().st_size > 0):
             shared.mkdir(parents=True, exist_ok=True)
             if not _pull(comma, REMOTE_DIR + '/' + route + '--' + str(segment) + '/rlog.zst', shared):
-                warn(route + '--' + str(segment) + ': rlog non disponibile, segmento escluso')
+                warn(route + '--' + str(segment) + ': rlog not available, segment excluded')
                 continue
         state = inspect_log('reverse', logfile)
         if state == 'forward':
             remaining.append(segment)
         elif state == 'reverse':
-            say(route + '--' + str(segment) + ': retromarcia rilevata, segmento escluso')
+            say(route + '--' + str(segment) + ': reverse gear detected, segment excluded')
         else:
-            warn(route + '--' + str(segment) + ': retromarcia non verificabile, segmento escluso')
+            warn(route + '--' + str(segment) + ': reverse gear cannot be checked, segment excluded')
     return remaining
 
 
@@ -445,22 +445,22 @@ def move_old_file(old: Path, shared: Path) -> None:
     if old.is_symlink() or not old.exists():
         return
     if not old.is_file():
-        raise TaskError(str(old) + ' non e\' ne\' un file ne\' un link: controlla a mano')
+        raise TaskError(str(old) + ' is neither a file nor a link: check it by hand')
     if not shared.exists():
         if shared.is_symlink():
             # A dangling link takes the name: the move replaces the link, never writes through it.
             shared.unlink()
         shutil.move(str(old), str(shared))
-        say('  ' + old.name + ': spostato da data/ nella cartella comune')
+        say('  ' + old.name + ': moved from data/ into the shared folder')
     elif os.path.samefile(old, shared):
-        raise TaskError(str(old) + ' e ' + str(shared) + ' sono lo stesso file (uno arriva all\'altro tramite un '
-                        'link): non cancello niente, controlla a mano')
+        raise TaskError(str(old) + ' and ' + str(shared) + ' are the same file (one reaches the other through a '
+                        'link): nothing deleted, check it by hand')
     elif filecmp.cmp(old, shared, shallow=False):
         old.unlink()
-        say('  ' + old.name + ': uguale a quello nella cartella comune, tolto da data/')
+        say('  ' + old.name + ': same as the one in the shared folder, removed from data/')
     else:
-        raise TaskError(str(old) + ' (' + str(old.stat().st_size) + ' byte) e ' + str(shared) + ' ('
-                        + str(shared.stat().st_size) + ' byte) sono diversi: non cancello niente, controlla a mano')
+        raise TaskError(str(old) + ' (' + str(old.stat().st_size) + ' bytes) and ' + str(shared) + ' ('
+                        + str(shared.stat().st_size) + ' bytes) differ: nothing deleted, check it by hand')
 
 
 def link_file(target: Path, link: Path) -> None:
@@ -472,18 +472,18 @@ def link_file(target: Path, link: Path) -> None:
     try:
         os.symlink(str(target), link)
     except OSError as exc:
-        raise TaskError('non riesco a creare il link ' + str(link) + ': ' + exc.strerror) from None
+        raise TaskError('cannot create the link ' + str(link) + ': ' + exc.strerror) from None
 
 
 def check_real_folders(dst: Path, shared: Path) -> None:
     """A segment folder that is a link would make data/<name>/<file> and the shared file the same
     file (the localizer outputs would also end up in the shared folder): stop."""
     if dst.is_symlink():
-        raise TaskError(str(dst) + ' e\' un link a una cartella: in data/ serve una cartella vera con dentro i '
-                        'link ai file. Non cancello niente, controlla a mano')
+        raise TaskError(str(dst) + ' is a link to a folder: data/ needs a real folder holding the links to the '
+                        'files. Nothing deleted, check it by hand')
     if shared.is_symlink():
-        raise TaskError(str(shared) + ' e\' un link a una cartella: nella cartella comune serve una cartella '
-                        'vera. Non cancello niente, controlla a mano')
+        raise TaskError(str(shared) + ' is a link to a folder: the shared folder needs a real folder. '
+                        'Nothing deleted, check it by hand')
 
 
 def run_localizer(name: str) -> None:
@@ -492,7 +492,7 @@ def run_localizer(name: str) -> None:
     code = subprocess.run([sys.executable, '-m', 'localizer.run', '--segment', name], cwd=REPO, env=environment,
                           stdin=subprocess.DEVNULL, check=False).returncode
     if code != 0:
-        raise TaskError('localizzazione di ' + name + ' fallita (codice ' + str(code) + ')')
+        raise TaskError('localization of ' + name + ' failed (code ' + str(code) + ')')
 
 
 def download_segments(comma: Comma, route: str, segments: list[int], videos: Path, localizer: bool) -> None:
@@ -506,14 +506,15 @@ def download_segments(comma: Comma, route: str, segments: list[int], videos: Pat
         dst = DATA_DIR / name
         # Discarded by the localizer (tasks.localize): not again.
         if (DISCARD_DIR / name).is_dir():
-            say('== ' + route + '--' + str(segment) + ': scartato dal localizer (data_scartati/' + name + '), salto')
+            say('== ' + route + '--' + str(segment) + ': discarded by the localizer (data_scartati/' + name
+                + '), skipping')
             say('PROGRESS ' + str(done) + '/' + str(len(segments)))
             continue
-        say('== ' + route + '--' + str(segment) + ' -> ' + str(shared) + ' (link in ' + str(dst) + ')')
+        say('== ' + route + '--' + str(segment) + ' -> ' + str(shared) + ' (links in ' + str(dst) + ')')
 
         for file_name in FILES:
             if comma.script(FILE_EXISTS_SCRIPT, src + '/' + file_name, check=False).returncode != 0:
-                raise TaskError(src + '/' + file_name + ' non esiste sul comma')
+                raise TaskError(src + '/' + file_name + ' does not exist on the comma')
 
         check_real_folders(dst, shared)
         shared.mkdir(parents=True, exist_ok=True)
@@ -536,7 +537,7 @@ def fetch(options: Options) -> int:
     if options.auto:
         routes = find_dashcam_routes(comma, options.since)
         if not routes:
-            say('Nessuna route in dashcam mode da scaricare.')
+            say('No route in dashcam mode to download.')
             return 0
         say('In dashcam mode:' + ''.join(' ' + route for route in routes))
         for route in routes:
@@ -547,7 +548,7 @@ def fetch(options: Options) -> int:
                 if segments:
                     download_segments(comma, route, segments, videos, options.localizer)
                     continue
-            say(route + ': nessun segmento idoneo da scaricare')
+            say(route + ': no eligible segment to download')
     else:
         segments = options.segments
         # --skip / --strip-ends: read the segments on the comma, then drop the skipped ones.
@@ -557,7 +558,7 @@ def fetch(options: Options) -> int:
                 return 1
         download_segments(comma, options.route, segments, videos, options.localizer)
 
-    say('Fatto.')
+    say('Done.')
     return 0
 
 
@@ -570,7 +571,7 @@ def main() -> int:
     try:
         return fetch(options)
     except OSError as exc:
-        raise TaskError('errore sul disco: ' + str(exc)) from exc
+        raise TaskError('disk error: ' + str(exc)) from exc
 
 
 if __name__ == '__main__':

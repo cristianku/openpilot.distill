@@ -47,13 +47,13 @@ PROGRESS_EVERY_FRAMES = 100
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", required=True, help="stock, teacher, logged, run:<cartella> o hf:<nome>")
-    parser.add_argument("--segments", default="heldout", help="heldout (default), all o lista separata da virgole")
-    parser.add_argument("--rate", type=int, choices=(5, 20), default=5, help="frame valutati al secondo (default 5)")
-    parser.add_argument("--horizon", type=float, default=DEFAULT_HORIZON_S, help="secondi di piano nel miss")
+    parser.add_argument("--model", required=True, help="stock, teacher, logged, run:<folder> or hf:<name>")
+    parser.add_argument("--segments", default="heldout", help="heldout (default), all or a comma separated list")
+    parser.add_argument("--rate", type=int, choices=(5, 20), default=5, help="frames evaluated per second (default 5)")
+    parser.add_argument("--horizon", type=float, default=DEFAULT_HORIZON_S, help="seconds of plan in the miss")
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
-    parser.add_argument("--force", action="store_true", help="ricalcola anche se il risultato esiste gia'")
-    parser.add_argument("--out", type=Path, help="json da scrivere (default outputs/eval/<modello>.json)")
+    parser.add_argument("--force", action="store_true", help="computes again even when the result already exists")
+    parser.add_argument("--out", type=Path, help="json to write (default outputs/eval/<model>.json)")
     return parser.parse_args()
 
 
@@ -90,13 +90,13 @@ def select_segments(selection: str) -> tuple[list[str], str]:
         try:
             validate_segment_name(name)
         except ValueError as error:
-            raise SystemExit(f"ERRORE: {error}") from None
+            raise SystemExit(f"ERROR: {error}") from None
         if not (ROOT / "data" / name).is_dir():
-            raise SystemExit(f"ERRORE: segmento {name} non trovato in data/")
+            raise SystemExit(f"ERROR: segment {name} not found in data/")
         if name not in names:
             names.append(name)
     if not names:
-        raise SystemExit("ERRORE: --segments vuoto")
+        raise SystemExit("ERROR: --segments is empty")
     digest = hashlib.sha256(",".join(names).encode()).hexdigest()[:8]
     return names, f"lista-{digest}"
 
@@ -195,9 +195,9 @@ def main() -> None:
     try:
         spec = parse_model_spec(args.model)
     except ValueError as error:
-        raise SystemExit(f"ERRORE: {error}") from None
+        raise SystemExit(f"ERROR: {error}") from None
     if args.horizon <= 0 or args.horizon > 10.0:
-        raise SystemExit("ERRORE: --horizon tra 0 e 10 secondi (il piano arriva a 10 s)")
+        raise SystemExit("ERROR: --horizon between 0 and 10 seconds (the plan reaches 10 s)")
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     started = time.time()
 
@@ -211,13 +211,13 @@ def main() -> None:
         output_path = ROOT / "outputs" / "eval" / f"{spec.key}__{selection_tag}_r{args.rate}_h{args.horizon:g}.json"
 
     model = resolve_model(spec, ROOT)
-    print(f"modello: {spec.label} = {model.path} (sha256 {model.sha256[:16]})", flush=True)
-    print(f"segmenti ({selection_tag}): {len(segments)}", flush=True)
+    print(f"model: {spec.label} = {model.path} (sha256 {model.sha256[:16]})", flush=True)
+    print(f"segments ({selection_tag}): {len(segments)}", flush=True)
     if not args.force:
         saved = cached_result(output_path, model.sha256, segments, settings)
         if saved is not None:
             saved_miss = saved["overall"]["avg_miss_m"]
-            print(f"risultato gia' calcolato: avg miss {saved_miss} m (--force per rifarlo)", flush=True)
+            print(f"result already computed: avg miss {saved_miss} m (--force to compute it again)", flush=True)
             print(f"OUTPUT_JSON={output_path}", flush=True)
             return
 
@@ -229,13 +229,13 @@ def main() -> None:
         try:
             segment = load_segment(ROOT, name)
         except (ValueError, OSError) as error:
-            print(f"segmento {name} saltato: {error}", flush=True)
+            print(f"segment {name} skipped: {error}", flush=True)
             skipped.append({"segment": name, "error": str(error)})
             continue
         frames = evaluated_frames(segment, args.rate, args.horizon)
         if len(frames) == 0:
-            print(f"segmento {name} saltato: troppo corto per {args.horizon:g} s di orizzonte", flush=True)
-            skipped.append({"segment": name, "error": "troppo corto"})
+            print(f"segment {name} skipped: too short for a {args.horizon:g} s horizon", flush=True)
+            skipped.append({"segment": name, "error": "too short"})
             continue
         plan.append(name)
         total_frames += decode_end(frames)
@@ -245,7 +245,7 @@ def main() -> None:
         lanes = BLOCK_FRAMES
     runner = build_runner(model, args.device, lanes)
     if runner.warmup_frames > EVAL_WARMUP_FRAMES:
-        print(f"ATTENZIONE: {runner.name} vuole {runner.warmup_frames} frame di riscaldamento", flush=True)
+        print(f"WARNING: {runner.name} needs {runner.warmup_frames} warm-up frames", flush=True)
     use_nvdec = args.device == "cuda" and nvdec_available()
     decoder_name = "ffmpeg"
     if use_nvdec:
@@ -273,8 +273,8 @@ def main() -> None:
             "elapsed_s": round(elapsed, 1),
         })
         print(
-            f"segmento {name}: avg miss {_metres(segment_miss)}, laterale {_metres(segment_lateral)}, "
-            f"{len(frames)} frame, {elapsed:.1f} s",
+            f"segment {name}: avg miss {_metres(segment_miss)}, lateral {_metres(segment_lateral)}, "
+            f"{len(frames)} frames, {elapsed:.1f} s",
             flush=True,
         )
 
@@ -332,8 +332,8 @@ def main() -> None:
     temporary.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     temporary.replace(output_path)
     print(
-        f"totale: avg miss {_metres(overall_miss)}, laterale {_metres(overall_lateral)} su {len(per_segment)} "
-        f"segmenti ({evaluated} frame) in {elapsed:.0f} s",
+        f"total: avg miss {_metres(overall_miss)}, lateral {_metres(overall_lateral)} over {len(per_segment)} "
+        f"segments ({evaluated} frames) in {elapsed:.0f} s",
         flush=True,
     )
     print(f"OUTPUT_JSON={output_path}", flush=True)

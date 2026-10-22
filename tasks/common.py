@@ -25,7 +25,7 @@ DEFAULT_HF_REPO = 'cristianku/openpilot-distill-models'
 
 
 class TaskError(Exception):
-    """A refusal or a failure, explained in Italian: main() prints it and exits with code 1."""
+    """A refusal or a failure, explained in English: main() prints it and exits with code 1."""
 
 
 def load_env(repo: Path = REPO) -> None:
@@ -40,14 +40,14 @@ def say(text: str) -> None:
 
 
 def run_main(main) -> None:
-    """Runs a task main(): a TaskError becomes "ERRORE: ..." and exit code 1, Ctrl+C exit code 130."""
+    """Runs a task main(): a TaskError becomes "ERROR: ..." and exit code 1, Ctrl+C exit code 130."""
     try:
         code = main()
     except TaskError as exc:
-        print('ERRORE: ' + str(exc), file=sys.stderr, flush=True)
+        print('ERROR: ' + str(exc), file=sys.stderr, flush=True)
         sys.exit(1)
     except KeyboardInterrupt:
-        print('\nInterrotto.', file=sys.stderr, flush=True)
+        print('\nInterrupted.', file=sys.stderr, flush=True)
         sys.exit(130)
     sys.exit(code or 0)
 
@@ -84,14 +84,14 @@ def list_gpus() -> list[Gpu]:
 def select_gpus(choice: str, gpus: list[Gpu]) -> list[int]:
     """The GPU indices of a choice: 'all', or one index ('0'), or several ('0,2')."""
     if not gpus:
-        raise TaskError('nessuna GPU NVIDIA su questa macchina')
+        raise TaskError('no NVIDIA GPU on this machine')
     available = [gpu.index for gpu in gpus]
     if choice == 'all':
         return available
     selected = []
     for part in choice.split(','):
         if not part.isdigit() or int(part) not in available:
-            raise TaskError('GPU ' + part + ' non esiste (ci sono: ' + ', '.join(str(i) for i in available) + ')')
+            raise TaskError('GPU ' + part + ' does not exist (available: ' + ', '.join(str(i) for i in available) + ')')
         if int(part) not in selected:
             selected.append(int(part))
     return selected
@@ -114,26 +114,26 @@ class GpuLock:
 
     def acquire(self) -> None:
         if not list_gpus():
-            say('Nessuna GPU NVIDIA: lock GPU non necessario.')
+            say('No NVIDIA GPU: no GPU lock needed.')
             return
         lock_dir = os.path.dirname(self.lock_file)
         if not os.path.isdir(lock_dir) or not os.access(lock_dir, os.W_OK):
-            raise TaskError('cartella del lock GPU ' + lock_dir + ' mancante o non scrivibile')
+            raise TaskError('GPU lock folder ' + lock_dir + ' missing or not writable')
         handle = os.open(self.lock_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             os.close(handle)
-            raise TaskError('la GPU e\' occupata da un altro job: riprova quando ha finito') from None
+            raise TaskError('the GPU is busy with another job: try again when it has finished') from None
         try:
             processes = _gpu_processes()
         except (OSError, subprocess.SubprocessError) as exc:
             os.close(handle)
-            raise TaskError('nvidia-smi non risponde, non so se la GPU e\' libera') from exc
+            raise TaskError('nvidia-smi does not answer, cannot tell whether the GPU is free') from exc
         if processes:
             os.close(handle)
-            raise TaskError('la GPU e\' occupata da processi che non usano il lock (' + '; '.join(processes)
-                            + '): riprova quando hanno finito')
+            raise TaskError('the GPU is busy with processes that do not use the lock (' + '; '.join(processes)
+                            + '): try again when they have finished')
         self.handle = handle
 
     def release(self) -> None:

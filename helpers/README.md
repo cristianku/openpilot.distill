@@ -1,6 +1,11 @@
 # Video and calibration helpers
 
-This directory contains **Python functions, not standalone shell scripts**. They are imported by [`supervised/dataset.py`](../supervised/dataset.py). Run the examples from the repository root, not from `helpers/`.
+This directory contains two kinds of files:
+
+- **Python helper functions** (`video_helpers.py` and friends), imported by [`supervised/dataset.py`](../supervised/dataset.py) and documented below. The helper module is not a CLI.
+- **Shell scripts** for the day-to-day jobs (download, localize, train, evaluate, export, publish, install, update), listed in [Shell scripts](#shell-scripts). The web site runs the same jobs through the Python modules in [`tasks/`](../tasks/).
+
+Run the examples and scripts from the repository root, not from `helpers/`.
 
 ## Prerequisites
 
@@ -59,6 +64,26 @@ PY
 ```
 
 For real driving data, **use the calibration and intrinsics for that camera**, as shown in [`supervised/dataset.py`](../supervised/dataset.py) (`_load_images` / `_calibration_augmentations`); zeros above are a shape/API demonstration, not a valid measured calibration.
+
+## Shell scripts
+
+Every script prints its usage with `-h` / `--help` (the comment block at its top). Each job also exists as a Python module in [`tasks/`](../tasks/), which is what the web site runs; the module docstring describes its options. The options are close but not always identical (see the notes).
+
+| Script | What it does | Python module used by the web site |
+| --- | --- | --- |
+| `fetch_comma_segments.sh` | Copy segments from the comma into the shared folder (`COMMA_VIDEOS_DIR`) and link them into `data/` | `python -m tasks.fetch` |
+| `localize_segments.sh` | Run the localizer on segments in `data/`, move unusable ones to `data_scartati/`; `--status` lists the state | `python -m tasks.localize` |
+| `train_supervised.sh` | Supervised distillation training under the GPU lock; prints `RUN_DIR=<path>` | `python -m tasks.train` (`--mode fresh\|continue\|resume` instead of `--continue` / `--resume=<run>`) |
+| `train_supervised_test.sh` | 10-step trial run (`train_supervised.sh --test`) | `python -m tasks.train --test` |
+| `train_progress.sh` | `tail -f` of the latest (or a given) run's `train.log` | none (the site has a run detail page) |
+| `eval_holdout.sh` | avg miss of one model on the held-out segments; prints `OUTPUT_JSON=<path>` | `python -m tasks.evaluation holdout` |
+| `compare_video.sh` | Comparison video of two models on one segment; prints `OUTPUT_MP4=` / `OUTPUT_JSON=` | `python -m tasks.evaluation compare` |
+| `export_onnx.sh` | Export `supercombo.pt` to `driving_supercombo.onnx`, with the comma's original model as reference | `python -m tasks.export` |
+| `publish_model.sh` | Export, compile on the comma and publish to Hugging Face | `python -m tasks.publish` (a dry run unless `--upload`; the script uploads unless `--no-upload`) |
+| `install_model_on_comma.sh` | Install a trained model on the comma (or `--restore` the original) and reboot | `python -m tasks.install` |
+| `update.sh` | `git pull --ff-only`, `uv sync --locked`, restart the `distill-web` service | `python -m tasks.update` |
+
+The GPU jobs (training, evaluation, comparison) share one lock, `/run/lock/v100-gpu.lock` (see `helpers/common.sh`): only one runs at a time, whether started from a script or from the site.
 
 ## Troubleshooting and agent guidance
 

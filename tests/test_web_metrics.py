@@ -266,7 +266,7 @@ class DataTest(unittest.TestCase):
         reasons = []
         for item in result['discarded_reasons']:
             reasons.append(item['reason'])
-        self.assertIn('motivo non registrato', reasons)
+        self.assertIn('reason not recorded', reasons)
 
     def test_failure_reason_without_date(self):
         path = self.repo / 'x.failed'
@@ -301,7 +301,7 @@ class EvalAndVideoTest(unittest.TestCase):
             'per_segment': {}, 'skipped': ['c'],
             'overall': {'segments': 2, 'frames': 400, 'avg_miss_m': 1.5, 'avg_lateral_miss_m': 0.4}}))
         (folder / 'run_2026-10-21_1544.json').write_text(json.dumps({
-            'model': {'spec': 'run:2026-10-21_1544', 'label': 'studente run 2026-10-21_1544'},
+            'model': {'spec': 'run:2026-10-21_1544', 'label': 'student run 2026-10-21_1544'},
             'selection': 'heldout', 'settings': {'rate_hz': 5},
             'overall': {'segments': 15, 'frames': 3000, 'avg_miss_m': 0.9, 'avg_lateral_miss_m': None}}))
         (folder / 'teacher__all_r20_h10.json').write_text(json.dumps({
@@ -345,7 +345,7 @@ class EvalAndVideoTest(unittest.TestCase):
             'clip': {'fps': 20, 'start_s': 5.2, 'end_s': 17.0},
             'models': {'reference': {'spec': 'stock', 'label': 'comma CD210 (stock)', 'avg_miss_m': 1.25,
                                      'avg_lateral_miss_m': 0.3},
-                       'student': {'spec': 'run:2026-10-21_1544', 'label': 'studente run 2026-10-21_1544',
+                       'student': {'spec': 'run:2026-10-21_1544', 'label': 'student run 2026-10-21_1544',
                                    'avg_miss_m': 0.75, 'avg_lateral_miss_m': None}},
             'per_frame': []}))
         (folder / 'old.mp4').write_bytes(b'v')

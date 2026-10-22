@@ -4,10 +4,10 @@
 # browser. It starts in the background and prints the link to open from the PC or the phone.
 #
 # Usage: helpers/web.sh [--local] [--foreground] [--stop]
-#   helpers/web.sh                (avvia, o se gia' acceso ristampa il link)
-#   helpers/web.sh --stop         (spegne il sito; i job avviati dal sito continuano)
-#   helpers/web.sh --local        (solo da questo server: dal PC serve il tunnel ssh)
-#   helpers/web.sh --foreground   (resta attaccato al terminale, Ctrl+C per spegnere)
+#   helpers/web.sh                (start it, or print the link again when it is already on)
+#   helpers/web.sh --stop         (stop the site; the jobs started from the site keep running)
+#   helpers/web.sh --local        (this server only: from the PC you need the ssh tunnel)
+#   helpers/web.sh --foreground   (stay attached to the terminal, Ctrl+C to stop)
 #
 # By default it listens on the LAN (0.0.0.0, port 8766) and every request needs the access token:
 # the link printed here already has it. The token is created once in the .env of this clone
@@ -82,26 +82,26 @@ token() {
     (
       umask 077
       if [ ! -f "$REPO_ENV" ]; then
-        echo "# Segreti e impostazioni locali di questo clone: il file e' in .gitignore, non va mai in git." > "$REPO_ENV"
+        echo "# Secrets and local settings of this clone: the file is in .gitignore, it never goes into git." > "$REPO_ENV"
       fi
-      echo "# Token di accesso al sito distill-web (servizio distill-web e helpers/web.sh)." >> "$REPO_ENV"
+      echo "# Access token of the distill-web site (distill-web service and helpers/web.sh)." >> "$REPO_ENV"
       echo "DISTILL_WEB_TOKEN=$value" >> "$REPO_ENV"
     )
     chmod 600 "$REPO_ENV"
-    echo "Token creato e salvato in $REPO_ENV" >&2
+    echo "Token created and saved in $REPO_ENV" >&2
   fi
   echo "$value"
 }
 
 print_lan_link() {
-  echo "Apri dal PC o dal telefono:  http://$(server_ip):$PORT/?token=$1"
-  echo "(il link resta lo stesso anche dopo un riavvio; il token e' in $REPO_ENV)"
+  echo "Open from the PC or the phone:  http://$(server_ip):$PORT/?token=$1"
+  echo "(the link stays the same after a restart too; the token is in $REPO_ENV)"
 }
 
 print_local_link() {
-  echo "Dal PC apri prima il tunnel (lascia aperto quel terminale):"
+  echo "From the PC open the tunnel first (leave that terminal open):"
   echo "  ssh -L $PORT:127.0.0.1:$PORT root@$(server_ip)"
-  echo "poi nel browser:  http://localhost:$PORT/"
+  echo "then in the browser:  http://localhost:$PORT/"
 }
 
 local_only=0
@@ -118,12 +118,12 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--stop" ]; then
     stop=1
   else
-    die "opzione non valida: $1 (vedi --help)"
+    die "invalid option: $1 (see --help)"
   fi
   shift
 done
 
-[ -x "$PY" ] || die "manca $PY: crea l'ambiente con uv sync (docs/INSTALL.md)"
+[ -x "$PY" ] || die "$PY is missing: create the environment with uv sync (docs/INSTALL.md)"
 mkdir -p "$WEB_DIR"
 chmod 700 "$WEB_DIR"
 
@@ -131,12 +131,12 @@ if [ "$stop" -eq 1 ]; then
   if pid="$(running_pid)"; then
     kill "$pid"
     rm -f "$PID_FILE"
-    echo "Sito spento (pid $pid). I job avviati dal sito continuano."
+    echo "Site stopped (pid $pid). The jobs started from the site keep running."
   else
     rm -f "$PID_FILE"
-    echo "Nessun sito avviato da questo script."
+    echo "No site started by this script."
     if service_active; then
-      echo "C'e' il servizio $SERVICE: si spegne con  systemctl stop $SERVICE"
+      echo "The $SERVICE service is running: stop it with  systemctl stop $SERVICE"
     fi
   fi
   exit 0
@@ -144,18 +144,18 @@ fi
 
 # Already on: the systemd service, or a site started earlier by this script.
 if service_active; then
-  echo "Il sito gira gia' come servizio $SERVICE (porta $SERVICE_PORT)."
+  echo "The site already runs as the $SERVICE service (port $SERVICE_PORT)."
   PORT="$SERVICE_PORT"
   if [ -r "$SERVICE_ENV" ]; then
     print_lan_link "$(sed -n 's/^DISTILL_WEB_TOKEN=//p' "$SERVICE_ENV" | tail -1)"
   else
-    echo "Il token e' in $SERVICE_ENV (leggibile solo da root)."
+    echo "The token is in $SERVICE_ENV (readable by root only)."
   fi
   exit 0
 fi
 if pid="$(running_pid)"; then
-  echo "Il sito e' gia' acceso (pid $pid, log $LOG)."
-  if grep -q "in ascolto su 127.0.0.1" "$LOG" 2>/dev/null; then
+  echo "The site is already on (pid $pid, log $LOG)."
+  if grep -q "listening on 127.0.0.1" "$LOG" 2>/dev/null; then
     print_local_link
   else
     print_lan_link "$(token)"
@@ -163,7 +163,7 @@ if pid="$(running_pid)"; then
   exit 0
 fi
 if port_busy; then
-  die "la porta $PORT e' gia' occupata da un altro programma (DISTILL_WEB_PORT=<altra> per cambiarla)"
+  die "port $PORT is already taken by another program (DISTILL_WEB_PORT=<other> to change it)"
 fi
 
 if [ "$local_only" -eq 1 ]; then
@@ -180,7 +180,7 @@ command=("$PY" -m web.server --host "$host" --port "$PORT")
 
 if [ "$foreground" -eq 1 ]; then
   if [ "$local_only" -eq 1 ]; then print_local_link; else print_lan_link "$DISTILL_WEB_TOKEN"; fi
-  echo "Ctrl+C per spegnere (i job avviati dal sito continuano)."
+  echo "Ctrl+C to stop (the jobs started from the site keep running)."
   exec "${command[@]}"
 fi
 
@@ -188,7 +188,7 @@ nohup "${command[@]}" < /dev/null > "$LOG" 2>&1 &
 echo $! > "$PID_FILE"
 # The site stops at once when it cannot start (port taken, bad token): wait for its first line.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if grep -q "in ascolto" "$LOG" 2>/dev/null; then
+  if grep -q "listening on" "$LOG" 2>/dev/null; then
     break
   fi
   if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -199,9 +199,9 @@ done
 if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   rm -f "$PID_FILE"
   tail -5 "$LOG" >&2
-  die "il sito non e' partito (log completo: $LOG)"
+  die "the site did not start (full log: $LOG)"
 fi
 
-echo "Sito acceso in background (pid $(cat "$PID_FILE"), log $LOG)."
+echo "Site started in the background (pid $(cat "$PID_FILE"), log $LOG)."
 if [ "$local_only" -eq 1 ]; then print_local_link; else print_lan_link "$DISTILL_WEB_TOKEN"; fi
-echo "Spegni con:  helpers/web.sh --stop"
+echo "Stop it with:  helpers/web.sh --stop"

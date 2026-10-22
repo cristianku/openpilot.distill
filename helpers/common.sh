@@ -84,7 +84,7 @@ distill_load_env() {
     fi
     if [[ ! "$line" =~ $assignment_pattern ]]; then
       # The line itself is not printed: it could hold a secret.
-      echo "ATTENZIONE: $DISTILL_ENV_FILE riga $line_number ignorata (formato atteso CHIAVE=valore)" >&2
+      echo "WARNING: $DISTILL_ENV_FILE line $line_number ignored (expected format KEY=value)" >&2
       continue
     fi
     key="${BASH_REMATCH[2]}"
@@ -111,7 +111,7 @@ distill_load_env() {
 
     if [ "$key" = "DISTILL_UV_EXTRA" ] && [ -n "$value" ]; then
       if [[ ! "$value" =~ $extra_name_pattern ]]; then
-        distill_die "$DISTILL_ENV_FILE riga $line_number: DISTILL_UV_EXTRA='$value' non e' il nome di un extra di uv (es. v100)"
+        distill_die "$DISTILL_ENV_FILE line $line_number: DISTILL_UV_EXTRA='$value' is not the name of a uv extra (e.g. v100)"
       fi
     fi
 
@@ -224,7 +224,7 @@ distill_gpu_lock_or_die() {
 
   # No NVIDIA driver here (e.g. the Mac): no GPU shared with other jobs.
   if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "nvidia-smi non trovato: nessuna GPU NVIDIA da condividere, lock GPU non necessario" >&2
+    echo "nvidia-smi not found: no NVIDIA GPU to share, GPU lock not needed" >&2
     return 0
   fi
 
@@ -237,29 +237,29 @@ distill_gpu_lock_or_die() {
   fi
 
   if ! command -v flock >/dev/null 2>&1; then
-    distill_die "flock non trovato (pacchetto util-linux): serve per il lock della GPU"
+    distill_die "flock not found (package util-linux): it is needed for the GPU lock"
   fi
   lock_dir="$(dirname "$DISTILL_GPU_LOCK_FILE")"
   if [ ! -d "$lock_dir" ] || [ ! -w "$lock_dir" ]; then
-    distill_die "cartella del lock GPU $lock_dir mancante o non scrivibile"
+    distill_die "GPU lock folder $lock_dir missing or not writable"
   fi
 
   # fd 9 stays open until the script exits: the lock lasts as long as the script (and its children).
   if ! exec 9>>"$DISTILL_GPU_LOCK_FILE"; then
-    distill_die "non riesco ad aprire il lock GPU $DISTILL_GPU_LOCK_FILE"
+    distill_die "cannot open the GPU lock $DISTILL_GPU_LOCK_FILE"
   fi
   if ! flock -n 9; then
     holder="$(distill_gpu_lock_holder)"
     if [ -n "$holder" ]; then
-      distill_die "La GPU e' occupata da un altro job ($holder). Riprova quando ha finito."
+      distill_die "The GPU is busy with another job ($holder). Try again when it has finished."
     else
-      distill_die "La GPU e' occupata da un altro job (lock $DISTILL_GPU_LOCK_FILE preso). Riprova quando ha finito."
+      distill_die "The GPU is busy with another job (lock $DISTILL_GPU_LOCK_FILE taken). Try again when it has finished."
     fi
   fi
 
   # Jobs that do not use the lock (e.g. a speedlimits training) still show up in nvidia-smi.
   if ! gpu_processes="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>&1)"; then
-    distill_die "nvidia-smi non risponde, non so se la GPU e' libera: $gpu_processes"
+    distill_die "nvidia-smi does not answer, cannot tell whether the GPU is free: $gpu_processes"
   fi
   while IFS= read -r line; do
     if [ -z "$line" ]; then
@@ -277,7 +277,7 @@ distill_gpu_lock_or_die() {
     foreign_processes="${foreign_processes}pid $gpu_pid: $gpu_name"
   done <<< "$gpu_processes"
   if [ -n "$foreign_processes" ]; then
-    distill_die "La GPU e' occupata da un altro job (processi sulla GPU: $foreign_processes). Riprova quando ha finito."
+    distill_die "The GPU is busy with another job (processes on the GPU: $foreign_processes). Try again when it has finished."
   fi
 
   export DISTILL_GPU_LOCK_PID="$$"

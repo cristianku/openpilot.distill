@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Follow the progress of a training: tail -f of its train.log.
 #
-# Usage: helpers/train_progress.sh [<cartella del run|train.log>]
-#   helpers/train_progress.sh                                   (l'ultimo outputs/supervised/*/train.log)
+# Usage: helpers/train_progress.sh [<run folder|train.log>]
+#   helpers/train_progress.sh                                   (the latest outputs/supervised/*/train.log)
 #   helpers/train_progress.sh outputs/supervised/2026-10-21_0839
 #
 # The latest run is the train.log written most recently, so it is the one still training.
@@ -30,27 +30,27 @@ while [ $# -gt 0 ]; do
   elif [ -z "$input" ]; then
     input="$1"
   else
-    die "argomento in piu': $1"
+    die "extra argument: $1"
   fi
   shift
 done
 
 if [ -z "$input" ]; then
   log="$(ls -t "$ROOT"/outputs/supervised/*/train.log 2>/dev/null | head -1 || true)"
-  [ -n "$log" ] || die "nessun outputs/supervised/*/train.log: il training non e' mai partito"
+  [ -n "$log" ] || die "no outputs/supervised/*/train.log: no training has ever started"
 elif [ -d "$input" ]; then
   log="$input/train.log"
 else
   log="$input"
 fi
-[ -f "$log" ] || die "non trovo $log"
+[ -f "$log" ] || die "$log not found"
 
 run_dir="$(dirname "$log")"
 echo "Run: $run_dir"
 if [ -f "$run_dir/supercombo.pt" ]; then
-  echo "Finito: il modello e' in $run_dir/supercombo.pt"
+  echo "Finished: the model is in $run_dir/supercombo.pt"
 else
-  echo "In corso (supercombo.pt arriva alla fine)."
+  echo "Running (supercombo.pt comes at the end)."
 fi
 echo
 

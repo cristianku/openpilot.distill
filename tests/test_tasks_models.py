@@ -163,12 +163,12 @@ class ResolveModelTest(TempRepoTest):
         self.assertEqual(path, self.runs / RUN / 'supercombo.pt')
 
     def test_refused(self):
-        with self.assertRaisesRegex(TaskError, 'nessun run finito'):
+        with self.assertRaisesRegex(TaskError, 'no finished run'):
             export_task.resolve_model(None, None)
         self.make_run(RUN, finished=False)
-        with self.assertRaisesRegex(TaskError, 'non ha supercombo.pt'):
+        with self.assertRaisesRegex(TaskError, 'has no supercombo.pt'):
             export_task.resolve_model(RUN, None)
-        with self.assertRaisesRegex(TaskError, 'non esiste'):
+        with self.assertRaisesRegex(TaskError, 'does not exist'):
             export_task.resolve_model(None, str(self.root / 'missing.pt'))
 
 
@@ -203,22 +203,22 @@ class ReferenceTest(TempRepoTest):
     def test_wrong_copy_never_kept(self):
         self.keep_reference(b'older openpilot version')
         comma = FakeComma(files={IN_PLACE: b'trained model'})
-        with self.assertRaisesRegex(TaskError, 'non toccato'):
+        with self.assertRaisesRegex(TaskError, 'left untouched'):
             self.update(comma, self.info())
         self.assertEqual(self.reference.read_bytes(), b'older openpilot version')
         self.assertFalse(self.reference.with_name(self.reference.name + '.new').exists())
 
     def test_original_missing_on_the_comma(self):
         info = self.info(current=TRAINED, backup=TRAINED)
-        with self.assertRaisesRegex(TaskError, 'non c\'e\''):
+        with self.assertRaisesRegex(TaskError, 'there is no'):
             self.update(FakeComma(), info)
         self.keep_reference(b'older openpilot version')
         self.assertEqual(self.update(FakeComma(), info), self.reference)
-        with self.assertRaisesRegex(TaskError, 'originale di questa versione'):
+        with self.assertRaisesRegex(TaskError, 'original model of this version'):
             self.update(FakeComma(), info, strict=True)
 
     def test_comma_off(self):
-        with self.assertRaisesRegex(TaskError, 'comma non raggiungibile'), quiet():
+        with self.assertRaisesRegex(TaskError, 'comma not reachable'), quiet():
             export_task.reference_for_export(FakeComma(reachable=False))
         self.keep_reference(b'older openpilot version')
         with quiet():
@@ -320,7 +320,7 @@ class PublishTest(TempRepoTest):
 
     def test_name_taken(self):
         comma = FakeComma(PUBLISH_INFO)
-        with self.assertRaisesRegex(TaskError, 'gia\' pubblicato'):
+        with self.assertRaisesRegex(TaskError, 'already published'):
             self.publish(['--upload', '--name=prova', '--run', RUN], comma=comma,
                          requests_module=fake_requests(200))
         self.assertNotIn('push', comma.kinds())
@@ -329,7 +329,7 @@ class PublishTest(TempRepoTest):
         self.assertEqual(self.publish(['--name=prova', '--run', RUN], requests_module=fake_requests(200)), 0)
 
     def test_name_not_checked(self):
-        with self.assertRaisesRegex(TaskError, 'non riesco a controllare'):
+        with self.assertRaisesRegex(TaskError, 'cannot check'):
             self.publish(['--upload', '--run', RUN], requests_module=fake_requests(error=True))
         self.assertEqual(self.publish(['--run', RUN], requests_module=fake_requests(error=True)), 0)
 
@@ -344,12 +344,12 @@ class PublishTest(TempRepoTest):
     def test_upload_failure(self):
         hub = fake_huggingface_hub()
         hub.HfApi.return_value.upload_folder.side_effect = OSError('403 Forbidden')
-        with self.assertRaisesRegex(TaskError, 'caricamento su Hugging Face fallito: 403'):
+        with self.assertRaisesRegex(TaskError, 'upload to Hugging Face failed: 403'):
             self.publish(['--upload', '--run', RUN], hub=hub)
 
     def test_compile_failure_uploads_nothing(self):
         hub = fake_huggingface_hub()
-        with self.assertRaisesRegex(TaskError, 'compilazione fallita'):
+        with self.assertRaisesRegex(TaskError, 'compile failed'):
             self.publish(['--upload', '--run', RUN], comma=FakeComma(PUBLISH_INFO, compile_code=1), hub=hub)
         hub.HfApi.return_value.upload_folder.assert_not_called()
 
@@ -359,7 +359,7 @@ class PublishTest(TempRepoTest):
             info = dict(PUBLISH_INFO, **{key: value})
             with self.assertRaisesRegex(TaskError, message, msg=key):
                 self.publish(['--run', RUN], comma=FakeComma(info))
-        with self.assertRaisesRegex(TaskError, 'non raggiungibile'):
+        with self.assertRaisesRegex(TaskError, 'not reachable'):
             self.publish(['--run', RUN], comma=FakeComma(PUBLISH_INFO, reachable=False))
 
     def test_onnx_given(self):
@@ -371,7 +371,7 @@ class PublishTest(TempRepoTest):
         self.assertEqual(weights, ['--model=supercombo=' + str(self.runs / RUN / 'supercombo.pt')])
         # --stable without weights next to the .onnx.
         (self.runs / RUN / 'supercombo.pt').unlink()
-        with self.assertRaisesRegex(TaskError, 'pesi PyTorch'):
+        with self.assertRaisesRegex(TaskError, 'PyTorch weights'):
             self.publish(['--stable', str(onnx)])
 
     def test_stock(self):
@@ -430,7 +430,7 @@ class InstallTest(TempRepoTest):
         for changes, message in (({'onroad': '1'}, 'onroad'), ({'reference': ''}, 'driving_supercombo.onnx'),
                                  ({'original': ''}, 'sha256'), ({'active_bundle': '{"ref": "x"}'}, 'Models'),
                                  ({'tg_flags': ''}, 'tg_flags'), ({'python': ''}, 'python3'),
-                                 ({'current': TRAINED, 'backup': TRAINED}, 'backup valido')):
+                                 ({'current': TRAINED, 'backup': TRAINED}, 'valid backup')):
             comma = FakeComma(dict(INSTALL_INFO, **changes))
             with self.assertRaisesRegex(TaskError, message, msg=changes):
                 self.install(['--run', RUN], comma)
@@ -442,13 +442,13 @@ class InstallTest(TempRepoTest):
 
     def test_comma_off(self):
         comma = FakeComma(INSTALL_INFO, reachable=False)
-        with self.assertRaisesRegex(TaskError, 'non raggiungibile'):
+        with self.assertRaisesRegex(TaskError, 'not reachable'):
             self.install(['--run', RUN], comma)
         self.assertEqual(comma.calls, [])
 
     def test_compile_failure_changes_nothing(self):
         comma = FakeComma(INSTALL_INFO, compile_code=1, compile_output='error\n')
-        with self.assertRaisesRegex(TaskError, 'non ho cambiato niente'):
+        with self.assertRaisesRegex(TaskError, 'nothing was changed'):
             self.install(['--run', RUN], comma)
         self.assert_untouched(comma)
         self.assertEqual(comma.calls[-1], ('run', 'rm -rf ' + install_task.BUILD_DIR))
@@ -456,7 +456,7 @@ class InstallTest(TempRepoTest):
     def test_unfinished_run(self):
         self.make_run(OLDER_RUN, finished=False)
         comma = FakeComma(INSTALL_INFO)
-        with self.assertRaisesRegex(TaskError, 'non ha supercombo.pt'):
+        with self.assertRaisesRegex(TaskError, 'has no supercombo.pt'):
             self.install(['--run', OLDER_RUN], comma)
         self.assert_untouched(comma)
 

@@ -135,7 +135,7 @@ class TokenTest(ServerTestCase):
         response, body = self.request('GET', '/', auth=False)
         self.assertEqual(response.status, 403)
         self.assertIn('text/html', response.getheader('Content-Type'))
-        self.assertIn('Accesso negato', body.decode())
+        self.assertIn('Access denied', body.decode())
         response, body = self.request('GET', '/api/status', auth=False)
         self.assertEqual(response.status, 403)
         self.assertEqual(json.loads(body)['error'], 'token_required')
@@ -236,7 +236,7 @@ class PageTest(ServerTestCase):
         for key in ('system', 'activities', 'jobs', 'comma', 'training', 'actions', 'code', 'limits'):
             self.assertIn(key, status)
         self.assertEqual(status['actions']['localize']['allowed'], False)
-        self.assertIn('questa versione del codice', status['actions']['localize']['reason'])
+        self.assertIn('this version of the code', status['actions']['localize']['reason'])
         self.assertNotIn('selftest', status['actions'])
 
     def test_runs_and_metrics(self):
@@ -327,11 +327,11 @@ class PostTest(ServerTestCase):
         while time.monotonic() < deadline:
             response, body = self.request('GET', '/api/jobs/' + job['id'] + '/log?offset=0')
             text = json.loads(body)['text']
-            if 'finito con codice' in text:
+            if 'finished with code' in text:
                 break
             time.sleep(0.1)
         self.assertIn('localizzo 0', text)
-        self.assertIn('== finito con codice 0', text)
+        self.assertIn('== finished with code 0', text)
         response, body = self.request('GET', '/api/jobs/' + job['id'])
         self.assertEqual(json.loads(body)['state'], 'ok')
         response, body = self.post('/api/jobs/' + job['id'] + '/stop', {})
@@ -374,23 +374,23 @@ class PostTest(ServerTestCase):
     def test_install_needs_the_comma_offroad(self):
         write_task(self.repo, 'install.py', 'print("install")')
         self.comma.state['reachable'] = False
-        self.comma.state['error'] = 'comma non raggiungibile via ssh'
-        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALLA'})
+        self.comma.state['error'] = 'comma not reachable over ssh'
+        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALL'})
         self.assertEqual(json.loads(body)['error'], 'comma_unreachable')
         self.comma.state['reachable'] = True
         self.comma.state['onroad'] = True
-        response, body = self.post('/api/run/restore', {'confirm': 'RIPRISTINA'})
+        response, body = self.post('/api/run/restore', {'confirm': 'RESTORE'})
         self.assertEqual(json.loads(body)['error'], 'comma_onroad')
         self.comma.state['onroad'] = False
         self.comma.state['bundle_default'] = False
-        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALLA'})
+        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALL'})
         self.assertEqual(json.loads(body)['error'], 'comma_bundle')
         response, body = self.request('GET', '/api/status')
-        self.assertIn('menu Modelli', json.loads(body)['actions']['install']['reason'])
+        self.assertIn('Models menu', json.loads(body)['actions']['install']['reason'])
         self.comma.state['bundle_default'] = True
         response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'installa'})
         self.assertEqual(response.status, 400)
-        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALLA'})
+        response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALL'})
         self.assertEqual(response.status, 200, body)
 
     def test_comma_check(self):

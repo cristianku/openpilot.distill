@@ -28,14 +28,14 @@ SERVICE = 'distill-web'
 # Jobs that run from .venv, by a fragment of their command line: updating the packages under them
 # would break them. The helper scripts too, while they exist and can be started by hand.
 BUSY_JOBS = (
-    (re.compile(r'supervised[.]train|tasks[.]train\b|helpers/train_supervised[.]sh'), 'un training'),
+    (re.compile(r'supervised[.]train|tasks[.]train\b|helpers/train_supervised[.]sh'), 'a training'),
     (re.compile(r'evaluation[.](compare|holdout)|tasks[.]evaluation\b|helpers/(compare_video|eval_holdout)[.]sh'),
-     'una valutazione o un video di confronto'),
-    (re.compile(r'tasks[.]fetch\b|helpers/fetch_comma_segments[.]sh'), 'uno scaricamento dal comma'),
-    (re.compile(r'localizer[.]run|tasks[.]localize\b|helpers/localize_segments[.]sh'), 'una localizzazione'),
-    (re.compile(r'helpers[.]export_onnx|tasks[.]export\b|helpers/export_onnx[.]sh'), 'un export ONNX'),
-    (re.compile(r'tasks[.]publish\b|helpers/publish_model[.]sh'), 'una pubblicazione'),
-    (re.compile(r'tasks[.]install\b|helpers/install_model_on_comma[.]sh'), 'un\'installazione sul comma'),
+     'an evaluation or a comparison video'),
+    (re.compile(r'tasks[.]fetch\b|helpers/fetch_comma_segments[.]sh'), 'a download from the comma'),
+    (re.compile(r'localizer[.]run|tasks[.]localize\b|helpers/localize_segments[.]sh'), 'a localization'),
+    (re.compile(r'helpers[.]export_onnx|tasks[.]export\b|helpers/export_onnx[.]sh'), 'an ONNX export'),
+    (re.compile(r'tasks[.]publish\b|helpers/publish_model[.]sh'), 'a publication'),
+    (re.compile(r'tasks[.]install\b|helpers/install_model_on_comma[.]sh'), 'an installation on the comma'),
 )
 
 
@@ -65,7 +65,7 @@ def git(*arguments: str, check: bool = True) -> str:
     result = subprocess.run(['git', *arguments], cwd=REPO, env=environment, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
     if check and result.returncode != 0:
-        raise TaskError('git ' + arguments[0] + ' non riuscito: ' + (result.stderr.strip() or 'errore sconosciuto'))
+        raise TaskError('git ' + arguments[0] + ' failed: ' + (result.stderr.strip() or 'unknown error'))
     return result.stdout.strip()
 
 
@@ -73,7 +73,7 @@ def uv_executable() -> str:
     for candidate in (shutil.which('uv'), str(Path.home() / '.local' / 'bin' / 'uv')):
         if candidate and Path(candidate).is_file():
             return candidate
-    raise TaskError('uv non trovato su questo server')
+    raise TaskError('uv not found on this server')
 
 
 def service_installed() -> bool:
@@ -89,34 +89,34 @@ def main() -> int:
         print(__doc__)
         return 0
     if len(sys.argv) > 1:
-        raise TaskError('opzione non valida: ' + sys.argv[1])
+        raise TaskError('invalid option: ' + sys.argv[1])
     load_env()
     uv = uv_executable()
 
     # 0. Jobs that use this clone.
     busy = busy_jobs()
     if busy:
-        raise TaskError('c\'e\' in corso ' + ', '.join(busy) + ': aggiorna quando ha finito')
+        raise TaskError('running now: ' + ', '.join(busy) + ': update when it has finished')
     lock = GpuLock()
     lock.acquire()
     if git('rev-parse', '--is-inside-work-tree', check=False) != 'true':
-        raise TaskError('questa cartella non e\' un clone git: niente da aggiornare')
+        raise TaskError('this folder is not a git clone: nothing to update')
 
     # 1. git pull.
     modified = git('status', '--porcelain', '--untracked-files=no')
     if modified:
-        say('File del repo modificati in locale:')
+        say('Repo files modified locally:')
         say(modified)
-        raise TaskError('ci sono modifiche locali ai file del repo (sopra): non le sovrascrivo')
+        raise TaskError('the repo files have local changes (above): not overwriting them')
     before = git('rev-parse', 'HEAD')
-    say('== 1. scarico il codice nuovo (branch ' + git('branch', '--show-current') + ')')
+    say('== 1. downloading the new code (branch ' + git('branch', '--show-current') + ')')
     try:
         git('pull', '--ff-only')
     except TaskError as exc:
-        raise TaskError(str(exc) + ' (branch divergente o rete?): niente e\' cambiato') from None
+        raise TaskError(str(exc) + ' (diverged branch or network?): nothing changed') from None
     after = git('rev-parse', 'HEAD')
     if before == after:
-        say('Gia\' aggiornato: ' + git('log', '--oneline', '-1'))
+        say('Already up to date: ' + git('log', '--oneline', '-1'))
     else:
         say(git('log', '--oneline', before + '..' + after))
 
@@ -125,27 +125,27 @@ def main() -> int:
     extra = os.environ.get('DISTILL_UV_EXTRA', '')
     if extra:
         command += ['--extra', extra]
-    say('== 2. aggiorno le librerie' + (' (extra ' + extra + ')' if extra else ''))
+    say('== 2. updating the packages' + (' (extra ' + extra + ')' if extra else ''))
     if subprocess.run(command, cwd=REPO, stdin=subprocess.DEVNULL).returncode != 0:
-        raise TaskError('aggiornamento delle librerie non riuscito: il codice e\' aggiornato ma le librerie no '
-                        '(uv.lock non allineato a pyproject.toml?)')
+        raise TaskError('package update failed: the code is updated but the packages are not '
+                        '(uv.lock out of sync with pyproject.toml?)')
 
     # 3. The web site.
     if not service_installed():
-        say('== 3. il sito non gira come servizio: riavvialo per usare il codice nuovo')
-        say('Fatto.')
+        say('== 3. the site does not run as a service: restart it to use the new code')
+        say('Done.')
         return 0
     if before != after and any(name.startswith('deploy/') for name in git('diff', '--name-only', before, after)
                                .splitlines()):
-        say('ATTENZIONE: e\' cambiato il file del servizio (deploy/): va reinstallato per usarlo')
-    say('== 3. riavvio il sito')
+        say('WARNING: the service file changed (deploy/): reinstall it to use it')
+    say('== 3. restarting the site')
     subprocess.run(['systemctl', 'restart', SERVICE], stdin=subprocess.DEVNULL, check=False)
     time.sleep(2)
     active = subprocess.run(['systemctl', 'is-active', '--quiet', SERVICE], stdin=subprocess.DEVNULL).returncode == 0
     if not active:
-        raise TaskError('il sito non riparte dopo l\'aggiornamento: controlla il suo log')
-    say('Sito riavviato con il codice nuovo.')
-    say('Fatto.')
+        raise TaskError('the site does not start again after the update: check its log')
+    say('Site restarted with the new code.')
+    say('Done.')
     return 0
 
 

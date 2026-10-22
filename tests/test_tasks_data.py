@@ -44,7 +44,7 @@ class FakeComma:
     def pull(self, remote_path, local_path, progress=False):
         self.pulls.append(remote_path)
         if remote_path not in self.files:
-            raise TaskError('copia con il comma fallita (rsync, codice 23)')
+            raise TaskError('copy with the comma failed (rsync, code 23)')
         target = Path(local_path)
         if target.is_dir():
             target = target / remote_path.rsplit('/', 1)[1]
@@ -247,24 +247,24 @@ class LayoutTest(unittest.TestCase):
         shared.mkdir()
         (folder / 'rlog.zst').write_bytes(b'one')
         (shared / 'rlog.zst').write_bytes(b'two')
-        with self.assertRaisesRegex(TaskError, 'sono diversi'):
+        with self.assertRaisesRegex(TaskError, 'differ'):
             fetch.move_old_file(folder / 'rlog.zst', shared / 'rlog.zst')
         self.assertEqual((folder / 'rlog.zst').read_bytes(), b'one')
         os.remove(shared / 'rlog.zst')
         os.link(folder / 'rlog.zst', shared / 'rlog.zst')
-        with self.assertRaisesRegex(TaskError, 'stesso file'):
+        with self.assertRaisesRegex(TaskError, 'same file'):
             fetch.move_old_file(folder / 'rlog.zst', shared / 'rlog.zst')
 
     def test_folder_links_stop(self):
         comma = FakeComma(segment_files(ROUTE, [3]))
         (self.videos / 'real').mkdir()
         os.symlink(self.videos / 'real', self.data / '0000011c8152ba83cf03')
-        with self.assertRaisesRegex(TaskError, 'cartella vera'):
+        with self.assertRaisesRegex(TaskError, 'real folder'):
             fetch.download_segments(comma, ROUTE, [3], self.videos, False)
 
     def test_missing_on_comma(self):
         comma = FakeComma(segment_files(ROUTE, [3], names=('rlog.zst', 'fcamera.hevc')))
-        with self.assertRaisesRegex(TaskError, 'ecamera.hevc non esiste sul comma'):
+        with self.assertRaisesRegex(TaskError, 'ecamera.hevc does not exist on the comma'):
             fetch.download_segments(comma, ROUTE, [3], self.videos, False)
 
     def test_discarded_not_again(self):
@@ -369,7 +369,7 @@ class LocalizeTest(unittest.TestCase):
         with self.ionex_answer(lines):
             self.assertEqual(localize.segments_to_do(), ['a1', 'a2', 'a3'])
         self.assertEqual(self.asked, ['a3', 'a4'])
-        self.assertIn('a3: rifaccio con la mappa RAP (prima P1D)', self.output)
+        self.assertIn('a3: redoing with map RAP (was P1D)', self.output)
 
     def test_nothing_done_no_ionex_call(self):
         self.segment('a1')
@@ -388,8 +388,8 @@ class LocalizeTest(unittest.TestCase):
         with self.ionex_answer(lines):
             localize.print_status()
         self.assertEqual(self.output, ['todo  a1', 'failed  a2  (2026-10-21 10:00 boom)',
-                                       'refine  a3  (mappa P1D, uscita RAP)', 'done  a4  (mappa FIN)',
-                                       'scartato  b1  (2026-10-20 09:00 no fix)'])
+                                       'refine  a3  (map P1D, out now RAP)', 'done  a4  (map FIN)',
+                                       'discarded  b1  (2026-10-20 09:00 no fix)'])
 
     def fake_localizer(self, codes):
         def run(name, log_path):
@@ -421,8 +421,8 @@ class LocalizeTest(unittest.TestCase):
         self.assertEqual(len([path for path in self.discard.iterdir() if path.name.startswith('a4.')]), 1)
         # Other failure: stays in data/.
         self.assertTrue((self.data / 'a5' / localize.FAILED_FILE).is_file())
-        self.assertIn('manca ' + str(self.data / 'a9' / 'rlog.zst'), self.output)
-        self.assertEqual(self.output[-3:], ['OK: a1', 'Scartati (in data_scartati/): a2 a4', 'Falliti: a3 a5 a9'])
+        self.assertIn('missing ' + str(self.data / 'a9' / 'rlog.zst'), self.output)
+        self.assertEqual(self.output[-3:], ['OK: a1', 'Discarded (in data_scartati/): a2 a4', 'Failed: a3 a5 a9'])
         self.assertIn('PROGRESS 6/6', self.output)
 
     def test_all_ok(self):

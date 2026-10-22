@@ -2,18 +2,18 @@
 # avg miss of one model on the held-out segments, the ones training never sees
 # (python -m evaluation.holdout).
 #
-# Usage: helpers/eval_holdout.sh --model=<modello> [--segments=heldout|all|<seg>,<seg>] [--rate=5|20]
+# Usage: helpers/eval_holdout.sh --model=<model> [--segments=heldout|all|<seg>,<seg>] [--rate=5|20]
 #          [--device=cuda|cpu] [--force]
 #   helpers/eval_holdout.sh --model=stock
 #   helpers/eval_holdout.sh --model=run:2026-10-21_1544
 #
-# Modelli: stock (il CD210 originale del comma), teacher, logged (il piano che girava davvero in
-#   auto, dal rlog), run:<cartella in outputs/supervised>, hf:<nome su Hugging Face>.
-# --segments: heldout (default) = quelli che supervised/dataset.py tiene fuori dal training.
-# --rate: frame valutati al secondo, 5 (default) o 20.
-# --force: ricalcola anche se outputs/eval/ ha gia' il risultato per lo stesso modello.
-# Output: outputs/eval/<modello>.json; alla fine stampa OUTPUT_JSON=...
-# Con --device=cuda (default) prende il lock della GPU condiviso con training e speedlimits.
+# Models: stock (the original CD210 of the comma), teacher, logged (the plan that really ran in
+#   the car, from the rlog), run:<folder in outputs/supervised>, hf:<name on Hugging Face>.
+# --segments: heldout (default) = the ones supervised/dataset.py keeps out of the training.
+# --rate: frames evaluated per second, 5 (default) or 20.
+# --force: recomputes even when outputs/eval/ already has the result for the same model.
+# Output: outputs/eval/<model>.json; at the end it prints OUTPUT_JSON=...
+# With --device=cuda (default) it takes the GPU lock shared with training and speedlimits.
 #
 # -h, --help: this help.
 
@@ -51,9 +51,9 @@ for argument in "$@"; do
   fi
 done
 
-[ "$has_model" = "1" ] || die "manca --model=<modello> (es. stock o run:2026-10-21_1544)"
+[ "$has_model" = "1" ] || die "missing --model=<model> (e.g. stock or run:2026-10-21_1544)"
 if [ "$device" != "cuda" ] && [ "$device" != "cpu" ]; then
-  die "--device vuole cuda o cpu, non '$device'"
+  die "--device needs cuda or cpu, not '$device'"
 fi
 
 distill_load_env

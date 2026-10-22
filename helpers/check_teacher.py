@@ -77,7 +77,7 @@ def numpy_dtype(type_name: str):
         return np.uint8
     if type_name == "tensor(float)":
         return np.float32
-    raise SystemExit(f"input di tipo {type_name}: questo controllo non lo sa riempire")
+    raise SystemExit(f"input of type {type_name}: this check cannot fill it")
 
 
 def run_full_model(session: ort.InferenceSession, frames: np.ndarray, desire_ticks: np.ndarray,
@@ -176,15 +176,15 @@ class Checks:
         if relative <= tolerance:
             verdict = "ok"
         else:
-            verdict = "FALLITO"
+            verdict = "FAILED"
             self.failed.append(label)
-        print(f"   {label:46s} max_abs {max_abs:.2e}  relativo {relative:.2e}  {verdict}")
+        print(f"   {label:46s} max_abs {max_abs:.2e}  relative {relative:.2e}  {verdict}")
 
     def require(self, label: str, ok: bool, detail: str) -> None:
         if ok:
             verdict = "ok"
         else:
-            verdict = "FALLITO"
+            verdict = "FAILED"
             self.failed.append(label)
         print(f"   {label:46s} {detail}  {verdict}")
 
@@ -208,8 +208,8 @@ def check_causality(checks: Checks, teacher: ORTSupercomboForInference, feed: di
         elif least_changed is None or max_abs < least_changed:
             least_changed = max_abs
     ok = worst_unchanged <= UNCHANGED_TOLERANCE and least_changed > 0
-    detail = (f"step 0..{first_changed - 1} relativo {worst_unchanged:.2e} (uguali), "
-              f"step {first_changed}..{len(base) - 1} max_abs >= {least_changed:.2e} (cambiati)")
+    detail = (f"step 0..{first_changed - 1} relative {worst_unchanged:.2e} (unchanged), "
+              f"step {first_changed}..{len(base) - 1} max_abs >= {least_changed:.2e} (changed)")
     checks.require(label, ok, detail)
 
 
@@ -227,7 +227,7 @@ def main() -> None:
     for entry in model.metadata_props:
         if entry.key == "model_checkpoint":
             checkpoint = entry.value
-    print(f"Modello: {args.model} ({args.model.stat().st_size / 1e6:.1f} MB), checkpoint {checkpoint or '?'}")
+    print(f"Model: {args.model} ({args.model.stat().st_size / 1e6:.1f} MB), checkpoint {checkpoint or '?'}")
     for value in model.graph.input:
         dims = []
         for dim in value.type.tensor_type.shape.dim:
@@ -235,24 +235,24 @@ def main() -> None:
         print(f"   input {value.name} {dims}")
     if not is_queue_supercombo(model):
         raise SystemExit(
-            f"{args.model}: nessun input state_feat_q, non e' un modello a code di Hugging Face "
-            "(il teacher vecchio 084747c7 non ha bisogno di questo controllo)"
+            f"{args.model}: no state_feat_q input, it is not a Hugging Face queue model "
+            "(the old teacher 084747c7 does not need this check)"
         )
 
     start = time.time()
     try:
         teacher = ORTSupercomboForInference.from_supercombo(model, providers=["CPUExecutionProvider"])
     except ValueError as error:
-        raise SystemExit(f"NON si puo' usare come teacher: {error}") from error
+        raise SystemExit(f"it CANNOT be used as teacher: {error}") from error
     del model
     steps = teacher.history_len
     temporal_len = teacher.temporal_len
-    print(f"Diviso in vision + policies dense in {time.time() - start:.1f} s: {steps} step, "
-          f"desire di {temporal_len} step, feature {teacher.feature_shape}")
+    print(f"Split into vision + dense policies in {time.time() - start:.1f} s: {steps} steps, "
+          f"desire of {temporal_len} steps, features {teacher.feature_shape}")
 
     minimum_ticks = steps * FRAME_SKIP + 1
     if args.ticks < minimum_ticks:
-        raise SystemExit(f"--ticks deve essere almeno {minimum_ticks} (il frame t-4 dello step piu' vecchio)")
+        raise SystemExit(f"--ticks must be at least {minimum_ticks} (the t-4 frame of the oldest step)")
 
     full = cpu_session(args.model)
     new_img_shape = None
@@ -276,7 +276,7 @@ def main() -> None:
 
     start = time.time()
     full_outputs = run_full_model(full, frames, desire_ticks, traffic, action_t)
-    print(f"Modello completo a 20 Hz: {args.ticks} frame in {time.time() - start:.1f} s")
+    print(f"Full model at 20 Hz: {args.ticks} frames in {time.time() - start:.1f} s")
     del full
 
     checks = Checks()
@@ -287,7 +287,7 @@ def main() -> None:
     images = step_images(frames, last_tick, 0, steps)
     big_images = step_images(frames, last_tick, 1, steps)
     features = teacher.encode({ModelInputs.IMG: images[None], ModelInputs.BIG_IMG: big_images[None]})[0]
-    print("[vision] feature di ogni step 5 Hz = hidden_state del modello completo a quel frame")
+    print("[vision] features of every 5 Hz step = hidden_state of the full model at that frame")
     for step in range(steps):
         tick = last_tick - (steps - 1 - step) * FRAME_SKIP
         reference = full_outputs[tick, hidden].reshape(features.shape[1:])
@@ -304,15 +304,15 @@ def main() -> None:
     }
     start = time.time()
     predictions = prefill(teacher, inputs)
-    print(f"[equivalenza] ultimo step del teacher (prefill dense, {time.time() - start:.1f} s) = "
-          f"modello completo al frame {last_tick}")
+    print(f"[equivalence] last step of the teacher (dense prefill, {time.time() - start:.1f} s) = "
+          f"full model at frame {last_tick}")
     for name, output_slice in output_slices.items():
         if name == "pad":
             continue
         value = predictions[name][0, -1].reshape(-1)
         checks.compare(name, value, full_outputs[last_tick, output_slice], args.tolerance)
 
-    print("[hidden_state] hidden_state di ogni step denso = feature della vision di quello step")
+    print("[hidden_state] hidden_state of every dense step = vision features of that step")
     checks.compare(f"step 0..{steps - 1}", predictions["hidden_state"][0], features, UNCHANGED_TOLERANCE)
 
     # Causality on the dense policies graph itself: one run with the vision features of the
@@ -324,19 +324,19 @@ def main() -> None:
         ModelInputs.ACTION_T: action_t,
     }
     base = teacher.policies_session.run(None, feed)[0][0]
-    print("[causalita'] lo step k vede solo gli step 0..k")
+    print("[causality] step k only sees steps 0..k")
     scale = float(np.std(features.astype(np.float32)))
     for changed_step in (steps - 1, steps // 2):
         changed_features = features.copy()
         noise = rng.normal(0.0, scale, size=features.shape[1:])
         changed_features[changed_step] = noise.astype(features.dtype)
         check_causality(checks, teacher, feed, base, "features", changed_features[None], changed_step,
-                        f"feature dello step {changed_step} cambiate")
+                        f"features of step {changed_step} changed")
     changed_desire = desire.copy()
     changed_desire[-1] = 0.0
     changed_desire[-1, 6] = 1.0
     check_causality(checks, teacher, feed, base, ModelInputs.DESIRE, changed_desire[None], steps - 1,
-                    "desire piu' recente cambiato")
+                    "newest desire changed")
 
     # Batch: a second, different sequence; both in one batch == each one alone.
     other_desire = np.zeros_like(desire)
@@ -353,7 +353,7 @@ def main() -> None:
     for name in inputs:
         batch_inputs[name] = np.concatenate((inputs[name], other_inputs[name]))
     batch_predictions = prefill(teacher, batch_inputs)
-    print("[batch] 2 sequenze diverse in un batch = ogni sequenza da sola")
+    print("[batch] 2 different sequences in one batch = each sequence alone")
     alone = (predictions, other_predictions)
     for sequence in range(2):
         worst = 0.0
@@ -363,19 +363,20 @@ def main() -> None:
             if relative >= worst:
                 worst = relative
                 worst_name = name
-        checks.require(f"sequenza {sequence}", worst <= args.tolerance,
-                       f"peggiore relativo {worst:.2e} ({worst_name})")
+        checks.require(f"sequence {sequence}", worst <= args.tolerance,
+                       f"worst relative {worst:.2e} ({worst_name})")
     sequence_difference, _ = errors(other_predictions["plan"], predictions["plan"])
-    checks.require("le due sequenze danno plan diversi", sequence_difference > 0, f"max_abs {sequence_difference:.2e}")
+    checks.require("the two sequences give different plans", sequence_difference > 0,
+                   f"max_abs {sequence_difference:.2e}")
 
     print()
     if checks.failed:
-        print(f"RISULTATO: {len(checks.failed)} controlli FALLITI (tolleranza relativa {args.tolerance:.0e}):")
+        print(f"RESULT: {len(checks.failed)} checks FAILED (relative tolerance {args.tolerance:.0e}):")
         for label in checks.failed:
             print(f"   {label}")
         raise SystemExit(1)
-    print(f"RISULTATO: tutti i controlli ok (tolleranza relativa {args.tolerance:.0e}): "
-          f"{args.model.name} si puo' usare come teacher")
+    print(f"RESULT: all checks ok (relative tolerance {args.tolerance:.0e}): "
+          f"{args.model.name} can be used as teacher")
 
 
 if __name__ == "__main__":

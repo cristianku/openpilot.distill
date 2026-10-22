@@ -70,13 +70,13 @@ def main() -> None:
 
     # The ref ends up in the ';'-separated favorites list and in file names.
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.name):
-        raise SystemExit(f"nome non valido: {args.name} (solo lettere, numeri, _ . -)")
+        raise SystemExit(f"invalid name: {args.name} (only letters, digits, _ . -)")
     if not re.fullmatch(r"[0-9a-f]{64}", args.sha256):
-        raise SystemExit(f"sha256 non valido: {args.sha256}")
+        raise SystemExit(f"invalid sha256: {args.sha256}")
 
     catalog = {"bundles": [make_bundle(args, FIRST_INDEX)]}
     args.catalog.write_text(json.dumps(catalog, indent=2) + "\n")
-    print(f"catalogo: solo distill-{args.name}")
+    print(f"catalog: only distill-{args.name}")
 
 
 if __name__ == "__main__":

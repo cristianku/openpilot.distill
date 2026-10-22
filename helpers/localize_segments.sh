@@ -3,10 +3,10 @@
 # and frame_info.safetensors next to rlog.zst).
 #
 # Usage: helpers/localize_segments.sh [<segment> ...]
-#   helpers/localize_segments.sh                                            (da fare + da raffinare)
-#   helpers/localize_segments.sh --status                                   (solo stato, non lancia il localizer)
-#   helpers/localize_segments.sh 0000011c8152ba83cf01                       (nome cartella in data/)
-#   helpers/localize_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1    (formato connect)
+#   helpers/localize_segments.sh                                            (todo + refine)
+#   helpers/localize_segments.sh --status                                   (state only, does not run the localizer)
+#   helpers/localize_segments.sh 0000011c8152ba83cf01                       (folder name in data/)
+#   helpers/localize_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1    (connect format)
 #   helpers/localize_segments.sh 0000011c--8152ba83cf 1 2 3
 #   helpers/localize_segments.sh 0000011c--8152ba83cf 2-9
 #
@@ -110,7 +110,7 @@ while [ $# -gt 0 ]; do
   elif [[ "$1" =~ ^[0-9a-f]+$ ]]; then
     names="$names $1"
   else
-    die "segmento non valido: $1"
+    die "invalid segment: $1"
   fi
   shift
 done
@@ -124,9 +124,9 @@ if [ "$status_only" -eq 1 ]; then
     elif [ "$state" = "done" ]; then
       ionex_of "$name"
       if [ "$ionex_better" != "-" ]; then
-        echo "refine  $name  (mappa $ionex_used, uscita $ionex_better)"
+        echo "refine  $name  (map $ionex_used, out now $ionex_better)"
       else
-        echo "done  $name  (mappa $ionex_used)"
+        echo "done  $name  (map $ionex_used)"
       fi
     else
       echo "$state  $name"
@@ -136,7 +136,7 @@ if [ "$status_only" -eq 1 ]; then
     if [ ! -d "$dir" ]; then
       continue
     fi
-    echo "scartato  $(basename "$dir")  ($(head -1 "$dir/localizer.failed" 2>/dev/null))"
+    echo "discarded  $(basename "$dir")  ($(head -1 "$dir/localizer.failed" 2>/dev/null))"
   done
   exit 0
 fi
@@ -151,12 +151,12 @@ if [ -z "$names" ]; then
     else
       ionex_of "$name"
       if [ "$ionex_better" != "-" ]; then
-        echo "$name: rifaccio con la mappa $ionex_better (prima $ionex_used)"
+        echo "$name: redoing with the map $ionex_better (was $ionex_used)"
         names="$names $name"
       fi
     fi
   done
-  [ -n "$names" ] || { echo "Niente da fare: tutti i segmenti sono gia' localizzati con la mappa migliore uscita."; exit 0; }
+  [ -n "$names" ] || { echo "Nothing to do: every segment is already localized with the best map out."; exit 0; }
 fi
 
 ok=""
@@ -166,7 +166,7 @@ for name in $names; do
   dir="$DATA_DIR/$name"
   echo "== $name"
   if [ ! -f "$dir/rlog.zst" ]; then
-    echo "manca $dir/rlog.zst"
+    echo "$dir/rlog.zst is missing"
     failed="$failed $name"
     continue
   fi
@@ -190,7 +190,7 @@ for name in $names; do
       else
         mv "$dir" "$DISCARD_DIR/$name"
       fi
-      echo "$name: dati inutilizzabili, spostato in data_scartati/"
+      echo "$name: unusable data, moved to data_scartati/"
       discarded="$discarded $name"
     else
       failed="$failed $name"
@@ -198,11 +198,11 @@ for name in $names; do
   fi
 done
 
-echo "OK:${ok:- nessuno}"
+echo "OK:${ok:- none}"
 if [ -n "$discarded" ]; then
-  echo "Scartati (in data_scartati/):$discarded"
+  echo "Discarded (in data_scartati/):$discarded"
 fi
 if [ -n "$failed" ]; then
-  echo "Falliti:$failed"
+  echo "Failed:$failed"
   exit 1
 fi

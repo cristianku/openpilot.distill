@@ -31,34 +31,34 @@ from tasks.train import RUN_NAME_RE, RUNS_DIR
 
 REFERENCE = REPO / 'models' / 'comma_driving_supercombo.onnx'
 ONNX_NAME = 'driving_supercombo.onnx'
-MISSING_ORIGINAL = ('sul comma non trovo l\'originale di questa versione (ne\' al suo posto ne\' in '
+MISSING_ORIGINAL = ('the original model of this version is not on the comma (neither in its place nor in '
                     + BACKUP + ')')
 
 
 def add_model_arguments(parser: argparse.ArgumentParser, file_help: str) -> None:
     """--host, --run and the optional model file: the arguments of the tasks that take a trained model."""
     parser.add_argument('--host', default=None,
-                        help='IP o nome ssh del comma ("comma@" aggiunto se manca l\'utente); default COMMA_HOST')
-    parser.add_argument('--run', default=None, help='il run di outputs/supervised/ (il suo supercombo.pt)')
+                        help='IP or ssh name of the comma ("comma@" added when it has no user); default COMMA_HOST')
+    parser.add_argument('--run', default=None, help='the run of outputs/supervised/ (its supercombo.pt)')
     parser.add_argument('model', nargs='?', default=None,
-                        help=file_help + ' (senza --run e senza file: l\'ultimo supercombo.pt)')
+                        help=file_help + ' (without --run and without a file: the newest supercombo.pt)')
 
 
 def check_model_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.host == '':
-        parser.error('--host vuole un IP o un nome')
+        parser.error('--host needs an IP or a name')
     if args.run is not None and args.model is not None:
-        parser.error('dai --run oppure un file, non tutti e due')
+        parser.error('give --run or a file, not both')
     if args.run is not None and not RUN_NAME_RE.fullmatch(args.run):
-        parser.error('--run non valido: ' + args.run)
+        parser.error('invalid --run: ' + args.run)
 
 
 def latest_model() -> Path:
     """The newest outputs/supervised/*/supercombo.pt (by modification time)."""
     models = [path for path in RUNS_DIR.glob('*/supercombo.pt') if path.is_file()]
     if not models:
-        raise TaskError('nessun run finito in outputs/supervised/ (manca supercombo.pt): finisci prima un '
-                        'training (Training)')
+        raise TaskError('no finished run in outputs/supervised/ (no supercombo.pt): finish a training first '
+                        '(Training)')
     return max(models, key=lambda path: path.stat().st_mtime)
 
 
@@ -67,11 +67,11 @@ def resolve_model(run: str | None, path: str | None) -> Path:
     if run is not None:
         model = RUNS_DIR / run / 'supercombo.pt'
         if not RUN_NAME_RE.fullmatch(run) or not model.is_file():
-            raise TaskError('il run ' + run + ' non ha supercombo.pt (non esiste o non e\' finito)')
+            raise TaskError('run ' + run + ' has no supercombo.pt (it does not exist or has not finished)')
     elif path is not None:
         model = Path(path)
         if not model.is_file():
-            raise TaskError(path + ' non esiste')
+            raise TaskError(path + ' does not exist')
     else:
         model = latest_model()
     return Path(os.path.abspath(model))
@@ -85,12 +85,12 @@ def run_module(module: str, *arguments: str, failure: str) -> None:
     code = subprocess.run([sys.executable, '-m', module, *arguments], cwd=REPO, env=environment,
                           stdin=subprocess.DEVNULL, check=False).returncode
     if code != 0:
-        raise TaskError(failure + ' (codice ' + str(code) + ')')
+        raise TaskError(failure + ' (code ' + str(code) + ')')
 
 
 def export_onnx(checkpoint: Path, reference: Path, output: Path) -> None:
     run_module('helpers.export_onnx', str(checkpoint), '--reference', str(reference), '--output', str(output),
-               failure='export ONNX fallito (errore sopra)')
+               failure='ONNX export failed (error above)')
 
 
 def read_model_info(comma: Comma) -> dict:
@@ -100,7 +100,7 @@ def read_model_info(comma: Comma) -> dict:
     try:
         info = comma.key_values(MODEL_INFO_SCRIPT, BACKUP)
     except TaskError as exc:
-        raise TaskError('non riesco a leggere /data/openpilot sul comma (' + str(exc) + ')') from exc
+        raise TaskError('cannot read /data/openpilot on the comma (' + str(exc) + ')') from exc
     for key in ('reference', 'original', 'current', 'backup'):
         info.setdefault(key, '')
     return info
@@ -122,7 +122,7 @@ def update_reference(comma: Comma, info: dict, *, strict: bool, reference: Path 
     source = original_model_source(info)
     cached = sha256_of(reference) if reference.is_file() else ''
     if original and cached == original:
-        say('Riferimento: ' + str(reference) + ', gia\' uguale all\'originale del comma')
+        say('Reference: ' + str(reference) + ', already the same as the comma\'s original')
         return reference
     if source:
         # Into a temporary file first, kept only when it is really the original.
@@ -131,17 +131,17 @@ def update_reference(comma: Comma, info: dict, *, strict: bool, reference: Path 
         copied = sha256_of(partial)
         if copied != original:
             partial.unlink(missing_ok=True)
-            raise TaskError('la copia di ' + source + ' non ha lo sha256 dell\'originale (' + copied + ' invece di '
-                            + original + '): ' + str(reference) + ' non toccato')
+            raise TaskError('the copy of ' + source + ' does not have the original\'s sha256 (' + copied
+                            + ' instead of ' + original + '): ' + str(reference) + ' left untouched')
         os.replace(partial, reference)
-        say('Riferimento: driving_supercombo.onnx originale del comma (' + source + ')')
+        say('Reference: the comma\'s original driving_supercombo.onnx (' + source + ')')
         return reference
     if strict:
         raise TaskError(MISSING_ORIGINAL)
     if reference.is_file():
-        say('ATTENZIONE: ' + MISSING_ORIGINAL + ': uso il riferimento gia\' copiato (' + str(reference) + ')')
+        say('WARNING: ' + MISSING_ORIGINAL + ': using the reference copied earlier (' + str(reference) + ')')
         return reference
-    raise TaskError(MISSING_ORIGINAL + ' e non c\'e\' ' + str(reference))
+    raise TaskError(MISSING_ORIGINAL + ' and there is no ' + str(reference))
 
 
 def reference_for_export(comma: Comma) -> Path:
@@ -150,15 +150,15 @@ def reference_for_export(comma: Comma) -> Path:
     if comma.reachable():
         return update_reference(comma, read_model_info(comma), strict=False)
     if REFERENCE.is_file():
-        say('Comma non raggiungibile: uso il riferimento gia\' copiato (' + str(REFERENCE) + ')')
+        say('Comma not reachable: using the reference copied earlier (' + str(REFERENCE) + ')')
         return REFERENCE
-    raise TaskError('comma non raggiungibile e nessun ' + str(REFERENCE) + ': accendi il comma (serve una chiave '
-                    'ssh registrata sul suo account GitHub)')
+    raise TaskError('comma not reachable and no ' + str(REFERENCE) + ': turn the comma on (it needs an ssh key '
+                    'registered on its GitHub account)')
 
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_model_arguments(parser, 'il supercombo.pt da esportare')
+    add_model_arguments(parser, 'the supercombo.pt to export')
     args = parser.parse_args(arguments)
     check_model_arguments(parser, args)
     return args
@@ -172,7 +172,7 @@ def export(args: argparse.Namespace) -> int:
     reference = reference_for_export(comma)
     say('Export: ' + str(checkpoint))
     export_onnx(checkpoint, reference, output)
-    say('Fatto: ' + str(output))
+    say('Done: ' + str(output))
     return 0
 
 

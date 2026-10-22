@@ -61,16 +61,16 @@ def read_reference(path: Path) -> tuple[dict[str, list[int]], dict[str, str], in
         if value.name == "outputs":
             output_size = value.type.tensor_type.shape.dim[-1].dim_value
     if output_size is None:
-        raise SystemExit(f"{path}: nessun output 'outputs', non sembra il driving_supercombo.onnx di openpilot")
+        raise SystemExit(f"{path}: no 'outputs' output, it does not look like openpilot's driving_supercombo.onnx")
     if "output_slices" not in metadata:
-        raise SystemExit(f"{path}: manca output_slices nei metadata")
+        raise SystemExit(f"{path}: output_slices missing in the metadata")
 
     for name in input_shapes:
         if name not in DEVICE_INPUTS and not name.startswith("state_"):
-            raise SystemExit(f"{path}: input '{name}' che questo export non conosce (openpilot cambiato?)")
+            raise SystemExit(f"{path}: input '{name}' unknown to this export (openpilot changed?)")
     for name in DEVICE_INPUTS:
         if name not in input_shapes:
-            raise SystemExit(f"{path}: manca l'input '{name}' (openpilot cambiato?)")
+            raise SystemExit(f"{path}: input '{name}' missing (openpilot changed?)")
     return input_shapes, metadata, output_size
 
 
@@ -86,10 +86,10 @@ def output_layout(output_slices: dict[str, slice], output_size: int) -> list[tup
     position = 0
     for start, stop, name in layout:
         if start != position:
-            raise SystemExit(f"output_slices: '{name}' parte da {start}, mi aspettavo {position}")
+            raise SystemExit(f"output_slices: '{name}' starts at {start}, expected {position}")
         position = stop
     if position != output_size:
-        raise SystemExit(f"output_slices: coprono {position} valori su {output_size}")
+        raise SystemExit(f"output_slices: they cover {position} values of {output_size}")
     return layout
 
 
@@ -184,9 +184,9 @@ def check_outputs(wrapper: OnDeviceSupercombo, inputs: dict[str, torch.Tensor]) 
         if name == "pad":
             continue
         if name not in outputs:
-            raise SystemExit(f"il modello addestrato non ha l'output '{name}' che openpilot si aspetta")
+            raise SystemExit(f"the trained model does not have the output '{name}' that openpilot expects")
         if outputs[name].shape[-1] != stop - start:
-            raise SystemExit(f"output '{name}': {outputs[name].shape[-1]} valori, openpilot ne vuole {stop - start}")
+            raise SystemExit(f"output '{name}': {outputs[name].shape[-1]} values, openpilot wants {stop - start}")
 
 
 def example_inputs(wrapper: OnDeviceSupercombo, input_shapes: dict[str, list[int]]) -> dict[str, torch.Tensor]:
@@ -264,8 +264,8 @@ def check(wrapper: OnDeviceSupercombo, path: Path, inputs: dict[str, torch.Tenso
         error = float(np.max(np.abs(got - reference)) / (np.max(np.abs(reference)) + 1e-6))
         worst = max(worst, error)
         if error > 1e-3:
-            raise SystemExit(f"controllo fallito su '{name}': errore relativo {error:.2e}")
-    print(f"controllo ok: {CHECK_FRAMES} frame con onnxruntime = modello addestrato (errore max {worst:.1e})")
+            raise SystemExit(f"check failed on '{name}': relative error {error:.2e}")
+    print(f"check ok: {CHECK_FRAMES} frames with onnxruntime = trained model (max error {worst:.1e})")
 
 
 def main() -> None:

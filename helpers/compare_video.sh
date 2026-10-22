@@ -3,21 +3,21 @@
 # (python -m evaluation.compare): the reference on top (white line), the student below (green
 # line), each with its "avg miss" on the stretch shown.
 #
-# Usage: helpers/compare_video.sh --segment=<segmento> --student=<modello> [--reference=<modello>]
+# Usage: helpers/compare_video.sh --segment=<segment> --student=<model> [--reference=<model>]
 #          [--start=<s>] [--duration=<s>] [--speed=0.25|0.5|1] [--inset|--no-inset] [--show-gt]
 #          [--device=cuda|cpu]
 #   helpers/compare_video.sh --segment=00000126f84ad127f010 --student=run:2026-10-21_1544
 #   helpers/compare_video.sh --segment=00000126f84ad127f010 --reference=teacher \
 #     --student=hf:2026_10_21_1544 --start=20 --duration=15 --speed=0.25 --show-gt
 #
-# Modelli: stock (il CD210 originale del comma, default del riferimento), teacher,
-#   logged (il piano che girava davvero in auto, dal rlog), run:<cartella in outputs/supervised>,
-#   hf:<nome su Hugging Face>.
-# --start: secondi dall'inizio del segmento (minimo 5.2: prima i modelli si riscaldano), default 10.
-# --duration: secondi di video (default 15). --speed: 0.5 = rallentato 2 volte (default).
-# --show-gt: anche il percorso reale (giallo). --no-inset: senza la vista dall'alto.
-# Output: outputs/compare/<id>.mp4 e <id>.json; alla fine stampa OUTPUT_MP4=... e OUTPUT_JSON=...
-# Con --device=cuda (default) prende il lock della GPU condiviso con training e speedlimits.
+# Models: stock (the original CD210 of the comma, default of the reference), teacher,
+#   logged (the plan that really ran in the car, from the rlog), run:<folder in outputs/supervised>,
+#   hf:<name on Hugging Face>.
+# --start: seconds from the start of the segment (minimum 5.2: before that the models warm up), default 10.
+# --duration: seconds of video (default 15). --speed: 0.5 = slowed down 2 times (default).
+# --show-gt: also the real path (yellow). --no-inset: without the top-down view.
+# Output: outputs/compare/<id>.mp4 and <id>.json; at the end it prints OUTPUT_MP4=... and OUTPUT_JSON=...
+# With --device=cuda (default) it takes the GPU lock shared with training and speedlimits.
 #
 # -h, --help: this help.
 
@@ -58,10 +58,10 @@ for argument in "$@"; do
   fi
 done
 
-[ "$has_segment" = "1" ] || die "manca --segment=<segmento> (una cartella di data/)"
-[ "$has_student" = "1" ] || die "manca --student=<modello> (es. run:2026-10-21_1544)"
+[ "$has_segment" = "1" ] || die "missing --segment=<segment> (a folder of data/)"
+[ "$has_student" = "1" ] || die "missing --student=<model> (e.g. run:2026-10-21_1544)"
 if [ "$device" != "cuda" ] && [ "$device" != "cpu" ]; then
-  die "--device vuole cuda o cpu, non '$device'"
+  die "--device needs cuda or cpu, not '$device'"
 fi
 
 distill_load_env

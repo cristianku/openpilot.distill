@@ -42,8 +42,8 @@ STEP_RE = re.compile(r'^step (\d+)/(\d+):')
 RUN_DIR_RE = re.compile(r'^RUN_DIR=(.+)$')
 VIDEO_RE = re.compile(r'/outputs/compare/([A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.mp4)$')
 OUTPUT_MP4_RE = re.compile(r'^OUTPUT_MP4=(.+)$')
-STATE_LABELS = {'running': 'in corso', 'ok': 'finito', 'failed': 'fallito', 'stopped': 'fermato',
-                'unknown': 'terminato (esito sconosciuto)'}
+STATE_LABELS = {'running': 'running', 'ok': 'done', 'failed': 'failed', 'stopped': 'stopped',
+                'unknown': 'ended (unknown result)'}
 # Environment variables of the site that the jobs must not see.
 PRIVATE_ENVIRONMENT = ('DISTILL_WEB_TOKEN',)
 
@@ -130,7 +130,7 @@ class JobManager:
     def __init__(self, repo: Path, *, jobs_dir: Path | None = None, code_root: Path = CODE_ROOT,
                  python: str = sys.executable, gpu_check=None, external_groups=None,
                  stop_grace: float = STOP_GRACE_SECONDS):
-        """gpu_check(): '' when a GPU job may start, else the Italian reason.
+        """gpu_check(): '' when a GPU job may start, else the reason.
         external_groups(): groups kept busy by processes the site did not start (a terminal)."""
         self.repo = repo
         if jobs_dir is None:
@@ -276,10 +276,10 @@ class JobManager:
 
     def get(self, job_id: str) -> dict:
         if not JOB_ID_RE.fullmatch(job_id):
-            raise WebError(404, 'unknown_job', 'Job sconosciuto.')
+            raise WebError(404, 'unknown_job', 'Unknown job.')
         job = self._load(job_id)
         if job is None:
-            raise WebError(404, 'unknown_job', 'Job sconosciuto.')
+            raise WebError(404, 'unknown_job', 'Unknown job.')
         return self._view(job)
 
     def own_running_groups(self) -> dict:
@@ -317,18 +317,19 @@ class JobManager:
 
     # -- start / stop ------------------------------------------------------------------------------
     def conflict_reason(self, group: str, running: set) -> str:
-        """'' when a job of `group` may start with `running` groups busy, else why not (Italian)."""
+        """'' when a job of `group` may start with `running` groups busy, else why not."""
         if group == 'system':
             if running:
                 names = []
                 for other in sorted(running):
                     names.append(GROUP_NAMES.get(other, other))
-                return 'Il codice si aggiorna solo quando non gira niente: c\'e\' ' + ', '.join(names) + ' in corso.'
+                return ('The code can only be updated when nothing else is running (running: ' + ', '.join(names)
+                        + ').')
             return ''
         if 'system' in running:
-            return 'C\'e\' un aggiornamento del codice in corso: aspetta che finisca.'
+            return 'A code update is running: wait for it to finish.'
         if group in running:
-            return 'C\'e\' gia\' ' + GROUP_NAMES.get(group, group) + ' in corso: aspetta che finisca.'
+            return 'There is already ' + GROUP_NAMES.get(group, group) + ' running: wait for it to finish.'
         return ''
 
     def start(self, spec: JobSpec) -> dict:
@@ -347,7 +348,7 @@ class JobManager:
             job_file = self.job_file(job_id)
             log_file = self.log_file(job_id)
             if job_file.exists() or log_file.exists():
-                raise WebError(409, 'busy', 'Un job e\' appena partito: riprova tra un secondo.')
+                raise WebError(409, 'busy', 'A job has just started: try again in a second.')
 
             job = {'id': job_id, 'action': spec.action, 'label': spec.label, 'group': spec.group,
                    'argv': list(spec.argv), 'cwd': str(self.repo), 'params': spec.params, 'summary': spec.summary,
@@ -362,7 +363,7 @@ class JobManager:
             environment['PYTHONUNBUFFERED'] = '1'
             stamp = datetime.fromtimestamp(started, UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
             with log_file.open('ab') as log:
-                log.write(('== ' + spec.label + ', avviato dal sito il ' + stamp + '\n').encode('utf-8'))
+                log.write(('== ' + spec.label + ', started from the site on ' + stamp + '\n').encode('utf-8'))
                 if spec.summary:
                     log.write(('== ' + spec.summary + '\n').encode('utf-8'))
                 log.flush()
@@ -373,7 +374,7 @@ class JobManager:
                                                stderr=subprocess.STDOUT, env=environment, start_new_session=True)
                 except OSError as exc:
                     update_job_file(job_file, {'exit_code': 127, 'finished': time.time()})
-                    raise WebError(500, 'start_failed', 'Non riesco ad avviare il job: ' + str(exc)) from exc
+                    raise WebError(500, 'start_failed', 'Cannot start the job: ' + str(exc)) from exc
             update_job_file(job_file, {'pid': process.pid, 'pgid': process.pid})
             self._processes[job_id] = process
             self._wait_wrapper_ready(job_file, process)
@@ -396,15 +397,15 @@ class JobManager:
     def stop(self, job_id: str) -> dict:
         view = self.get(job_id)
         if view['state'] != 'running':
-            raise WebError(409, 'not_running', 'Il job non e\' in corso.')
+            raise WebError(409, 'not_running', 'The job is not running.')
         job = read_job_file(self.job_file(job_id))
         pgid = job.get('pgid')
         pid = job.get('pid')
         # Only a process group whose leader is still the wrapper of this very job.
         if not self._is_job_process(pid, job_id) or pgid != pid:
-            raise WebError(409, 'not_running', 'Non trovo il processo del job: forse e\' appena finito.')
+            raise WebError(409, 'not_running', 'Cannot find the job process: it may have just finished.')
         update_job_file(self.job_file(job_id), {'stop_requested': time.time()})
-        self._append_log(job_id, '\n== fermato dal sito: SIGTERM al gruppo ' + str(pgid) + '\n')
+        self._append_log(job_id, '\n== stopped from the site: SIGTERM to group ' + str(pgid) + '\n')
         try:
             os.killpg(pgid, signal.SIGTERM)
         except ProcessLookupError:
@@ -433,7 +434,7 @@ class JobManager:
         # Still alive since stop() checked that its leader was the wrapper of this job: the same group
         # (a process group id is not reused while the group has members). Also kills what is left
         # when the wrapper already ended (e.g. data-loader workers that ignored SIGTERM).
-        self._append_log(job_id, '\n== non si e\' fermato in ' + str(int(grace)) + ' s: SIGKILL al gruppo\n')
+        self._append_log(job_id, '\n== did not stop within ' + str(int(grace)) + ' s: SIGKILL to the group\n')
         try:
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
@@ -450,7 +451,7 @@ class JobManager:
         if job is None or job.get('exit_code') is not None:
             return
         update_job_file(self.job_file(job_id), {'exit_code': code, 'finished': time.time(), 'killed': killed})
-        self._append_log(job_id, '\n== finito con codice ' + str(code) + ' (fermato dal sito)\n')
+        self._append_log(job_id, '\n== finished with code ' + str(code) + ' (stopped from the site)\n')
 
     def _append_log(self, job_id: str, text: str) -> None:
         try:
@@ -462,10 +463,10 @@ class JobManager:
     # -- log ---------------------------------------------------------------------------------------
     def log(self, job_id: str, offset: int) -> dict:
         if not JOB_ID_RE.fullmatch(job_id):
-            raise WebError(404, 'unknown_job', 'Job sconosciuto.')
+            raise WebError(404, 'unknown_job', 'Unknown job.')
         path = self.log_file(job_id)
         if not path.is_file():
-            raise WebError(404, 'unknown_job', 'Job sconosciuto.')
+            raise WebError(404, 'unknown_job', 'Unknown job.')
         size = path.stat().st_size
         if offset < 0 or offset > size:
             offset = 0

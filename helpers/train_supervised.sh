@@ -5,15 +5,15 @@
 # Usage: helpers/train_supervised.sh [--steps=<n>] [--batch-size=<n>] [--workers=<n>] [--test]
 #                                    [--background | --foreground-log] [--wandb=online|offline|disabled]
 #                                    [--continue | --resume=<run>] [--teacher=md-v3|084747c7]
-#   helpers/train_supervised.sh                  (5000 step, in primo piano)
-#   helpers/train_supervised.sh --test           (10 step, solo per vedere che tutto parte)
-#   helpers/train_supervised.sh --background     (continua anche se chiudi la ssh)
+#   helpers/train_supervised.sh                  (5000 steps, in the foreground)
+#   helpers/train_supervised.sh --test           (10 steps, only to see that everything starts)
+#   helpers/train_supervised.sh --background     (keeps going after the ssh is closed)
 #   helpers/train_supervised.sh --steps=20000 --background
-#   helpers/train_supervised.sh --continue --background                    (dai pesi "stable" su Hugging Face)
-#   helpers/train_supervised.sh --resume=outputs/supervised/2026-10-21_1544  (riprende un run interrotto)
-#   helpers/train_supervised.sh --resume=2026-10-21_1544                     (uguale, solo il nome del run)
-#   helpers/train_supervised.sh --foreground-log --wandb=offline             (come lo lancia il sito)
-#   helpers/train_supervised.sh --teacher=084747c7 --background              (col teacher vecchio)
+#   helpers/train_supervised.sh --continue --background                    (from the "stable" weights on Hugging Face)
+#   helpers/train_supervised.sh --resume=outputs/supervised/2026-10-21_1544  (resumes an interrupted run)
+#   helpers/train_supervised.sh --resume=2026-10-21_1544                     (the same, only the run name)
+#   helpers/train_supervised.sh --foreground-log --wandb=offline             (as the web site starts it)
+#   helpers/train_supervised.sh --teacher=084747c7 --background              (with the old teacher)
 #
 # Start of the model (supervised/train.py --mode):
 #   (default)   fresh: a new model, from the pretrained vision backbone.
@@ -72,7 +72,7 @@
 #   - fcamera.hevc / ecamera.hevc in data/ are not links to a missing file of the shared
 #     folder (COMMA_VIDEOS_DIR): one would stop the training too
 #
-# Every run gets its own folder outputs/supervised/<AAAA-MM-GG_hhmmss>/ (time of the server) with
+# Every run gets its own folder outputs/supervised/<YYYY-MM-DD_hhmmss>/ (time of the server) with
 # supercombo.pt (the trained model, written only at the end), supercombo.training.pt (model +
 # optimizer, for --resume), train.log, metrics.jsonl (one JSON line per step: loss, gt, distill,
 # grad_norm, step_time and the single losses), run.json (settings, start, end) and the wandb files.
@@ -137,13 +137,13 @@ while [ $# -gt 0 ]; do
   elif [[ "$1" == --wandb=* ]]; then
     wandb_mode="${1#--wandb=}"
   elif [ "$1" = "--continue" ]; then
-    [ "$mode" != "resume" ] || die "--continue e --resume insieme non hanno senso"
+    [ "$mode" != "resume" ] || die "--continue and --resume together make no sense"
     mode="continue"
   elif [[ "$1" == --resume=* ]]; then
-    [ "$mode" != "continue" ] || die "--continue e --resume insieme non hanno senso"
+    [ "$mode" != "continue" ] || die "--continue and --resume together make no sense"
     mode="resume"
     resume_dir="${1#--resume=}"
-    [ -n "$resume_dir" ] || die "--resume vuole il run (es. outputs/supervised/2026-10-21_1544 o 2026-10-21_1544)"
+    [ -n "$resume_dir" ] || die "--resume needs the run (e.g. outputs/supervised/2026-10-21_1544 or 2026-10-21_1544)"
   elif [[ "$1" == --steps=* ]]; then
     steps="${1#--steps=}"
     steps_given=1
@@ -155,28 +155,28 @@ while [ $# -gt 0 ]; do
     teacher_name="${1#--teacher=}"
     teacher_given=1
   else
-    die "opzione non valida: $1 (vedi --help)"
+    die "invalid option: $1 (see --help)"
   fi
   shift
 done
 
-[[ "$steps" =~ ^[0-9]+$ ]] || die "--steps vuole un numero"
-[[ "$batch_size" =~ ^[0-9]+$ ]] || die "--batch-size vuole un numero"
-[[ "$workers" =~ ^[0-9]+$ ]] || die "--workers vuole un numero"
+[[ "$steps" =~ ^[0-9]+$ ]] || die "--steps needs a number"
+[[ "$batch_size" =~ ^[0-9]+$ ]] || die "--batch-size needs a number"
+[[ "$workers" =~ ^[0-9]+$ ]] || die "--workers needs a number"
 if [ "$background" -eq 1 ] && [ "$foreground_log" -eq 1 ]; then
-  die "--background e --foreground-log insieme non hanno senso"
+  die "--background and --foreground-log together make no sense"
 fi
 if [ -n "$wandb_mode" ] && [ "$wandb_mode" != "online" ] && [ "$wandb_mode" != "offline" ] \
   && [ "$wandb_mode" != "disabled" ]; then
-  die "--wandb vuole online, offline o disabled (non '$wandb_mode')"
+  die "--wandb needs online, offline or disabled (not '$wandb_mode')"
 fi
 # --teacher: one of the two this script can download (file, URL and sha256 below). --resume takes
 # the teacher of the interrupted run from its checkpoint, so it refuses --teacher.
 if [ "$teacher_name" != "md-v3" ] && [ "$teacher_name" != "084747c7" ]; then
-  die "--teacher vuole md-v3 o 084747c7 (non '$teacher_name')"
+  die "--teacher needs md-v3 or 084747c7 (not '$teacher_name')"
 fi
 if [ "$mode" = "resume" ] && [ "$teacher_given" -eq 1 ]; then
-  die "con --resume il teacher e' quello del run interrotto: togli --teacher"
+  die "with --resume the teacher is the one of the interrupted run: drop --teacher"
 fi
 
 # GPU lock first: two trainings started together must not both prepare a run.
@@ -188,9 +188,9 @@ if [ "$mode" = "continue" ]; then
   stable_url="https://huggingface.co/$HF_REPO/resolve/main/training/stable.json"
   http_code="$(curl -sS -L -o /dev/null -w '%{http_code}' "$stable_url" || true)"
   if [ "$http_code" = "404" ]; then
-    die "su $HF_REPO non c'e' ancora training/stable.json: pubblica prima un modello con helpers/publish_model.sh --stable"
+    die "$HF_REPO has no training/stable.json yet: first publish a model with helpers/publish_model.sh --stable"
   fi
-  [ "$http_code" = "200" ] || die "non riesco a leggere $stable_url (HTTP $http_code)"
+  [ "$http_code" = "200" ] || die "cannot read $stable_url (HTTP $http_code)"
 fi
 
 # --resume: the folder of an interrupted run, with its checkpoint and without the final model.
@@ -201,12 +201,12 @@ if [ "$mode" = "resume" ]; then
   elif [[ "$resume_dir" =~ $RUN_NAME_PATTERN ]] && [ -d "$RUNS_DIR/$resume_dir" ]; then
     run_dir="$RUNS_DIR/$resume_dir"
   else
-    die "non trovo il run $resume_dir (la cartella, o il nome di una cartella in outputs/supervised/)"
+    die "run $resume_dir not found (give the folder, or the name of a folder in outputs/supervised/)"
   fi
   [ -f "$run_dir/supercombo.training.pt" ] \
-    || die "in $run_dir non c'e' supercombo.training.pt: il run e' partito senza checkpoint, non si puo' riprendere"
+    || die "$run_dir has no supercombo.training.pt: the run started without a checkpoint and cannot be resumed"
   [ ! -f "$run_dir/supercombo.pt" ] \
-    || die "$run_dir e' gia' finito (c'e' supercombo.pt): per allenarlo ancora pubblicalo con --stable e usa --continue"
+    || die "$run_dir has already finished (supercombo.pt is there): to train it further, publish it with --stable and use --continue"
   # Steps and teacher of the run in one read (the checkpoint also holds the optimizer: slow to load).
   resume_info="$(cd "$ROOT" && distill_uv_run python -c 'import sys, torch
 saved = torch.load(sys.argv[1], map_location="cpu", weights_only=True)
@@ -225,7 +225,7 @@ print(saved.get("teacher", ""))' \
   elif [ "$saved_teacher_file" = "big_driving_supercombo.onnx" ]; then
     teacher_name="084747c7"
   else
-    die "il run usa il teacher '$saved_teacher', che questo script non sa scaricare: riprendilo a mano con supervised/train.py --mode resume --teacher ..."
+    die "the run uses the teacher '$saved_teacher', which this script cannot download: resume it by hand with supervised/train.py --mode resume --teacher ..."
   fi
 fi
 
@@ -241,7 +241,7 @@ elif [ "$teacher_name" = "084747c7" ]; then
   TEACHER_SHA256="a501760a9d1d5fef0eab2b8c5d122d06124fc26dc8e0782e0aa94b82a208f0ff"
   TEACHER_SOURCE="GitHub"
 else
-  die "--teacher vuole md-v3 o 084747c7 (non '$teacher_name')"
+  die "--teacher needs md-v3 or 084747c7 (not '$teacher_name')"
 fi
 # TEACHER is the file that is checked here, TEACHER_ARG the --teacher given to train.py.
 # --resume: TEACHER_ARG is exactly the path saved in the checkpoint, train.py compares it as a
@@ -266,12 +266,12 @@ if [ -n "${WANDB_API_KEY:-}" ] || grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/n
 fi
 if [ -n "$wandb_mode" ]; then
   if [ "$wandb_mode" = "online" ] && [ "$wandb_logged_in" -eq 0 ]; then
-    die "--wandb=online ma wandb non e' loggato (uv run wandb login): usa --wandb=offline"
+    die "--wandb=online but wandb is not logged in (uv run wandb login): use --wandb=offline"
   fi
   export WANDB_MODE="$wandb_mode"
 elif [ -z "${WANDB_MODE:-}" ] && [ "$wandb_logged_in" -eq 0 ]; then
   export WANDB_MODE=offline
-  echo "wandb: non loggato, vado offline (i numeri restano in train.log e metrics.jsonl)."
+  echo "wandb: not logged in, going offline (the numbers stay in train.log and metrics.jsonl)."
 fi
 
 # A new run: its own folder, named after the time with seconds (two starts in the same minute
@@ -279,7 +279,7 @@ fi
 if [ "$mode" != "resume" ]; then
   mkdir -p "$RUNS_DIR"
   run_dir="$RUNS_DIR/$(date '+%Y-%m-%d_%H%M%S')"
-  [ ! -e "$run_dir" ] || die "$run_dir esiste gia' (due partenze nello stesso secondo?): rilancia"
+  [ ! -e "$run_dir" ] || die "$run_dir already exists (two starts in the same second?): start it again"
   mkdir "$run_dir"
 fi
 log="$run_dir/train.log"
@@ -295,7 +295,7 @@ prepare_and_train() {
   # called big_driving_supercombo.onnx, and downloading another one must not stop the training.
   teacher_file_regex="$(basename "$TEACHER" | sed 's/[.]/[.]/g')"
   if pgrep -f "curl .*--output ([^ ]*/)?${teacher_file_regex}([.]part)?( |\$)" > /dev/null; then
-    die "il teacher si sta ancora scaricando (curl in corso): aspetta che finisca e rilancia"
+    die "the teacher is still downloading (curl running): wait for it to finish and start again"
   fi
 
   # Teacher: download it when its size is not the one of its source. Hugging Face answers with a
@@ -306,8 +306,8 @@ prepare_and_train() {
     local_size="$(stat -c %s "$TEACHER")"
   fi
   if [ -z "$remote_size" ]; then
-    [ -f "$TEACHER" ] || die "manca $TEACHER e $TEACHER_SOURCE non risponde per scaricarlo"
-    echo "Teacher $teacher_name: $TEACHER_SOURCE non risponde, uso $TEACHER cosi' com'e' ($local_size byte)."
+    [ -f "$TEACHER" ] || die "$TEACHER is missing and $TEACHER_SOURCE does not answer to download it"
+    echo "Teacher $teacher_name: $TEACHER_SOURCE does not answer, using $TEACHER as it is ($local_size bytes)."
   elif [ "$local_size" != "$remote_size" ]; then
     # The download goes to $TEACHER.part (a stopped one is finished by the next start) and gets
     # the teacher's name only after the size and sha256 checks: a partial or wrong file never has
@@ -321,22 +321,22 @@ prepare_and_train() {
     # Already complete when the previous start stopped during the sha256: nothing left to download
     # (curl would get "range not satisfiable").
     if [ "$partial_size" != "$remote_size" ]; then
-      echo "Teacher $teacher_name: $partial_size di $remote_size byte, scarico da $TEACHER_SOURCE..."
+      echo "Teacher $teacher_name: $partial_size of $remote_size bytes, downloading from $TEACHER_SOURCE..."
       curl --fail --location --continue-at - "$TEACHER_URL" --output "$partial"
       partial_size="$(stat -c %s "$partial")"
     fi
-    [ "$partial_size" = "$remote_size" ] || die "teacher scaricato a meta' ($partial_size di $remote_size byte), rilancia"
+    [ "$partial_size" = "$remote_size" ] || die "teacher only partly downloaded ($partial_size of $remote_size bytes), start again"
     # Only after a download, not at every start (0.8-1.8 GB to read).
-    echo "Teacher $teacher_name: scaricato, controllo lo sha256..."
+    echo "Teacher $teacher_name: downloaded, checking the sha256..."
     local_sha256="$(sha256sum "$partial" | cut -d ' ' -f 1)"
     if [ "$local_sha256" != "$TEACHER_SHA256" ]; then
       rm -f "$partial"
-      die "teacher scaricato ma sha256 diverso ($local_sha256 invece di $TEACHER_SHA256): cancellato, rilancia per riscaricarlo"
+      die "teacher downloaded but its sha256 differs ($local_sha256 instead of $TEACHER_SHA256): deleted, start again to download it again"
     fi
     mv "$partial" "$TEACHER"
-    echo "Teacher $teacher_name: ok, sha256 giusto ($remote_size byte)."
+    echo "Teacher $teacher_name: ok, sha256 matches ($remote_size bytes)."
   else
-    echo "Teacher $teacher_name: ok ($local_size byte)."
+    echo "Teacher $teacher_name: ok ($local_size bytes)."
   fi
 
   # Segments: the dataset takes every folder of data/ with fcamera.hevc, and one without
@@ -364,23 +364,23 @@ prepare_and_train() {
       missing="$missing $(basename "$dir")"
     fi
   done
-  [ -z "$broken" ] || die "link rotti verso la cartella comune (COMMA_VIDEOS_DIR), il training si fermerebbe:$broken
-Controlla che la cartella comune ci sia (disco montato) o riscarica con helpers/fetch_comma_segments.sh."
-  [ "$total" -gt 0 ] || die "nessun segmento in data/ (scaricali con helpers/fetch_comma_segments.sh)"
-  [ -z "$missing" ] || die "segmenti non localizzati, fermerebbero il training:$missing
-Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in data_scartati/)."
-  echo "Segmenti: $total, tutti localizzati."
+  [ -z "$broken" ] || die "broken links to the shared folder (COMMA_VIDEOS_DIR), the training would stop:$broken
+Check that the shared folder is there (disk mounted) or download again with helpers/fetch_comma_segments.sh."
+  [ "$total" -gt 0 ] || die "no segments in data/ (download them with helpers/fetch_comma_segments.sh)"
+  [ -z "$missing" ] || die "segments not localized, they would stop the training:$missing
+Run helpers/localize_segments.sh first (it moves the unusable ones to data_scartati/)."
+  echo "Segments: $total, all localized."
 
   mode_args=(--mode "$mode")
   if [ "$mode" = "fresh" ]; then
-    start="da zero"
+    start="from scratch"
   elif [ "$mode" = "continue" ]; then
-    start="dai pesi stable di $HF_REPO"
+    start="from the stable weights of $HF_REPO"
     mode_args+=(--hf-repo "$HF_REPO")
   else
-    start="ripresa dall'ultimo checkpoint"
+    start="resumed from the last checkpoint"
   fi
-  echo "Training ($start): $steps step, batch $batch_size, workers $workers, teacher $teacher_name, wandb ${WANDB_MODE:-online} -> $run_dir"
+  echo "Training ($start): $steps steps, batch $batch_size, workers $workers, teacher $teacher_name, wandb ${WANDB_MODE:-online} -> $run_dir"
 
   # The log is appended to: --resume keeps writing the train.log of its run.
   # The GPU lock (fd 9) is inherited by the training: with --background it stays held after this
@@ -392,19 +392,19 @@ Lancia prima helpers/localize_segments.sh (quelli inutilizzabili li sposta in da
     nohup "${DISTILL_UV_COMMAND[@]}" torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
       --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" >> "$log" 2>&1 &
-    echo "Partito in background (pid $!). Segui con:  tail -f $log"
-    echo "Alla fine il modello e' in $run_dir/supercombo.pt"
+    echo "Started in the background (pid $!). Follow it with:  tail -f $log"
+    echo "At the end the model is in $run_dir/supercombo.pt"
   elif [ "$foreground_log" -eq 1 ]; then
     # The output of this function already goes through tee into train.log.
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
       --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" 2>&1
-    echo "Fatto. Modello: $run_dir/supercombo.pt"
+    echo "Done. Model: $run_dir/supercombo.pt"
   else
     distill_uv_run torchrun --standalone --nproc-per-node=1 -m supervised.train "${mode_args[@]}" \
       --steps "$steps" --batch-size "$batch_size" --workers "$workers" --teacher "$TEACHER_ARG" \
       --output "$run_dir/supercombo.pt" 2>&1 | tee -a "$log"
-    echo "Fatto. Modello: $run_dir/supercombo.pt"
+    echo "Done. Model: $run_dir/supercombo.pt"
   fi
 }
 

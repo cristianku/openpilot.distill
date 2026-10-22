@@ -27,8 +27,8 @@ MIN_FORWARD_M = 1.0
 HEADER_HEIGHT = 86
 FOOTER_LINE_HEIGHT = 34
 
-FOOTER_TEXT = "avg miss = quanto il percorso previsto dista da dove ho guidato davvero, piu' basso e' meglio"
-TRUTH_LEGEND = "linea gialla = dove ho guidato davvero"
+FOOTER_TEXT = "avg miss = how far the predicted path is from where I really drove, lower is better"
+TRUTH_LEGEND = "yellow line = where I really drove"
 
 INSET_WIDTH = 270
 INSET_HEIGHT = 330
@@ -85,8 +85,8 @@ def _text_width(text: str, scale: float, thickness: int) -> int:
 
 def miss_text(avg_miss_m: float | None) -> str:
     if avg_miss_m is None:
-        return "avg miss su questo tratto: --"
-    return f"avg miss su questo tratto: {avg_miss_m:.2f} m"
+        return "avg miss on this clip: --"
+    return f"avg miss on this clip: {avg_miss_m:.2f} m"
 
 
 def draw_header(
@@ -190,7 +190,7 @@ def draw_inset(
     centre_x = plot_left + half_width
     plot_height = _PLOT_HEIGHT
 
-    cv2.putText(image, "vista dall'alto", (left + 10, top + 22), FONT, 0.55, WHITE, 1, cv2.LINE_AA)
+    cv2.putText(image, "top-down view", (left + 10, top + 22), FONT, 0.55, WHITE, 1, cv2.LINE_AA)
     # Straight-ahead axis and the car at the bottom.
     cv2.line(image, (int(centre_x), plot_top), (int(centre_x), plot_bottom), (90, 90, 90), 1, cv2.LINE_AA)
     car = np.array([[centre_x, plot_bottom - 8], [centre_x - 6, plot_bottom + 4], [centre_x + 6, plot_bottom + 4]])
@@ -198,7 +198,7 @@ def draw_inset(
 
     forward_label = f"{scale.forward_m:.0f} m"
     cv2.putText(image, forward_label, (plot_left, plot_top + 4), FONT, 0.45, GREY, 1, cv2.LINE_AA)
-    lateral_label = f"laterale +-{scale.lateral_m:.0f} m"
+    lateral_label = f"lateral +-{scale.lateral_m:.0f} m"
     cv2.putText(image, lateral_label, (left + 10, top + INSET_HEIGHT - 10), FONT, 0.45, GREY, 1, cv2.LINE_AA)
 
     for points, colour, thickness in lines:

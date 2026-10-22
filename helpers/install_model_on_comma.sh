@@ -3,11 +3,11 @@
 # put it in place of openpilot's driving model (driving_supercombo.onnx) and reboot the comma.
 # --restore puts the original back.
 #
-# Usage: helpers/install_model_on_comma.sh [--host=<ip|nome>] [--no-reboot] [<supercombo.pt>]
-#        helpers/install_model_on_comma.sh [--host=<ip|nome>] [--no-reboot] --restore
-#   helpers/install_model_on_comma.sh                 (l'ultimo outputs/supervised/*/supercombo.pt)
+# Usage: helpers/install_model_on_comma.sh [--host=<ip|name>] [--no-reboot] [<supercombo.pt>]
+#        helpers/install_model_on_comma.sh [--host=<ip|name>] [--no-reboot] --restore
+#   helpers/install_model_on_comma.sh                 (the latest outputs/supervised/*/supercombo.pt)
 #   helpers/install_model_on_comma.sh outputs/supervised/2026-10-20_1910/supercombo.pt
-#   helpers/install_model_on_comma.sh --restore       (rimette il modello originale)
+#   helpers/install_model_on_comma.sh --restore       (puts the original model back)
 #
 # What it does:
 #   1. checks that the comma is reachable, offroad, and (sunnypilot) on the Default model of the
@@ -99,10 +99,10 @@ put_model() {
 
 reboot_comma() {
   if [ "$do_reboot" -eq 0 ]; then
-    echo "--no-reboot: il comma usa il modello dal prossimo avvio"
+    echo "--no-reboot: the comma uses the model from the next start"
     return
   fi
-  echo "Riavvio il comma (il primo avvio ricompila il modello, qualche minuto in piu')"
+  echo "Rebooting the comma (the first start compiles the model again, a few minutes more)"
   ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "sudo reboot" || true
 }
 
@@ -119,23 +119,23 @@ while [ $# -gt 0 ]; do
     do_reboot=0
   elif [ "$1" = "--host" ]; then
     shift
-    [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
+    [ -n "${1:-}" ] || die "--host needs an IP or a name"
     COMMA_HOST="$1"
     add_comma_user
   elif [[ "$1" == --host=* ]]; then
     COMMA_HOST="${1#--host=}"
-    [ -n "$COMMA_HOST" ] || die "--host vuole un IP o un nome"
+    [ -n "$COMMA_HOST" ] || die "--host needs an IP or a name"
     add_comma_user
   elif [ -z "$input" ]; then
     input="$1"
   else
-    die "argomento in piu': $1"
+    die "extra argument: $1"
   fi
   shift
 done
 
 ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true \
-  || die "comma '$COMMA_HOST' non raggiungibile via ssh (acceso e in rete? chiave ssh registrata? dal Mac serve ssh -A)"
+  || die "comma '$COMMA_HOST' not reachable over ssh (on and online? ssh key registered? from the Mac use ssh -A)"
 
 onroad=""
 active_bundle=""
@@ -145,7 +145,7 @@ original=""
 current=""
 backup=""
 python=""
-info="$(read_comma_info)" || die "non riesco a leggere /data/openpilot sul comma"
+info="$(read_comma_info)" || die "cannot read /data/openpilot on the comma"
 while IFS='=' read -r key value; do
   if [ "$key" = "onroad" ]; then
     onroad="$value"
@@ -166,48 +166,48 @@ while IFS='=' read -r key value; do
   fi
 done <<< "$info"
 
-[ "$onroad" != "1" ] || die "il comma e' onroad: spegni l'auto e riprova"
-[ -n "$onnx" ] || die "sul comma non trovo driving_supercombo.onnx"
-[ -n "$original" ] || die "non riesco a leggere da git lo sha256 del modello originale"
+[ "$onroad" != "1" ] || die "the comma is onroad: turn the car off and try again"
+[ -n "$onnx" ] || die "driving_supercombo.onnx not found on the comma"
+[ -n "$original" ] || die "cannot read the sha256 of the original model from git"
 
 if [ "$restore" -eq 1 ]; then
-  [ -z "$input" ] || die "--restore non vuole un file"
+  [ -z "$input" ] || die "--restore takes no file"
   if [ "$current" = "$original" ]; then
-    echo "Il comma ha gia' il modello originale."
+    echo "The comma already has the original model."
     exit 0
   fi
   [ "$backup" = "$original" ] \
-    || die "il backup $BACKUP manca o non e' l'originale di questa versione: rimetti l'originale con un aggiornamento dallo schermo"
+    || die "the backup $BACKUP is missing or is not the original of this version: bring the original back with an update from the comma screen"
   put_model "$BACKUP"
-  echo "Rimesso il modello originale."
+  echo "Original model put back."
   reboot_comma
   exit 0
 fi
 
 if [ -n "$active_bundle" ] && [ "$active_bundle" != "{}" ]; then
-  die "nel menu Models di sunnypilot e' scelto un modello: metti Default, se no il tuo non viene usato"
+  die "a model is selected in sunnypilot's Models menu: select Default, otherwise yours is not used"
 fi
-[ -n "$tg_flags" ] || die "non trovo i flag di tinygrad (tg_flags) nello SConscript del comma"
-[ -n "$python" ] || die "sul comma non c'e' /usr/local/venv/bin/python3"
+[ -n "$tg_flags" ] || die "tinygrad flags (tg_flags) not found in the comma's SConscript"
+[ -n "$python" ] || die "/usr/local/venv/bin/python3 is not on the comma"
 
 if [ -z "$input" ]; then
   input="$(ls -t "$ROOT"/outputs/supervised/*/supercombo.pt 2>/dev/null | head -1 || true)"
-  [ -n "$input" ] || die "nessun outputs/supervised/*/supercombo.pt: passa il .pt"
+  [ -n "$input" ] || die "no outputs/supervised/*/supercombo.pt: pass the .pt"
 fi
-[ -f "$input" ] || die "$input non esiste"
+[ -f "$input" ] || die "$input does not exist"
 input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
 run_dir="$(dirname "$input")"
 student="$run_dir/driving_supercombo.onnx"
-echo "Modello: $input"
+echo "Model: $input"
 
 # 2. Backup of the original, refreshed while the comma has it (it changes with openpilot updates).
 if [ "$current" = "$original" ]; then
   ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cp $REMOTE_OP/$onnx $BACKUP"
-  echo "== 2. salvato l'originale in $BACKUP"
+  echo "== 2. original saved to $BACKUP"
 elif [ "$backup" = "$original" ]; then
-  echo "== 2. sul comma c'e' gia' un modello tuo, l'originale e' in $BACKUP"
+  echo "== 2. the comma already has one of your models, the original is in $BACKUP"
 else
-  die "sul comma c'e' un modello diverso dall'originale e non c'e' un backup valido: rimetti l'originale con un aggiornamento dallo schermo"
+  die "the comma has a model other than the original and no valid backup: bring the original back with an update from the comma screen"
 fi
 
 # 3. Export, with the original as reference for inputs and output layout.
@@ -219,7 +219,7 @@ echo "== 3. export -> $student"
 
 # 4. Compile check on the comma, same command as the openpilot build. compile_onnx writes a
 # temporary file in the current folder.
-echo "== 4. compilo sul comma per controllo (qualche minuto)"
+echo "== 4. compiling on the comma as a check (a few minutes)"
 ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR && mkdir -p $BUILD_DIR"
 rsync -a -e "$DISTILL_RSYNC_SSH" "$student" "$COMMA_HOST:$BUILD_DIR/driving_supercombo.onnx"
 log="$run_dir/comma_compile.log"
@@ -228,12 +228,12 @@ if ! ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cd $BUILD_DIR && env $tg_fla
   driving_supercombo.onnx driving_tinygrad.pkl --out-of-band --benchmark-runs 1" > "$log" 2>&1; then
   tail -20 "$log"
   ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR"
-  die "il comma non riesce a compilare il modello: non ho cambiato niente (log completo: $log)"
+  die "the comma cannot compile the model: nothing was changed (full log: $log)"
 fi
 grep -E " ms$" "$log" | tail -3 || true
 
 # 5. In place of the original, then reboot.
 put_model "$BUILD_DIR/driving_supercombo.onnx"
 ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "rm -rf $BUILD_DIR"
-echo "== 5. installato: per tornare all'originale helpers/install_model_on_comma.sh --restore"
+echo "== 5. installed: to go back to the original, helpers/install_model_on_comma.sh --restore"
 reboot_comma

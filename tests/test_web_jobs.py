@@ -16,7 +16,7 @@ from web.jobs import JobManager, parse_progress, parse_run_dir, parse_video
 
 
 def spec(argv, group='data', action='fetch', needs_gpu=False, params=None):
-    return JobSpec(action=action, label='prova ' + action, group=group, argv=argv, needs_gpu=needs_gpu,
+    return JobSpec(action=action, label='test ' + action, group=group, argv=argv, needs_gpu=needs_gpu,
                    params=params or {}, summary='test')
 
 
@@ -75,7 +75,7 @@ class LifecycleTest(JobTestCase):
         self.assertIn('== test\n', text)
         self.assertNotIn('sh -c', text)
         self.assertIn('hello', text)
-        self.assertIn('== finito con codice 0', text)
+        self.assertIn('== finished with code 0', text)
         record = json.loads(manager.job_file(job['id']).read_text())
         for key in ('id', 'action', 'argv', 'pid', 'pgid', 'started', 'finished', 'exit_code', 'log'):
             self.assertIn(key, record)
@@ -88,14 +88,14 @@ class LifecycleTest(JobTestCase):
         done = self.wait_state(manager, job['id'], ('ok', 'failed'))
         self.assertEqual(done['state'], 'failed')
         self.assertEqual(done['exit_code'], 1)
-        self.assertEqual(done['state_label'], 'fallito')
+        self.assertEqual(done['state_label'], 'failed')
 
     def test_program_that_does_not_exist(self):
         manager = self.manager()
         job = manager.start(spec([str(self.repo / 'helpers' / 'missing.sh')]))
         done = self.wait_state(manager, job['id'], ('ok', 'failed'))
         self.assertEqual(done['exit_code'], 127)
-        self.assertIn('non riesco ad avviare', manager.log(job['id'], 0)['text'])
+        self.assertIn('cannot start', manager.log(job['id'], 0)['text'])
 
     def test_job_runs_in_the_repo_without_the_site_token(self):
         os.environ['DISTILL_WEB_TOKEN'] = 'secret-token-1234567890'
@@ -120,7 +120,7 @@ class GroupTest(JobTestCase):
         with self.assertRaises(WebError) as caught:
             manager.start(spec(['true'], action='localize'))
         self.assertEqual(caught.exception.status, 409)
-        self.assertIn('in corso', caught.exception.message)
+        self.assertIn('already', caught.exception.message)
         other = manager.start(spec(['true'], group='cpu', action='export'))
         self.wait_state(manager, other['id'], ('ok',))
         self.assertEqual(manager.running_groups(), {'data'})
@@ -140,7 +140,7 @@ class GroupTest(JobTestCase):
         self.wait_state(manager, update['id'], ('ok',))
 
     def test_gpu_check_refuses(self):
-        manager = self.manager(gpu_check=lambda: "La GPU e' occupata da un altro job (lock preso).")
+        manager = self.manager(gpu_check=lambda: 'The GPU is busy with another job (lock taken).')
         with self.assertRaises(WebError) as caught:
             manager.start(spec(['true'], group='gpu', action='train_test', needs_gpu=True))
         self.assertEqual(caught.exception.status, 409)
@@ -179,8 +179,8 @@ class StopTest(JobTestCase):
         self.assertEqual(done['state'], 'stopped')
         self.assertEqual(done['exit_code'], -15)
         text = manager.log(job['id'], 0)['text']
-        self.assertIn('fermato dal sito', text)
-        self.assertIn('== finito con codice -15', text)
+        self.assertIn('stopped from the site', text)
+        self.assertIn('== finished with code -15', text)
         with self.assertRaises(WebError):
             manager.stop(job['id'])
 
@@ -234,14 +234,14 @@ class RestartTest(JobTestCase):
         ended = subprocess.Popen(['true'])
         ended.wait()
         job_id = '20260101-000000-localize'
-        record = {'id': job_id, 'action': 'localize', 'label': 'Localizza', 'group': 'data', 'argv': ['x'],
+        record = {'id': job_id, 'action': 'localize', 'label': 'Localize', 'group': 'data', 'argv': ['x'],
                   'cwd': str(self.repo), 'started': 1767225600.0, 'pid': ended.pid, 'pgid': ended.pid,
                   'finished': None, 'exit_code': None, 'log': 'outputs/web/jobs/' + job_id + '.log'}
         manager.job_file(job_id).write_text(json.dumps(record))
         manager.log_file(job_id).write_text('== x\n')
         view = manager.get(job_id)
         self.assertEqual(view['state'], 'unknown')
-        self.assertEqual(view['state_label'], 'terminato (esito sconosciuto)')
+        self.assertEqual(view['state_label'], 'ended (unknown result)')
         self.assertFalse(view['stoppable'])
         self.assertEqual(manager.running_groups(), set())
         # The group is free again.

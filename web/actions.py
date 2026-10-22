@@ -46,8 +46,8 @@ TEACHER_NAMES = ('md-v3', '084747c7')
 # 'all', or the indices of the chosen GPUs (tasks/train.py --gpus).
 GPUS_RE = re.compile(r'^(all|[0-9]{1,2}(,[0-9]{1,2}){0,15})$')
 REFERENCE_KINDS = ('stock', 'teacher', 'logged')
-CONFIRM_INSTALL = 'INSTALLA'
-CONFIRM_RESTORE = 'RIPRISTINA'
+CONFIRM_INSTALL = 'INSTALL'
+CONFIRM_RESTORE = 'RESTORE'
 
 
 @dataclass(frozen=True)
@@ -64,35 +64,35 @@ class Action:
 
 
 ACTIONS = {
-    'fetch': Action('Scarica i segmenti dal comma', 'data', 'tasks/fetch.py'),
-    'localize': Action('Localizza i segmenti', 'data', 'tasks/localize.py'),
+    'fetch': Action('Download segments from the comma', 'data', 'tasks/fetch.py'),
+    'localize': Action('Localize segments', 'data', 'tasks/localize.py'),
     'train': Action('Training', 'gpu', 'tasks/train.py', needs_gpu=True),
-    'train_test': Action('Prova del training (10 step)', 'gpu', 'tasks/train.py', needs_gpu=True),
-    'eval': Action('Valutazione sui segmenti hold-out', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
-    'compare': Action('Video di confronto', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
-    'export': Action('Export ONNX', 'cpu', 'tasks/export.py'),
-    'publish_dry': Action('Pubblicazione di prova (dry run)', 'cpu', 'tasks/publish.py'),
-    'publish': Action('Pubblicazione su Hugging Face', 'cpu', 'tasks/publish.py'),
-    'install': Action('Installazione sul comma', 'comma', 'tasks/install.py',
+    'train_test': Action('Training test (10 steps)', 'gpu', 'tasks/train.py', needs_gpu=True),
+    'eval': Action('Evaluation on the hold-out segments', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
+    'compare': Action('Comparison video', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
+    'export': Action('ONNX export', 'cpu', 'tasks/export.py'),
+    'publish_dry': Action('Test publish (dry run)', 'cpu', 'tasks/publish.py'),
+    'publish': Action('Publish to Hugging Face', 'cpu', 'tasks/publish.py'),
+    'install': Action('Install on the comma', 'comma', 'tasks/install.py',
                       needs_comma_offroad=True),
-    'restore': Action('Ripristino del modello originale', 'comma', 'tasks/install.py',
+    'restore': Action('Restore the original model', 'comma', 'tasks/install.py',
                       needs_comma_offroad=True),
-    'update': Action('Aggiornamento del codice', 'system', 'tasks/update.py'),
+    'update': Action('Code update', 'system', 'tasks/update.py'),
 }
 
 # Only with "python -m web.server --test-actions": a harmless job to test the job runner and the GPU
 # lock path of a live server without training anything. Never available otherwise.
 TEST_ACTIONS = {
-    'selftest': Action('Prova del sito (nessun lavoro vero)', 'gpu', None, needs_gpu=True),
+    'selftest': Action('Site test (no real work)', 'gpu', None, needs_gpu=True),
 }
 
 GROUP_NAMES = {
-    'data': 'uno scaricamento o una localizzazione',
-    'gpu': 'un job sulla GPU',
-    'cpu': 'un export o una pubblicazione',
-    'comma': 'un\'operazione sul comma',
-    'system': 'un aggiornamento del codice',
-    'test': 'una prova',
+    'data': 'a download or a localization',
+    'gpu': 'a GPU job',
+    'cpu': 'an export or a publish',
+    'comma': 'a comma operation',
+    'system': 'a code update',
+    'test': 'a test',
 }
 
 # The selftest job: takes the real GPU lock (when /run/lock exists) the way the helper scripts do,
@@ -105,13 +105,13 @@ if os.path.isdir(os.path.dirname(lock)):
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print("La GPU e' occupata da un altro job (lock preso).", flush=True)
+        print("The GPU is busy with another job (lock taken).", flush=True)
         sys.exit(1)
-    print("lock GPU preso: " + lock, flush=True)
+    print("GPU lock taken: " + lock, flush=True)
 for step in range(1, 11):
     print("PROGRESS %d/10" % step, flush=True)
     time.sleep(0.5)
-print("prova finita", flush=True)
+print("test finished", flush=True)
 '''
 
 
@@ -126,7 +126,7 @@ class JobSpec:
     needs_comma_offroad: bool = False
     # Validated parameters, kept in the job file (shown in the job list, matched by the publish check).
     params: dict = field(default_factory=dict)
-    # One line in Italian that says what the job does, for the job list.
+    # One line that says what the job does, for the job list.
     summary: str = ''
 
 
@@ -138,26 +138,26 @@ def check_keys(params: dict, allowed: tuple[str, ...]) -> None:
     """Refuses any parameter the action does not take: a typo must not be silently ignored."""
     for key in params:
         if key not in allowed:
-            raise bad('Parametro sconosciuto: ' + str(key)[:40] + '.')
+            raise bad('Unknown parameter: ' + str(key)[:40] + '.')
 
 
 def int_param(params: dict, key: str, low: int, high: int, default: int | None = None) -> int:
     value = params.get(key)
     if value is None or value == '':
         if default is None:
-            raise bad('Manca il parametro ' + key + '.')
+            raise bad('Missing parameter: ' + key + '.')
         return default
     # bool is an int in Python: true/false must not pass as 1/0.
     if isinstance(value, bool):
-        raise bad(key + ' deve essere un numero intero.')
+        raise bad(key + ' must be a whole number.')
     if isinstance(value, int):
         number = value
     elif isinstance(value, str) and re.fullmatch(r'[0-9]{1,7}', value):
         number = int(value)
     else:
-        raise bad(key + ' deve essere un numero intero.')
+        raise bad(key + ' must be a whole number.')
     if number < low or number > high:
-        raise bad(key + ' deve essere tra ' + str(low) + ' e ' + str(high) + '.')
+        raise bad(key + ' must be between ' + str(low) + ' and ' + str(high) + '.')
     return number
 
 
@@ -165,20 +165,20 @@ def float_param(params: dict, key: str, low: float, high: float, default: float 
     value = params.get(key)
     if value is None or value == '':
         if default is None:
-            raise bad('Manca il parametro ' + key + '.')
+            raise bad('Missing parameter: ' + key + '.')
         return default
     if isinstance(value, bool):
-        raise bad(key + ' deve essere un numero.')
+        raise bad(key + ' must be a number.')
     if isinstance(value, int) or isinstance(value, float):
         number = float(value)
     elif isinstance(value, str) and NUMBER_TEXT_RE.fullmatch(value):
         number = float(value)
     else:
-        raise bad(key + ' deve essere un numero.')
+        raise bad(key + ' must be a number.')
     if not math.isfinite(number):
-        raise bad(key + ' deve essere un numero.')
+        raise bad(key + ' must be a number.')
     if number < low or number > high:
-        raise bad(key + ' deve essere tra ' + format_number(low) + ' e ' + format_number(high) + '.')
+        raise bad(key + ' must be between ' + format_number(low) + ' and ' + format_number(high) + '.')
     return number
 
 
@@ -188,17 +188,17 @@ def bool_param(params: dict, key: str) -> bool:
         return False
     if value is True or value is False:
         return value
-    raise bad(key + ' deve essere vero o falso.')
+    raise bad(key + ' must be true or false.')
 
 
 def choice_param(params: dict, key: str, choices: tuple[str, ...], default: str | None = None) -> str:
     value = params.get(key)
     if value is None:
         if default is None:
-            raise bad('Manca il parametro ' + key + '.')
+            raise bad('Missing parameter: ' + key + '.')
         return default
     if not isinstance(value, str) or value not in choices:
-        raise bad(key + ' non valido.')
+        raise bad(key + ' is not valid.')
     return value
 
 
@@ -207,7 +207,7 @@ def text_param(params: dict, key: str) -> str:
     if value is None:
         return ''
     if not isinstance(value, str):
-        raise bad(key + ' deve essere un testo.')
+        raise bad(key + ' must be text.')
     return value
 
 
@@ -217,18 +217,18 @@ def date_param(params: dict, key: str) -> str:
     if value == '':
         return ''
     if not DATE_RE.fullmatch(value):
-        raise bad(key + ': data non valida (formato AAAA-MM-GG).')
+        raise bad(key + ': invalid date (format YYYY-MM-DD).')
     try:
         datetime.strptime(value, '%Y-%m-%d')
     except ValueError as exc:
-        raise bad(key + ': data non valida (formato AAAA-MM-GG).') from exc
+        raise bad(key + ': invalid date (format YYYY-MM-DD).') from exc
     return value
 
 
 def name_param(params: dict, key: str) -> str:
     value = text_param(params, key)
     if not NAME_RE.fullmatch(value):
-        raise bad('Nome non valido: da 1 a 64 caratteri tra lettere, cifre, _ . -')
+        raise bad('Invalid name: 1 to 64 characters, letters, digits, _ . or -')
     return value
 
 
@@ -242,11 +242,11 @@ def format_number(number: float) -> str:
 def run_folder(repo: Path, run: str) -> Path:
     """outputs/supervised/<run> after the name and location checks (not its content)."""
     if not isinstance(run, str) or not RUN_RE.fullmatch(run):
-        raise bad('Run non valido.')
+        raise bad('Invalid run.')
     base = repo / 'outputs' / 'supervised'
     folder = base / run
     if not folder.is_dir() or not inside(base, folder):
-        raise WebError(404, 'unknown_run', 'Il run ' + run + ' non esiste.')
+        raise WebError(404, 'unknown_run', 'Run ' + run + ' does not exist.')
     return folder
 
 
@@ -259,18 +259,18 @@ def run_param(repo: Path, value, need: str) -> str:
     if need == 'final':
         if not final.is_file() or not inside(folder, final):
             raise WebError(409, 'run_not_finished',
-                           'Il run ' + value + ' non ha ancora supercombo.pt (non e\' finito).')
+                           'Run ' + value + ' has no supercombo.pt yet (it has not finished).')
     elif need == 'model':
         has_final = final.is_file() and inside(folder, final)
         has_checkpoint = checkpoint.is_file() and inside(folder, checkpoint)
         if not has_final and not has_checkpoint:
-            raise WebError(409, 'run_without_model', 'Il run ' + value + ' non ha un modello (supercombo.pt).')
+            raise WebError(409, 'run_without_model', 'Run ' + value + ' has no model (supercombo.pt).')
     elif need == 'resume':
         if final.is_file():
-            raise WebError(409, 'run_finished', 'Il run ' + value + ' e\' gia\' finito: non si riprende.')
+            raise WebError(409, 'run_finished', 'Run ' + value + ' has already finished: it cannot be resumed.')
         if not checkpoint.is_file() or not inside(folder, checkpoint):
             raise WebError(409, 'run_without_checkpoint',
-                           'Il run ' + value + ' non ha supercombo.training.pt: non si puo\' riprendere.')
+                           'Run ' + value + ' has no supercombo.training.pt: it cannot be resumed.')
     else:
         raise ValueError('unknown need: ' + need)
     return value
@@ -279,14 +279,14 @@ def run_param(repo: Path, value, need: str) -> str:
 def segment_param(repo: Path, value) -> str:
     """A segment folder of data/ that exists and is localized."""
     if not isinstance(value, str) or not SEGMENT_RE.fullmatch(value):
-        raise bad('Segmento non valido (20 caratteri esadecimali).')
+        raise bad('Invalid segment (20 hexadecimal characters).')
     base = repo / 'data'
     folder = base / value
     if not folder.is_dir() or not inside(base, folder):
-        raise WebError(404, 'unknown_segment', 'Il segmento ' + value + ' non e\' in data/.')
+        raise WebError(404, 'unknown_segment', 'Segment ' + value + ' is not in data/.')
     localized = (folder / 'localizer.safetensors').is_file() and (folder / 'frame_info.safetensors').is_file()
     if not localized:
-        raise WebError(409, 'segment_not_localized', 'Il segmento ' + value + ' non e\' localizzato.')
+        raise WebError(409, 'segment_not_localized', 'Segment ' + value + ' is not localized.')
     return value
 
 
@@ -295,7 +295,7 @@ def model_spec_param(repo: Path, params: dict, key: str, kinds: tuple[str, ...])
     run:<x> must be an existing run with a model; hf:<slug> is checked by the script itself."""
     value = params.get(key)
     if not isinstance(value, str) or not MODEL_SPEC_RE.fullmatch(value):
-        raise bad(key + ': modello non valido.')
+        raise bad(key + ': invalid model.')
     if value.startswith('run:'):
         kind = 'run'
     elif value.startswith('hf:'):
@@ -303,7 +303,7 @@ def model_spec_param(repo: Path, params: dict, key: str, kinds: tuple[str, ...])
     else:
         kind = value
     if kind not in kinds:
-        raise bad(key + ': modello non ammesso qui.')
+        raise bad(key + ': model not allowed here.')
     if kind == 'run':
         run_param(repo, value[len('run:'):], 'model')
     return value
@@ -315,13 +315,13 @@ def gpus_param(params: dict) -> str:
     if value is None or value == '':
         return 'all'
     if not isinstance(value, str) or not GPUS_RE.fullmatch(value):
-        raise bad('gpus deve essere "all" o gli indici delle GPU (es. 0 o 0,1).')
+        raise bad('gpus must be "all" or GPU indices (e.g. 0 or 0,1).')
     return value
 
 
 def gpus_text(gpus: str) -> str:
     if gpus == 'all':
-        return 'tutte le GPU'
+        return 'all GPUs'
     return 'GPU ' + gpus
 
 
@@ -342,14 +342,14 @@ def find_action(action_id: str, test_actions: bool = False) -> Action:
         return ACTIONS[action_id]
     if test_actions and action_id in TEST_ACTIONS:
         return TEST_ACTIONS[action_id]
-    raise WebError(404, 'unknown_action', 'Azione sconosciuta.')
+    raise WebError(404, 'unknown_action', 'Unknown action.')
 
 
 def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False) -> JobSpec:
     """Validates the parameters of an action and builds its argv. Raises WebError on any problem."""
     action = find_action(action_id, test_actions)
     if not isinstance(params, dict):
-        raise bad('I parametri devono essere un oggetto JSON.')
+        raise bad('The parameters must be a JSON object.')
     argv = []
     clean = {}
     summary = ''
@@ -358,16 +358,16 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         check_keys(params, ('since',))
         since = date_param(params, 'since')
         argv = [sys.executable, '-m', 'tasks.fetch']
-        summary = 'giri nuovi dal comma'
+        summary = 'new drives from the comma'
         if since:
             argv.append('--since=' + since)
             clean['since'] = since
-            summary = 'giri dal ' + since
+            summary = 'drives since ' + since
 
     elif action_id == 'localize':
         check_keys(params, ())
         argv = [sys.executable, '-m', 'tasks.localize']
-        summary = 'segmenti da fare e da raffinare'
+        summary = 'segments to do and to refine'
 
     elif action_id == 'train':
         check_keys(params, ('steps', 'batch_size', 'workers', 'mode', 'run', 'wandb', 'teacher', 'gpus'))
@@ -380,25 +380,25 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         if mode == 'resume':
             # The steps and the teacher of a resumed run come from its checkpoint.
             if params.get('steps') not in (None, ''):
-                raise bad('Con "riprendi" i passi sono quelli del run interrotto: lascia vuoto il campo.')
+                raise bad('A resumed run keeps the steps of the interrupted run: leave the field empty.')
             if params.get('teacher') not in (None, ''):
-                raise bad('Con "riprendi" il teacher e\' quello del run interrotto.')
+                raise bad('A resumed run keeps the teacher of the interrupted run.')
             run = run_param(repo, params.get('run'), 'resume')
             argv += ['--run', run]
             clean['run'] = run
-            summary = 'riprende ' + run
+            summary = 'resumes ' + run
         else:
             if params.get('run') not in (None, ''):
-                raise bad('Il run serve solo con "riprendi".')
+                raise bad('A run is only needed to resume.')
             steps = int_param(params, 'steps', STEPS_MIN, STEPS_MAX)
             teacher = choice_param(params, 'teacher', TEACHER_NAMES, 'md-v3')
             argv += ['--steps', str(steps), '--teacher', teacher]
             clean['steps'] = steps
             clean['teacher'] = teacher
             if mode == 'continue':
-                summary = str(steps) + ' step dai pesi stable'
+                summary = str(steps) + ' steps from the stable weights'
             else:
-                summary = str(steps) + ' step da zero'
+                summary = str(steps) + ' steps from scratch'
             summary = summary + ', teacher ' + teacher
         argv += ['--batch-size', str(batch_size), '--workers', str(workers), '--gpus', gpus]
         if wandb:
@@ -416,7 +416,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         gpus = gpus_param(params)
         argv = [sys.executable, '-m', 'tasks.train', '--test', '--gpus', gpus]
         clean['gpus'] = gpus
-        summary = '10 step per vedere che tutto parte, ' + gpus_text(gpus)
+        summary = '10 steps to check that everything starts, ' + gpus_text(gpus)
 
     elif action_id == 'eval':
         check_keys(params, ('model',))
@@ -434,7 +434,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         duration = float_param(params, 'duration', DURATION_MIN, DURATION_MAX, 20.0)
         speed = float_param(params, 'speed', 0.25, 1.0, 0.5)
         if speed not in SPEED_TEXT:
-            raise bad('speed deve essere 0.25, 0.5 o 1.')
+            raise bad('speed must be 0.25, 0.5 or 1.')
         inset = bool_param(params, 'inset')
         show_gt = bool_param(params, 'show_gt')
         argv = [sys.executable, '-m', 'tasks.evaluation', 'compare', '--segment=' + segment, '--reference=' + reference,
@@ -449,7 +449,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             argv.append('--show-gt')
         clean = {'segment': segment, 'reference': reference, 'student': student, 'start': start,
                  'duration': duration, 'speed': speed, 'inset': inset, 'show_gt': show_gt}
-        summary = (student + ' contro ' + reference + ' su ' + segment + ' (' + format_number(start) + ' s, '
+        summary = (student + ' vs ' + reference + ' on ' + segment + ' (' + format_number(start) + ' s, '
                    + format_number(duration) + ' s)')
 
     elif action_id == 'export':
@@ -471,7 +471,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             # Typed confirmation: the exact name, so a click alone never publishes.
             if text_param(params, 'confirm') != name:
                 raise WebError(400, 'confirmation_required',
-                               'Per pubblicare scrivi esattamente il nome del modello (' + name + ').')
+                               'To publish, type the exact model name (' + name + ').')
             argv = [sys.executable, '-m', 'tasks.publish', '--upload']
         else:
             argv = [sys.executable, '-m', 'tasks.publish']
@@ -480,7 +480,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             argv.append('--stable')
         argv += ['--run', run]
         clean = {'run': run, 'name': name, 'stable': stable}
-        summary = run + ' come ' + name
+        summary = run + ' as ' + name
         if stable:
             summary = summary + ' (stable)'
 
@@ -488,30 +488,30 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         check_keys(params, ('run', 'confirm'))
         run = run_param(repo, params.get('run'), 'final')
         if text_param(params, 'confirm') != CONFIRM_INSTALL:
-            raise WebError(400, 'confirmation_required', 'Per installare scrivi ' + CONFIRM_INSTALL + '.')
+            raise WebError(400, 'confirmation_required', 'To install, type ' + CONFIRM_INSTALL + '.')
         argv = [sys.executable, '-m', 'tasks.install', '--run', run]
         clean['run'] = run
-        summary = run + ' sul comma (si riavvia)'
+        summary = run + ' on the comma (it restarts)'
 
     elif action_id == 'restore':
         check_keys(params, ('confirm',))
         if text_param(params, 'confirm') != CONFIRM_RESTORE:
-            raise WebError(400, 'confirmation_required', 'Per ripristinare scrivi ' + CONFIRM_RESTORE + '.')
+            raise WebError(400, 'confirmation_required', 'To restore, type ' + CONFIRM_RESTORE + '.')
         argv = [sys.executable, '-m', 'tasks.install', '--restore']
-        summary = 'modello originale sul comma (si riavvia)'
+        summary = 'original model on the comma (it restarts)'
 
     elif action_id == 'update':
         check_keys(params, ())
         argv = [sys.executable, '-m', 'tasks.update']
-        summary = 'ultima versione del codice, librerie, riavvio del sito'
+        summary = 'latest code, libraries, site restart'
 
     elif action_id == 'selftest':
         check_keys(params, ())
         argv = [sys.executable, '-c', SELFTEST_CODE, GPU_LOCK_FILE]
-        summary = 'job finto di 5 secondi con il lock GPU'
+        summary = '5-second fake job with the GPU lock'
 
     else:
-        raise WebError(404, 'unknown_action', 'Azione sconosciuta.')
+        raise WebError(404, 'unknown_action', 'Unknown action.')
 
     return JobSpec(action=action_id, label=action.label, group=action.group, argv=argv,
                    needs_gpu=action.needs_gpu, needs_comma_offroad=action.needs_comma_offroad,
@@ -519,11 +519,11 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
 
 
 def script_missing(repo: Path, action_id: str, test_actions: bool = False) -> str:
-    """'' when the helper of the action is in this checkout, else the Italian reason. The helpers
+    """'' when the helper of the action is in this checkout, else the reason. The helpers
     written for the site (eval, compare, update) may be missing on an older checkout."""
     action = find_action(action_id, test_actions)
     if action.script is None:
         return ''
     if (repo / action.script).is_file():
         return ''
-    return 'questa versione del codice non ha ancora «' + action.label + '»'
+    return 'this version of the code does not have "' + action.label + '" yet'

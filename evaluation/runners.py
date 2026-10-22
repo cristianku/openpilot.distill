@@ -102,7 +102,7 @@ class LaneRunner(ModelRunner):
         self.is_torch = model.backend == "torch"
         image_names = set(model.image_names)
         if image_names != {"img", "big_img"}:
-            raise ValueError(f"{name}: input immagine inattesi {sorted(image_names)}")
+            raise ValueError(f"{name}: unexpected image inputs {sorted(image_names)}")
         # history_len steps plus the t-4 image of the first one.
         self.warmup_frames = BLOCK_FRAMES * (model.history_len + 1)
         if self.is_torch:
@@ -207,7 +207,7 @@ class OnnxStreamingRunner(ModelRunner):
             dtype = _ort_dtype(model_input.type)
             if model_input.name.startswith("state_"):
                 if f"next_{model_input.name}" not in self.output_names:
-                    raise ValueError(f"{name}: manca l'output next_{model_input.name}")
+                    raise ValueError(f"{name}: output next_{model_input.name} is missing")
                 self.state_shapes[model_input.name] = shape
                 self.state_dtypes[model_input.name] = dtype
             elif model_input.name == "new_img":
@@ -219,7 +219,7 @@ class OnnxStreamingRunner(ModelRunner):
             elif model_input.name == "action_t":
                 self.constants["action_t"] = np.asarray(ACTION_T, dtype=dtype).reshape(shape)
             else:
-                raise ValueError(f"{name}: input '{model_input.name}' sconosciuto")
+                raise ValueError(f"{name}: unknown input '{model_input.name}'")
 
         # Frames until the feature queue holds only real frames (each feature needs its t-4 image).
         feature_frames = 0
@@ -272,7 +272,7 @@ class LoggedModelV2Runner(ModelRunner):
 
         rlog = segment.directory / "rlog.zst"
         if not rlog.exists():
-            raise ValueError(f"segmento {segment.name}: manca rlog.zst per il modello 'logged'")
+            raise ValueError(f"segment {segment.name}: rlog.zst missing for the 'logged' model")
         frame_eof = segment.frame_t + self._EOF_OFFSET_S
         self.plans = np.full((segment.frame_count, PLAN_POINTS, PLAN_WIDTH), np.nan, dtype=np.float32)
         for event in LogReader(str(rlog), sort_by_time=True, only_union_types=True):
@@ -310,4 +310,4 @@ def build_runner(model: ResolvedModel, device: str, lanes: int) -> ModelRunner:
         return OnnxStreamingRunner(name, model.path, device, lanes)
     if model.format == FORMAT_LOGGED:
         return LoggedModelV2Runner(name, lanes)
-    raise ValueError(f"formato di modello sconosciuto: {model.format}")
+    raise ValueError(f"unknown model format: {model.format}")

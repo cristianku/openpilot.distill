@@ -125,21 +125,21 @@ env DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 OPENPILOT_HACKS=1 \
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_model_arguments(parser, 'il supercombo.pt da pubblicare, o un .onnx gia\' esportato (solo ricompila)')
-    parser.add_argument('--name', default=None, help='nome del modello (default: la cartella del run)')
-    parser.add_argument('--stable', action='store_true', help='i pesi PyTorch diventano la base dei training '
-                        '«dai pesi stable»')
-    parser.add_argument('--stock', action='store_true', help='pubblica il modello originale del comma')
-    parser.add_argument('--upload', action='store_true', help='carica davvero su Hugging Face (senza: prova)')
+    add_model_arguments(parser, 'the supercombo.pt to publish, or an .onnx already exported (compile only)')
+    parser.add_argument('--name', default=None, help='name of the model (default: the run folder)')
+    parser.add_argument('--stable', action='store_true', help='the PyTorch weights become the base of the trainings '
+                        '"from the stable weights"')
+    parser.add_argument('--stock', action='store_true', help='publishes the comma\'s original model')
+    parser.add_argument('--upload', action='store_true', help='really uploads to Hugging Face (without it: dry run)')
     args = parser.parse_args(arguments)
     check_model_arguments(parser, args)
     if args.name is not None and not NAME_RE.fullmatch(args.name):
-        parser.error('nome non valido: ' + args.name + ' (solo lettere, numeri, _ . -)')
+        parser.error('invalid name: ' + args.name + ' (only letters, digits, _ . -)')
     if args.stock:
         if args.run is not None or args.model is not None:
-            parser.error('--stock non vuole un modello: prende quello originale dal comma')
+            parser.error('--stock takes no model: it takes the original one from the comma')
         if args.stable:
-            parser.error('--stable con --stock non ha senso: il modello del comma non ha pesi PyTorch')
+            parser.error('--stable with --stock makes no sense: the comma\'s model has no PyTorch weights')
     return args
 
 
@@ -157,7 +157,7 @@ def read_publish_info(comma: Comma) -> dict:
     try:
         info = comma.key_values(PUBLISH_INFO_SCRIPT, BACKUP)
     except TaskError as exc:
-        raise TaskError('non riesco a leggere /data/openpilot sul comma (' + str(exc) + ')') from exc
+        raise TaskError('cannot read /data/openpilot on the comma (' + str(exc) + ')') from exc
     for key in INFO_KEYS:
         info.setdefault(key, '')
     return info
@@ -165,15 +165,15 @@ def read_publish_info(comma: Comma) -> dict:
 
 def check_comma(info: dict) -> None:
     if info['onroad'] == '1':
-        raise TaskError('il comma e\' onroad: spegni l\'auto e riprova')
+        raise TaskError('the comma is onroad: turn the car off and try again')
     if not info['compiler']:
-        raise TaskError('sul comma non c\'e\' compile_modeld_v2.py: serve sunnypilot')
+        raise TaskError('compile_modeld_v2.py is not on the comma: sunnypilot is needed')
     if not info['reference']:
-        raise TaskError('sul comma non trovo driving_supercombo.onnx')
+        raise TaskError('driving_supercombo.onnx not found on the comma')
     if not info['selector_version']:
-        raise TaskError('sul comma non trovo REQUIRED_JSON_VERSION (sunnypilot/models/helpers.py)')
+        raise TaskError('REQUIRED_JSON_VERSION not found on the comma (sunnypilot/models/helpers.py)')
     if not info['python']:
-        raise TaskError('sul comma non c\'e\' /usr/local/venv/bin/python3')
+        raise TaskError('/usr/local/venv/bin/python3 is not on the comma')
 
 
 def check_login(hf_repo: str) -> None:
@@ -184,12 +184,12 @@ def check_login(hf_repo: str) -> None:
         user = HfApi().whoami()
     except Exception as exc:  # no saved token, revoked token, Hugging Face not answering
         detail = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:200]
-        raise TaskError('Hugging Face: nessun login valido su questo server (' + detail + '): serve un token '
-                        'che possa scrivere ' + hf_repo) from exc
+        raise TaskError('Hugging Face: no valid login on this server (' + detail + '): it needs a token '
+                        'that can write ' + hf_repo) from exc
     token = (user.get('auth') or {}).get('accessToken') or {}
     if token.get('role') == 'read':
-        raise TaskError('Hugging Face: il token di questo server e\' di sola lettura, non puo\' scrivere ' + hf_repo)
-    say('Hugging Face: login come ' + str(user.get('name', '?')))
+        raise TaskError('Hugging Face: the token of this server is read-only, it cannot write ' + hf_repo)
+    say('Hugging Face: logged in as ' + str(user.get('name', '?')))
 
 
 def check_name_free(hf_repo: str, slug: str, name: str, upload: bool) -> None:
@@ -204,19 +204,19 @@ def check_name_free(hf_repo: str, slug: str, name: str, upload: bool) -> None:
         code = None
     if code == 200:
         if upload:
-            raise TaskError('il nome ' + name + ' e\' gia\' pubblicato su Hugging Face (models/' + slug + '/ in '
-                            + hf_repo + '): scegli un altro nome')
-        say('ATTENZIONE: il nome ' + name + ' e\' gia\' pubblicato su Hugging Face (models/' + slug + '/): nella '
-            'prova preparo lo stesso, ma per caricarlo serve un altro nome')
+            raise TaskError('the name ' + name + ' is already published on Hugging Face (models/' + slug + '/ in '
+                            + hf_repo + '): choose another name')
+        say('WARNING: the name ' + name + ' is already published on Hugging Face (models/' + slug + '/): the dry '
+            'run prepares it anyway, but uploading it needs another name')
     elif code == 404:
-        say('Nome libero su Hugging Face: models/' + slug + '/')
+        say('Name free on Hugging Face: models/' + slug + '/')
     else:
-        answer = 'HTTP ' + str(code) if code is not None else 'nessuna risposta'
+        answer = 'HTTP ' + str(code) if code is not None else 'no answer'
         if upload:
-            raise TaskError('non riesco a controllare su Hugging Face se il nome ' + name + ' e\' libero (' + url
+            raise TaskError('cannot check on Hugging Face whether the name ' + name + ' is free (' + url
                             + ', ' + answer + ')')
-        say('ATTENZIONE: non riesco a controllare su Hugging Face se il nome ' + name + ' e\' libero (' + answer
-            + '), nella prova vado avanti')
+        say('WARNING: cannot check on Hugging Face whether the name ' + name + ' is free (' + answer
+            + '), going on with the dry run')
 
 
 def upload_stage(hf_repo: str, stage: Path, name: str) -> None:
@@ -228,7 +228,7 @@ def upload_stage(hf_repo: str, stage: Path, name: str) -> None:
                               commit_message='Publish model ' + name)
     except Exception as exc:  # network, permissions, a commit refused by the Hub
         detail = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:300]
-        raise TaskError('caricamento su Hugging Face fallito: ' + detail) from exc
+        raise TaskError('upload to Hugging Face failed: ' + detail) from exc
 
 
 def compile_on_comma(comma: Comma, onnx: Path, info: dict, pkl_name: str, destination: Path) -> None:
@@ -240,7 +240,7 @@ def compile_on_comma(comma: Comma, onnx: Path, info: dict, pkl_name: str, destin
     for line in ((result.stdout or '') + (result.stderr or '')).splitlines():
         say(line)
     if result.returncode != 0:
-        raise TaskError('compilazione fallita sul comma (file in ' + BUILD_DIR + ')')
+        raise TaskError('compile failed on the comma (files in ' + BUILD_DIR + ')')
     comma.pull(BUILD_DIR + '/' + pkl_name, destination)
     comma.run('rm -rf ' + BUILD_DIR)
 
@@ -248,7 +248,7 @@ def compile_on_comma(comma: Comma, onnx: Path, info: dict, pkl_name: str, destin
 def publish(args: argparse.Namespace, comma: Comma) -> int:
     hf_repo = os.environ.get('HF_REPO') or DEFAULT_HF_REPO
     if not HF_REPO_RE.fullmatch(hf_repo):
-        raise TaskError('HF_REPO non valido: ' + hf_repo)
+        raise TaskError('invalid HF_REPO: ' + hf_repo)
     steps = 5 if args.upload else 4
     model = None if args.stock else resolve_model(args.run, args.model)
 
@@ -259,17 +259,17 @@ def publish(args: argparse.Namespace, comma: Comma) -> int:
     name = args.name
     if args.stock:
         if not info['default_model']:
-            raise TaskError('sul comma non trovo DEFAULT_MODEL (sunnypilot/models/model_name.py)')
+            raise TaskError('DEFAULT_MODEL not found on the comma (sunnypilot/models/model_name.py)')
         if not name:
             name = stock_name(info['default_model'])
         if not NAME_RE.fullmatch(name):
-            raise TaskError('nome non valido: ' + name + ' (solo lettere, numeri, _ . -)')
+            raise TaskError('invalid name: ' + name + ' (only letters, digits, _ . -)')
         # The original of this openpilot version, sha256-checked (the export reference is the same file).
         original = update_reference(comma, info, strict=True)
         model = STOCK_DIR / name / ONNX_NAME
         model.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, model)
-        say('Originale del comma: ' + info['default_model'] + ' (' + (original_model_source(info) or str(original))
+        say('Comma original: ' + info['default_model'] + ' (' + (original_model_source(info) or str(original))
             + ')')
 
     run_dir = model.parent
@@ -282,13 +282,13 @@ def publish(args: argparse.Namespace, comma: Comma) -> int:
     elif not args.stock and (run_dir / 'supercombo.pt').is_file():
         weights = run_dir / 'supercombo.pt'
     if args.stable and weights is None:
-        raise TaskError('--stable vuole i pesi PyTorch: serve il supercombo.pt (o un .onnx con supercombo.pt '
-                        'accanto)')
+        raise TaskError('--stable needs the PyTorch weights: give the supercombo.pt (or an .onnx with a supercombo.pt '
+                        'next to it)')
 
     if not name:
         name = run_dir.name
     if not NAME_RE.fullmatch(name):
-        raise TaskError('nome non valido: ' + name + ' (solo lettere, numeri, _ . -)')
+        raise TaskError('invalid name: ' + name + ' (only letters, digits, _ . -)')
     slug = slug_of(name)
     pkl_name = 'driving_distill_' + slug + '_tinygrad.pkl'
     stage = PUBLISH_DIR / slug
@@ -297,8 +297,8 @@ def publish(args: argparse.Namespace, comma: Comma) -> int:
         check_login(hf_repo)
     check_name_free(hf_repo, slug, name, args.upload)
 
-    say('Modello: ' + name + ' (' + pkl_name + ')')
-    say('Comma: tinygrad ' + info['tinygrad_ref'] + ', catalogo versione ' + info['selector_version'])
+    say('Model: ' + name + ' (' + pkl_name + ')')
+    say('Comma: tinygrad ' + info['tinygrad_ref'] + ', catalog version ' + info['selector_version'])
 
     if stage.exists():
         shutil.rmtree(stage)
@@ -307,7 +307,7 @@ def publish(args: argparse.Namespace, comma: Comma) -> int:
     # 1. Export, unless an .onnx was given.
     if is_onnx:
         onnx = model
-        say('== 1. export saltato, uso ' + str(onnx))
+        say('== 1. export skipped, using ' + str(onnx))
     else:
         onnx = run_dir / ONNX_NAME
         say('== 1. export ' + str(model) + ' -> ' + str(onnx))
@@ -320,48 +320,48 @@ def publish(args: argparse.Namespace, comma: Comma) -> int:
     # that cannot be published (training checkpoint, release name taken by other weights) stops here
     # instead of after minutes on the comma.
     if weights is not None:
-        say('== 2. pesi PyTorch ' + str(weights) + ' -> training/releases/' + slug + '/')
+        say('== 2. PyTorch weights ' + str(weights) + ' -> training/releases/' + slug + '/')
         stable_args = ['--stable'] if args.stable else []
         run_module('helpers.publish_training_weights', '--repo=' + hf_repo, '--release=' + slug,
                    '--model=supercombo=' + str(weights), '--stage-dir=' + str(stage), *stable_args,
-                   failure='pesi PyTorch non pubblicabili (errore sopra)')
+                   failure='PyTorch weights cannot be published (error above)')
     else:
-        say('== 2. pesi PyTorch saltati: nessun supercombo.pt, un training «dai pesi stable» non potra\' partire '
-            'da questo modello')
+        say('== 2. PyTorch weights skipped: no supercombo.pt, a training "from the stable weights" cannot start '
+            'from this model')
     say('PROGRESS 2/' + str(steps))
 
     # 3. Compile on the comma.
-    say('== 3. compilo sul comma (qualche minuto)')
+    say('== 3. compiling on the comma (a few minutes)')
     compiled = stage / 'models' / slug / pkl_name
     compile_on_comma(comma, onnx, info, pkl_name, compiled)
     sha256 = sha256_of(compiled)
-    say('Compilato: ' + pkl_name + ' sha256 ' + sha256)
+    say('Compiled: ' + pkl_name + ' sha256 ' + sha256)
     say('PROGRESS 3/' + str(steps))
 
     # 4. Catalog: only this model, the menu shows the last one published.
-    say('== 4. catalogo')
+    say('== 4. catalog')
     base_url = 'https://huggingface.co/' + hf_repo + '/resolve/main/'
     run_module('helpers.model_catalog', str(stage / 'driving_models.json'), '--name=' + name,
                '--file-name=' + pkl_name, '--url=' + base_url + 'models/' + slug + '/' + pkl_name,
                '--sha256=' + sha256, '--selector-version=' + info['selector_version'],
-               '--tinygrad-ref=' + info['tinygrad_ref'], failure='catalogo non scritto')
+               '--tinygrad-ref=' + info['tinygrad_ref'], failure='catalog not written')
     say('PROGRESS 4/' + str(steps))
 
     if not args.upload:
-        say('Prova: niente caricato. File pronti in ' + str(stage))
+        say('Dry run: nothing uploaded. Files ready in ' + str(stage))
         return 0
 
     # 5. One commit with the model files, the new catalog and the PyTorch weights.
-    say('== 5. carico su https://huggingface.co/' + hf_repo)
+    say('== 5. uploading to https://huggingface.co/' + hf_repo)
     upload_stage(hf_repo, stage, name)
     say('PROGRESS 5/' + str(steps))
-    say('Pubblicato. Catalogo: ' + base_url + 'driving_models.json')
+    say('Published. Catalog: ' + base_url + 'driving_models.json')
     if weights is not None and args.stable:
-        say('Pesi PyTorch: training/releases/' + slug + '/supercombo.pt, ora stable: il prossimo training «dai '
-            'pesi stable» (Training) parte da qui.')
+        say('PyTorch weights: training/releases/' + slug + '/supercombo.pt, now stable: the next training "from the '
+            'stable weights" (Training) starts from here.')
     elif weights is not None:
-        say('Pesi PyTorch: training/releases/' + slug + '/supercombo.pt (stable non spostato: pubblicando come '
-            'stable diventa la base dei training «dai pesi stable»).')
+        say('PyTorch weights: training/releases/' + slug + '/supercombo.pt (stable not moved: publishing it as '
+            'stable makes it the base of the trainings "from the stable weights").')
     return 0
 
 

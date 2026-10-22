@@ -10,7 +10,7 @@
 # ~/.local/bin, run the install script again and make the token file readable by that account only.
 
 [Unit]
-Description=distill-web: sito di controllo di openpilot.distill
+Description=distill-web: control site of openpilot.distill
 Documentation=file://__DISTILL_REPO__/docs/INSTALL.md
 After=network-online.target
 Wants=network-online.target

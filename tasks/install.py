@@ -104,13 +104,13 @@ env $flags PYTHONPATH="$openpilot/tinygrad_repo:$openpilot" \
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_model_arguments(parser, 'il supercombo.pt da installare')
-    parser.add_argument('--restore', action='store_true', help='rimette il modello originale')
-    parser.add_argument('--no-reboot', action='store_true', help='non riavvia il comma')
+    add_model_arguments(parser, 'the supercombo.pt to install')
+    parser.add_argument('--restore', action='store_true', help='puts the original model back')
+    parser.add_argument('--no-reboot', action='store_true', help='does not reboot the comma')
     args = parser.parse_args(arguments)
     check_model_arguments(parser, args)
     if args.restore and (args.run is not None or args.model is not None):
-        parser.error('--restore non vuole un modello')
+        parser.error('--restore takes no model')
     return args
 
 
@@ -118,7 +118,7 @@ def read_install_info(comma: Comma) -> dict:
     try:
         info = comma.key_values(INSTALL_INFO_SCRIPT, BACKUP)
     except TaskError as exc:
-        raise TaskError('non riesco a leggere /data/openpilot sul comma (' + str(exc) + ')') from exc
+        raise TaskError('cannot read /data/openpilot on the comma (' + str(exc) + ')') from exc
     for key in INFO_KEYS:
         info.setdefault(key, '')
     return info
@@ -130,9 +130,9 @@ def put_model(comma: Comma, source: str, info: dict) -> None:
 
 def reboot(comma: Comma, do_reboot: bool) -> None:
     if not do_reboot:
-        say('Senza riavvio: il comma usa il modello dal prossimo avvio')
+        say('No reboot: the comma uses the model from its next start')
         return
-    say('Riavvio il comma (il primo avvio ricompila il modello, qualche minuto in piu\')')
+    say('Rebooting the comma (the first start compiles the model again, a few minutes more)')
     try:
         # The connection drops while the comma goes down: its exit code means nothing.
         comma.run('sudo reboot', check=False, timeout=60)
@@ -142,13 +142,13 @@ def reboot(comma: Comma, do_reboot: bool) -> None:
 
 def restore(comma: Comma, info: dict, do_reboot: bool) -> int:
     if info['current'] == info['original']:
-        say('Il comma ha gia\' il modello originale.')
+        say('The comma already has the original model.')
         return 0
     if info['backup'] != info['original']:
-        raise TaskError('il backup ' + BACKUP + ' manca o non e\' l\'originale di questa versione: rimetti '
-                        'l\'originale con un aggiornamento dallo schermo del comma')
+        raise TaskError('the backup ' + BACKUP + ' is missing or is not the original of this version: put the '
+                        'original back with a software update from the comma screen')
     put_model(comma, BACKUP, info)
-    say('Rimesso il modello originale.')
+    say('Original model put back.')
     reboot(comma, do_reboot)
     return 0
 
@@ -166,7 +166,7 @@ def compile_check(comma: Comma, student: Path, info: dict, log: Path) -> None:
         for line in lines[-20:]:
             say(line)
         comma.run('rm -rf ' + BUILD_DIR, check=False)
-        raise TaskError('il comma non riesce a compilare il modello: non ho cambiato niente (log completo: '
+        raise TaskError('the comma cannot compile the model: nothing was changed (full log: '
                         + str(log) + ')')
     for line in [line for line in lines if line.endswith(' ms')][-3:]:
         say(line)
@@ -176,38 +176,38 @@ def install(args: argparse.Namespace, comma: Comma) -> int:
     comma.require()
     info = read_install_info(comma)
     if info['onroad'] == '1':
-        raise TaskError('il comma e\' onroad: spegni l\'auto e riprova')
+        raise TaskError('the comma is onroad: turn the car off and try again')
     if not info['reference']:
-        raise TaskError('sul comma non trovo driving_supercombo.onnx')
+        raise TaskError('driving_supercombo.onnx not found on the comma')
     if not info['original']:
-        raise TaskError('non riesco a leggere da git lo sha256 del modello originale')
+        raise TaskError('cannot read the original model\'s sha256 from git')
 
     if args.restore:
         return restore(comma, info, not args.no_reboot)
 
     if info['active_bundle'] and info['active_bundle'] != '{}':
-        raise TaskError('nel menu Models di sunnypilot e\' scelto un modello: metti Default, se no il tuo non '
-                        'viene usato')
+        raise TaskError('a model is chosen in the sunnypilot Models menu: set it to Default, otherwise yours is '
+                        'not used')
     if not info['tg_flags']:
-        raise TaskError('non trovo i flag di tinygrad (tg_flags) nello SConscript del comma')
+        raise TaskError('tinygrad flags (tg_flags) not found in the comma\'s SConscript')
     if not info['python']:
-        raise TaskError('sul comma non c\'e\' /usr/local/venv/bin/python3')
+        raise TaskError('/usr/local/venv/bin/python3 is not on the comma')
 
     checkpoint = resolve_model(args.run, args.model)
     run_dir = checkpoint.parent
     student = run_dir / ONNX_NAME
-    say('Modello: ' + str(checkpoint))
+    say('Model: ' + str(checkpoint))
     say('PROGRESS 1/' + str(STEPS))
 
     # 2. Backup of the original, refreshed while the comma has it (it changes with openpilot updates).
     if info['current'] == info['original']:
         comma.script(COPY_SCRIPT, REMOTE_OPENPILOT + '/' + info['reference'], BACKUP)
-        say('== 2. salvato l\'originale in ' + BACKUP)
+        say('== 2. original saved in ' + BACKUP)
     elif info['backup'] == info['original']:
-        say('== 2. sul comma c\'e\' gia\' un modello tuo, l\'originale e\' in ' + BACKUP)
+        say('== 2. one of your models is already on the comma, the original is in ' + BACKUP)
     else:
-        raise TaskError('sul comma c\'e\' un modello diverso dall\'originale e non c\'e\' un backup valido: '
-                        'rimetti l\'originale con un aggiornamento dallo schermo del comma')
+        raise TaskError('the comma has a model other than the original and no valid backup: '
+                        'put the original back with a software update from the comma screen')
     say('PROGRESS 2/' + str(STEPS))
 
     # 3. Export, with the original as reference for inputs and output layout.
@@ -217,14 +217,14 @@ def install(args: argparse.Namespace, comma: Comma) -> int:
     say('PROGRESS 3/' + str(STEPS))
 
     # 4. Compile check on the comma, same command as the openpilot build.
-    say('== 4. compilo sul comma per controllo (qualche minuto)')
+    say('== 4. test compile on the comma (a few minutes)')
     compile_check(comma, student, info, run_dir / 'comma_compile.log')
     say('PROGRESS 4/' + str(STEPS))
 
     # 5. In place of the original, then reboot.
     put_model(comma, BUILD_DIR + '/' + ONNX_NAME, info)
     comma.run('rm -rf ' + BUILD_DIR)
-    say('== 5. installato: per tornare all\'originale usa il ripristino nella sezione Comma')
+    say('== 5. installed: to go back to the original use the restore in the Comma section')
     say('PROGRESS 5/' + str(STEPS))
     reboot(comma, not args.no_reboot)
     return 0

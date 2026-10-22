@@ -1,36 +1,36 @@
-# openpilot.distill su NVIDIA Tesla V100 — handoff per Claude
+# openpilot.distill on NVIDIA Tesla V100 — handoff for Claude
 
-Data: 17 ottobre 2026.
+Date: 17 October 2026.
 
-Questo documento contiene la risposta integrale di Codex e, in appendice, lo script Python completo a cui la risposta fa riferimento. I collegamenti allo script temporaneo sono stati adattati per puntare all'appendice; il testo della risposta è altrimenti conservato.
+This document contains Codex's full answer and, in the appendix, the complete Python script the answer refers to. The links to the temporary script have been adapted to point to the appendix; the text of the answer is otherwise preserved.
 
-Stato delle verifiche: sono stati ispezionati sorgenti e metadati del torchpackage pubblico e il checkout locale di openpilot.distill. Lo script ha superato soltanto il controllo sintattico e della CLI. Conversione dei pesi, forward CPU/GPU, confronto numerico e benchmark restano da eseguire. Le stime non sono misure.
+Verification status: the sources and metadata of the public torchpackage and the local checkout of openpilot.distill were inspected. The script has passed only the syntax and CLI check. Weight conversion, CPU/GPU forward, numerical comparison and benchmarks are still to be run. The estimates are not measurements.
 
-La consegna di questo documento non autorizza modifiche live, installazioni o riavvii sul comma, né l'accensione di Serverone-ai.
+Handing over this document does not authorize live changes, installations or restarts on the comma, nor powering on Serverone-ai.
 
-## Risposta integrale
+## Full answer
 
-**La strada più solida è dequantizzare su CPU, usare pesi densi FP16 e KV cache FP16, eseguire il modello in eager con SDPA.** Prima costruirei anche un riferimento denso FP32.
+**The most solid route is to dequantize on the CPU, use dense FP16 weights and an FP16 KV cache, and run the model in eager mode with SDPA.** Before that I would also build a dense FP32 reference.
 
-Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture parziali, senza scaricare tutti i pesi. Ho preparato [uno script Python completo](#appendice-script-python-completo) per ispezione, conversione, caricamento e confronto. **Ho verificato sintassi e CLI; conversione e forward non sono stati eseguiti.** Nessuna modifica al repository o ai dispositivi.
+I inspected the sources and metadata of the public torchpackage through partial reads, without downloading all the weights. I prepared [a complete Python script](#appendix-complete-python-script) for inspection, conversion, loading and comparison. **I verified syntax and CLI; conversion and forward have not been run.** No changes to the repository or the devices.
 
-1. **Dequantizzazione: nel pacchetto il formato è identificabile con precisione.**
+1. **Dequantization: in the package the format can be identified precisely.**
 
-   Nell’indice dello state dict compaiono effettivamente:
+   The state dict index does contain:
 
-   | Parte | Rappresentazione |
+   | Part | Representation |
    |---|---|
    | Attention | `torchao.quantization.Float8Tensor` |
    | MLP | `torchao.prototype.mx_formats.nvfp4_tensor.NVFP4Tensor` |
-   | Dati FP4 | `uint8`, due valori per byte |
-   | Blocchi NVFP4 | 16 elementi |
-   | Scale NVFP4 | FP8 E4M3, con layout **swizzled** |
-   | Scala globale | `per_tensor_scale` |
-   | Dtype originale dichiarato | BF16 |
+   | FP4 data | `uint8`, two values per byte |
+   | NVFP4 blocks | 16 elements |
+   | NVFP4 scales | FP8 E4M3, with a **swizzled** layout |
+   | Global scale | `per_tensor_scale` |
+   | Declared original dtype | BF16 |
 
-   Quindi **non basta `weight.half()`**: sui tensor subclass può cambiare il dtype dichiarato lasciando dati e comportamento quantizzati.
+   So **`weight.half()` is not enough**: on tensor subclasses it can change the declared dtype while leaving the data and the behavior quantized.
 
-   Il nucleo della conversione è:
+   The core of the conversion is:
 
    ```python
    from torchao.quantization import Float8Tensor
@@ -45,42 +45,42 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
        raise TypeError(type(weight))
 
    if type(dense) is not torch.Tensor:
-       raise TypeError("La dequantizzazione ha conservato un tensor subclass")
+       raise TypeError("Dequantization retained a tensor subclass")
 
    if not torch.isfinite(dense).all():
-       raise ValueError("Pesi dequantizzati non finiti")
+       raise ValueError("Nonfinite dequantized weights")
 
    dense_fp16 = dense.to(torch.float16)
 
    if not torch.isfinite(dense_fp16).all():
-       raise ValueError("Overflow nella conversione FP16")
+       raise ValueError("Overflow in the FP16 conversion")
    ```
 
-   Il passaggio intermedio NVFP4 è intenzionale: in torchao 0.17, `get_hp_scales()` consulta `orig_dtype`. Portarlo a FP32 prima della dequantizzazione evita un passaggio delle scale in BF16. Il dequantizzatore gestisce anche trasposizioni e riordinamento delle scale. [Implementazione NVFP4 di torchao 0.17](https://github.com/pytorch/ao/blob/v0.17.0/torchao/prototype/mx_formats/nvfp4_tensor.py).
+   The intermediate NVFP4 step is intentional: in torchao 0.17, `get_hp_scales()` consults `orig_dtype`. Moving it to FP32 before dequantization avoids passing the scales through BF16. The dequantizer also handles transpositions and the reordering of the scales. [NVFP4 implementation in torchao 0.17](https://github.com/pytorch/ao/blob/v0.17.0/torchao/prototype/mx_formats/nvfp4_tensor.py).
 
-   Concettualmente:
+   Conceptually:
 
    ```text
-   peso = valore_FP4_decodificato × scala_del_blocco × scala_globale
+   weight = decoded_FP4_value × block_scale × global_scale
    ```
 
-   Ma ordine dei nibble, orientamento e swizzle devono seguire quella classe. **Non ricostruirei manualmente il formato quando il dequantizzatore è disponibile.**
+   But nibble order, orientation and swizzle must follow that class. **I would not rebuild the format by hand when the dequantizer is available.**
 
-   La conversione conserva l’approssimazione dei pesi quantizzati: non recupera i pesi BF16 precedenti alla quantizzazione.
+   The conversion keeps the approximation of the quantized weights: it does not recover the BF16 weights from before quantization.
 
-2. **Nel modello ispezionato non serve sostituire indiscriminatamente i Linear.**
+2. **In the inspected model there is no need to replace the Linear layers wholesale.**
 
-   La classe `torchtitan.models.common.nn_modules.Linear` eredita da `nn.Linear` senza ridefinirne il forward. La quantizzazione risiede nei pesi tensor subclass.
+   The class `torchtitan.models.common.nn_modules.Linear` inherits from `nn.Linear` without redefining its forward. The quantization lives in the tensor-subclass weights.
 
-   Per questo pacchetto conviene:
+   For this package it is better to:
 
-   - mantenere nomi e struttura dei moduli;
-   - caricare tensori ordinari con `strict=True, assign=True`;
-   - selezionare SDPA;
-   - cambiare il resolver del dtype della cache;
-   - eliminare cache e maschere precedentemente costruite.
+   - keep the module names and structure;
+   - load ordinary tensors with `strict=True, assign=True`;
+   - select SDPA;
+   - change the cache dtype resolver;
+   - drop the caches and masks built earlier.
 
-   Il resolver attuale riconosce FP8 e altrimenti restituisce BF16: **passare semplicemente `"float16"` oggi non produce una cache FP16**. Nel sorgente estratto lo cambierei così:
+   The current resolver recognizes FP8 and otherwise returns BF16: **simply passing `"float16"` today does not produce an FP16 cache**. In the extracted source I would change it like this:
 
    ```python
    KVCacheDType = Literal[
@@ -103,7 +103,7 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
            raise ValueError(requested_dtype)
    ```
 
-   Poi:
+   Then:
 
    ```python
    output = model.generate(
@@ -116,44 +116,44 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
    )
    ```
 
-   Le cache K/V sono già registrate con `persistent=False`: **non introducono chiavi nello state dict e non compromettono `strict=True`**.
+   The K/V caches are already registered with `persistent=False`: **they add no keys to the state dict and do not break `strict=True`**.
 
-   Per la prima prova manterrei il torchpackage originale come contenitore del codice, caricando separatamente lo state dict denso. Lo script allegato usa questa soluzione e applica l’adattamento nel namespace privato del `PackageImporter`.
+   For the first attempt I would keep the original torchpackage as the container of the code, loading the dense state dict separately. The attached script uses this approach and applies the adaptation in the private namespace of the `PackageImporter`.
 
-   Dopo la validazione renderei permanenti le modifiche nei sorgenti estratti. Un nuovo torchpackage richiederebbe anche metadati aggiornati: quelli originali dichiarano BF16, `fp8_nvfp4` e compute capability minima `(10, 0)`. Cambiare soltanto questi metadati non rende compatibile il modello.
+   After validation I would make the changes permanent in the extracted sources. A new torchpackage would also need updated metadata: the original metadata declares BF16, `fp8_nvfp4` and a minimum compute capability of `(10, 0)`. Changing only this metadata does not make the model compatible.
 
-3. **`compile_for_inference()` va inizialmente saltato, insieme al percorso FLEX.**
+3. **`compile_for_inference()` should be skipped at first, together with the FLEX path.**
 
-   Nel codice reale la funzione fa:
+   In the actual code the function does:
 
    ```python
    for block in self.blocks:
        block.compile(mode="max-autotune-no-cudagraphs")
    ```
 
-   Non converte i pesi e non è necessaria al sampling.
+   It does not convert the weights and is not needed for sampling.
 
-   Esiste inoltre una compilazione separata per costruire le maschere FLEX. Per la prima versione V100 imposterei SDPA su configurazione e moduli attention, invalidando le maschere esistenti.
+   There is also a separate compilation to build the FLEX masks. For the first V100 version I would set SDPA on the configuration and on the attention modules, invalidating the existing masks.
 
-   **Saltare soltanto `compile_for_inference()` lasciando FLEX e pesi quantizzati non è sufficiente.** Partirei senza compilazione; eventuali ottimizzazioni arrivano dopo il confronto numerico.
+   **Skipping only `compile_for_inference()` while leaving FLEX and the quantized weights is not enough.** I would start without compilation; any optimizations come after the numerical comparison.
 
-4. **FP16 va validato: proteggere solo il softmax non basta.**
+4. **FP16 must be validated: protecting only the softmax is not enough.**
 
-   Userei questa politica iniziale:
+   I would use this initial policy:
 
-   | Operazione | Precisione |
+   | Operation | Precision |
    |---|---|
-   | Pesi delle proiezioni e MLP | FP16 |
+   | Projection and MLP weights | FP16 |
    | KV cache | FP16 |
-   | RMSNorm, incluse Q/K norm | Calcolo FP32, uscita nel dtype richiesto |
-   | Attention di riferimento | SDPA `MATH` |
-   | Frequenze e funzioni sinusoidali dei timestep | FP32 |
-   | CFG e aggiornamento Euler | Preferibilmente FP32 |
-   | Residual e modulazione adattiva | Monitorare; promuovere a FP32 se necessario |
+   | RMSNorm, including Q/K norm | FP32 computation, output in the requested dtype |
+   | Reference attention | SDPA `MATH` |
+   | Frequencies and sinusoidal timestep functions | FP32 |
+   | CFG and Euler update | Preferably FP32 |
+   | Residual and adaptive modulation | Monitor; promote to FP32 if needed |
 
-   Il modello mantiene già in FP32 una parte del calcolo dei timestep. Nel backend SDPA matematico PyTorch mantiene normalmente gli intermedi in FP32 per ingressi FP16/BF16. Questo migliora la stabilità, ma aumenta memoria e costo dell’attention. [Numerical accuracy di PyTorch](https://docs.pytorch.org/docs/main/notes/numerical_accuracy.html).
+   The model already keeps part of the timestep computation in FP32. In the math SDPA backend PyTorch normally keeps the intermediates in FP32 for FP16/BF16 inputs. This improves stability, but increases the memory and cost of attention. [PyTorch numerical accuracy](https://docs.pytorch.org/docs/main/notes/numerical_accuracy.html).
 
-   La combinazione CFG va promossa **prima** delle operazioni:
+   The CFG combination must be promoted **before** the operations:
 
    ```python
    unconditional = unconditional.float()
@@ -164,15 +164,15 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
    x = next_x.to(dtype=x.dtype)
    ```
 
-   Analogamente, un residual FP32 deve effettuare somma e gating in FP32. Fare `.float()` dopo che un valore è diventato `inf` non lo recupera.
+   Likewise, an FP32 residual must do the sum and the gating in FP32. Calling `.float()` after a value has become `inf` does not recover it.
 
-   Lo script fornito protegge RMSNorm e usa SDPA matematico; **è una baseline da validare**, non una garanzia che tutti i residual FP16 siano stabili.
+   The provided script protects RMSNorm and uses math SDPA; **it is a baseline to be validated**, not a guarantee that all FP16 residuals are stable.
 
-   FP32 completo ha senso come riferimento e per diagnosticare overflow. Su V100 32 GB è plausibile per il world model isolato; su 16 GB pesi e memoria operativa rendono la configurazione impraticabile. GradScaler non risolve gli overflow del forward in inferenza.
+   Full FP32 makes sense as a reference and to diagnose overflows. On a 32 GB V100 it is plausible for the world model alone; on 16 GB, weights and working memory make the configuration impractical. GradScaler does not fix forward overflows in inference.
 
-   Per l’autoencoder partirei da FP32. I suoi circa 128 milioni di parametri complessivi occupano circa 0,48 GiB in FP32. [Model card dell’autoencoder](https://huggingface.co/commaai/vit-ae-2x-f8c32).
+   For the autoencoder I would start from FP32. Its roughly 128 million parameters in total take about 0.48 GiB in FP32. [Autoencoder model card](https://huggingface.co/commaai/vit-ae-2x-f8c32).
 
-   Attenzione agli export: `.float()` sui parametri non elimina eventuali cast BF16 incorporati nel grafo. Per scoprirli:
+   Beware of exports: `.float()` on the parameters does not remove BF16 casts that may be embedded in the graph. To find them:
 
    ```python
    import torch
@@ -181,53 +181,53 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
    print(exported.graph_module.code)
    ```
 
-   Se contiene cast espliciti o operazioni specializzate, va adattato il grafo oppure riesportato dal sorgente; non assumerei che `.to(torch.float16)` basti.
+   If it contains explicit casts or specialized operations, the graph must be adapted or re-exported from source; I would not assume that `.to(torch.float16)` is enough.
 
-5. **Memoria: la 32 GB è il bersaglio ragionevole; la 16 GB richiede margini misurati.**
+5. **Memory: the 32 GB card is the reasonable target; the 16 GB one needs measured margins.**
 
-   Dai metadati della struttura ho ricavato **56 blocchi, dimensione 2304, 36 teste**, quindi head dimension 64.
+   From the structure metadata I derived **56 blocks, dimension 2304, 36 heads**, hence a head dimension of 64.
 
-   Questo sampling condivide il prefisso tra i due rami CFG:
-
-   ```text
-   prefisso:          14 × 128 = 1792 token
-   suffix con CFG:     2 × 128 =  256 token
-   capacità cache:                 2048 token
-   ```
-
-   La cache FP16 vale quindi:
+   This sampling shares the prefix between the two CFG branches:
 
    ```text
-   2 × 56 × 2048 × 2304 × 2 byte = 0,984375 GiB
+   prefix:            14 × 128 = 1792 tokens
+   suffix with CFG:    2 × 128 =  256 tokens
+   cache capacity:                 2048 tokens
    ```
 
-   **Non raddoppia tutta la cache per CFG.** Il funzionamento prefill/decode è descritto anche nella [model card del world model](https://huggingface.co/commaai/worldmodel-4B).
+   The FP16 cache is therefore:
 
-   Stime di pianificazione, non misure:
+   ```text
+   2 × 56 × 2048 × 2304 × 2 bytes = 0.984375 GiB
+   ```
 
-   | Componente | Ordine di grandezza |
+   **CFG does not double the whole cache.** The prefill/decode operation is also described in the [world model's model card](https://huggingface.co/commaai/worldmodel-4B).
+
+   Planning estimates, not measurements:
+
+   | Component | Order of magnitude |
    |---|---:|
-   | Pesi 4B FP16 | 7,45 GiB |
-   | KV FP16 con CFG | 0,98 GiB |
-   | Una matrice score FP32 del prefill | 0,49 GiB |
-   | World model FP16 con SDPA matematico, complessivo | circa 11–15+ GiB |
-   | World model interamente FP32 | circa 19–24+ GiB |
+   | 4B FP16 weights | 7.45 GiB |
+   | FP16 KV with CFG | 0.98 GiB |
+   | One FP32 score matrix of the prefill | 0.49 GiB |
+   | FP16 world model with math SDPA, total | about 11–15+ GiB |
+   | World model entirely in FP32 | about 19–24+ GiB |
 
-   Gli intermedi dell’attention vivono per il blocco corrente: non bisogna moltiplicarne il picco per 56. Vanno però aggiunti allocator, workspace e gli altri modelli. **Queste stime non includono il learner con gradienti e optimizer.**
+   The attention intermediates live for the current block: their peak must not be multiplied by 56. The allocator, workspaces and the other models must be added, though. **These estimates do not include the learner with gradients and optimizer.**
 
-   SDPA matematico è sufficiente per una prima implementazione corretta. Non introdurrei subito xformers. Dopo, proverei il backend `EFFICIENT_ATTENTION` disponibile nella build, verificando supporto di GPU, shape e maschera. SDPA consente di selezionare esplicitamente i backend. [Documentazione SDPA](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention).
+   Math SDPA is enough for a first correct implementation. I would not bring in xformers right away. Afterwards I would try the `EFFICIENT_ATTENTION` backend available in the build, checking support for the GPU, the shapes and the mask. SDPA allows selecting the backends explicitly. [SDPA documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention).
 
-   Per la velocità, il solo conteggio delle proiezioni è circa:
+   As for speed, the projections alone count about:
 
    ```text
    2 × 4B × (1792 + 15 × 256) ≈ 45 TFLOP
    ```
 
-   cui aggiungere attention e altri calcoli. Budgetterei **secondi o decine di secondi per predizione**, non tempo reale, finché non esiste un benchmark. PCIe/SXM, backend attention e precisione cambiano molto il risultato.
+   plus attention and other computations. I would budget **seconds or tens of seconds per prediction**, not real time, until a benchmark exists. PCIe/SXM, attention backend and precision change the result a lot.
 
-6. **La procedura riproducibile è nello script allegato.**
+6. **The reproducible procedure is in the attached script.**
 
-   Copia [worldmodel_v100_tools.py](#appendice-script-python-completo) nell’ambiente Linux. I comandi seguenti assumono che il torchpackage sia già disponibile e che l’ambiente contenga versioni compatibili di PyTorch e torchao. Nel lockfile locale ho trovato torchao **0.17.0**: partirei da quella versione, verificandone l’importazione.
+   Copy [worldmodel_v100_tools.py](#appendix-complete-python-script) into the Linux environment. The following commands assume that the torchpackage is already available and that the environment contains compatible versions of PyTorch and torchao. In the local lockfile I found torchao **0.17.0**: I would start from that version, checking that it imports.
 
    ```bash
    uv run --no-sync python worldmodel_v100_tools.py inspect \
@@ -236,9 +236,9 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      > worldmodel-inspection.txt
    ```
 
-   Questo stampa classi, shape, dtype e attributi di quantizzazione, oltre al codice dei dequantizzatori installati.
+   This prints classes, shapes, dtypes and quantization attributes, plus the code of the installed dequantizers.
 
-   Costruisci prima il riferimento FP32:
+   Build the FP32 reference first:
 
    ```bash
    uv run --no-sync python worldmodel_v100_tools.py convert \
@@ -247,7 +247,7 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      --dtype fp32
    ```
 
-   Poi la versione FP16:
+   Then the FP16 version:
 
    ```bash
    uv run --no-sync python worldmodel_v100_tools.py convert \
@@ -256,9 +256,9 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      --dtype fp16
    ```
 
-   Prevedi spazio per entrambi gli output, circa 24 GB decimali oltre all’originale. Per la conversione FP32 pianificherei almeno 32 GB di RAM libera, preferibilmente più margine.
+   Plan space for both outputs, about 24 decimal GB on top of the original. For the FP32 conversion I would plan at least 32 GB of free RAM, preferably with more margin.
 
-   Genera un input sintetico comune:
+   Generate a shared synthetic input:
 
    ```bash
    uv run --no-sync python worldmodel_v100_tools.py inputs \
@@ -266,7 +266,7 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      smoke-inputs.pt
    ```
 
-   Primo confronto con un solo step:
+   First comparison with a single step:
 
    ```bash
    uv run --no-sync python worldmodel_v100_tools.py run \
@@ -283,26 +283,26 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      cpu-output.pt gpu-output.pt
    ```
 
-   Il caricamento usa `strict=True, assign=True`; il confronto riporta errore massimo assoluto, RMSE e errore L2 relativo.
+   Loading uses `strict=True, assign=True`; the comparison reports maximum absolute error, RMSE and relative L2 error.
 
-   Dopo il primo esito: ripeti con 15 step, quindi con ingressi reali e rollout. Il tempo stampato dallo script è una chiamata **a freddo**, non un benchmark stabilizzato. La memoria riportata copre le allocazioni PyTorch, non quelle di ORT.
+   After the first result: repeat with 15 steps, then with real inputs and rollout. The time printed by the script is a **cold** call, not a stabilized benchmark. The reported memory covers PyTorch allocations, not ORT's.
 
-   **Il riferimento CPU FP32 verifica il porting denso. Non dimostra equivalenza al modello quantizzato originale**, che quantizza anche le attivazioni e usa cache FP8. Per quella verifica serve l’originale su hardware supportato oppure un’emulazione completa delle quantizzazioni. Il semplice test sintetico non valida la qualità del simulatore.
+   **The FP32 CPU reference verifies the dense port. It does not prove equivalence to the original quantized model**, which also quantizes the activations and uses an FP8 cache. That check needs the original on supported hardware or a complete emulation of the quantizations. The simple synthetic test does not validate the quality of the simulator.
 
-7. **`onnxruntime-gpu 1.29` da PyPI non è la build giusta per la V100.**
+7. **`onnxruntime-gpu 1.29` from PyPI is not the right build for the V100.**
 
-   Qui la documentazione è esplicita:
+   Here the documentation is explicit:
 
-   | Build ORT 1.29 Linux x64 | CUDA | `sm_70` |
+   | ORT 1.29 Linux x64 build | CUDA | `sm_70` |
    |---|---|---|
-   | PyPI predefinita | 13.x | Assente |
-   | Variante CUDA 12 | 12.8 | Presente |
+   | Default PyPI | 13.x | Absent |
+   | CUDA 12 variant | 12.8 | Present |
 
-   Lo dichiarano sia la [matrice CUDA EP](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html) sia le [release notes 1.29](https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0).
+   Both the [CUDA EP matrix](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html) and the [1.29 release notes](https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0) state this.
 
-   **Torch `+cu126` e ORT CUDA 12.8 non sono automaticamente incompatibili, ma non basta che entrambi dicano “CUDA 12”.** ORT richiede librerie adeguate alla propria build; quelle caricate da Torch cu126 possono non bastare.
+   **Torch `+cu126` and ORT CUDA 12.8 are not automatically incompatible, but it is not enough that both say “CUDA 12”.** ORT needs libraries matching its own build; the ones loaded by Torch cu126 may not be enough.
 
-   Per verificare la disponibilità della variante 1.29 nel feed Microsoft, senza installare:
+   To check whether the 1.29 variant is available in the Microsoft feed, without installing:
 
    ```bash
    uv pip install --dry-run --no-deps \
@@ -310,9 +310,9 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
      "onnxruntime-gpu==1.29.0"
    ```
 
-   Per mantenere un ambiente basato sulle librerie di Torch cu126, **ORT 1.20.1 CUDA 12/cuDNN 9 è una candidata conservativa**, ma soltanto se il modello è compatibile: ORT 1.20 supporta ONNX IR fino a 10 e opset standard fino a 21. [Compatibilità ORT](https://onnxruntime.ai/docs/reference/compatibility.html).
+   To keep an environment based on the Torch cu126 libraries, **ORT 1.20.1 CUDA 12/cuDNN 9 is a conservative candidate**, but only if the model is compatible: ORT 1.20 supports ONNX IR up to 10 and standard opsets up to 21. [ORT compatibility](https://onnxruntime.ai/docs/reference/compatibility.html).
 
-   Controlla prima:
+   Check first:
 
    ```python
    import onnx
@@ -327,19 +327,19 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
        print("DOMAIN:", entry.domain, "OPSET:", entry.version)
    ```
 
-   Nel progetto vanno controllati anche i grafi prodotti da `split_supercombo()` e `make_dense()`, perché sono quelli effettivamente passati a ORT.
+   In the project the graphs produced by `split_supercombo()` and `make_dense()` must be checked too, because those are the ones actually passed to ORT.
 
-   Se serve ORT recente, userei la variante CUDA 12.8 con dipendenze verificate, oppure una build da sorgente mirata. **Non proporrei una build 1.29 con CUDA 12.6 come sicuramente supportata senza verificarne i requisiti di compilazione.**
+   If a recent ORT is needed, I would use the CUDA 12.8 variant with verified dependencies, or a targeted build from source. **I would not present a 1.29 build with CUDA 12.6 as surely supported without checking its build requirements.**
 
-   Verifica anche cuDNN effettivo: la [matrice NVIDIA di cuDNN 9.10.2](https://docs.nvidia.com/deeplearning/cudnn/backend/v9.10.2/reference/support-matrix.html) include esplicitamente Volta.
+   Also check the actual cuDNN: the [NVIDIA support matrix of cuDNN 9.10.2](https://docs.nvidia.com/deeplearning/cudnn/backend/v9.10.2/reference/support-matrix.html) explicitly includes Volta.
 
-   Infine, `get_available_providers()` non prova l’esecuzione sulla GPU. Servono una vera inferenza e il profiling dei nodi; il fallback CPU può mascherare una configurazione errata.
+   Finally, `get_available_providers()` does not prove execution on the GPU. A real inference and per-node profiling are needed; the CPU fallback can hide a wrong configuration.
 
-8. **Per l’insegnante partirei dall’ONNX originale; FP16 viene dopo il riferimento.**
+8. **For the teacher I would start from the original ONNX; FP16 comes after the reference.**
 
-   Mantieni inizialmente la precisione originale per verificare runtime e risultati. Poi prova FP16 o mixed precision: sulla V100 può ridurre memoria e accelerare le parti compatibili.
+   Keep the original precision at first to verify the runtime and the results. Then try FP16 or mixed precision: on the V100 it can reduce memory and speed up the compatible parts.
 
-   Nel tuo progetto convertirei i grafi **dopo split e densificazione**, mantenendo inizialmente gli I/O FP32:
+   In your project I would convert the graphs **after split and densification**, keeping the I/O in FP32 at first:
 
    ```python
    import onnx
@@ -362,11 +362,11 @@ Ho ispezionato i sorgenti e i metadati del torchpackage pubblico tramite letture
    )
    ```
 
-   `keep_io_types=True` conserva l’interfaccia esterna. Il convertitore supporta inoltre esclusioni per operatori o nodi quando alcune parti devono restare FP32. [Conversione FP16 e mixed precision di ORT](https://onnxruntime.ai/docs/performance/model-optimizations/float16.html).
+   `keep_io_types=True` preserves the external interface. The converter also supports exclusions for operators or nodes when some parts must stay in FP32. [ORT FP16 and mixed-precision conversion](https://onnxruntime.ai/docs/performance/model-optimizations/float16.html).
 
-   Confronta FP32 e FP16 sulla **stessa sequenza registrata**, partendo dallo stesso stato delle code: un singolo frame non rileva la deriva temporale.
+   Compare FP32 and FP16 on the **same recorded sequence**, starting from the same queue state: a single frame does not reveal temporal drift.
 
-   Le sei varianti Hugging Face non sono intercambiabili solo perché hanno lo stesso filename. Prima di sceglierne una vanno confrontati I/O, metadati e compatibilità con lo split del progetto; un README vuoto non permette di stabilire quale sia migliore.
+   The six Hugging Face variants are not interchangeable just because they have the same filename. Before choosing one, their I/O, metadata and compatibility with the project's split must be compared; an empty README does not make it possible to tell which one is better.
 
 <oai-mem-citation>
 <citation_entries>
@@ -377,9 +377,9 @@ MEMORY.md:476-476|note=[prior V100 compatibility context checked against current
 </rollout_ids>
 </oai-mem-citation>
 
-## Appendice: script Python completo
+## Appendix: complete Python script
 
-Salvare il contenuto del seguente blocco come `worldmodel_v100_tools.py`. Il codice è quello del prototipo descritto nella risposta, senza modifiche aggiuntive. Richiede revisione e verifica nell'ambiente Linux di destinazione prima di considerarlo funzionante.
+Save the content of the following block as `worldmodel_v100_tools.py`. The code is that of the prototype described in the answer, without additional changes. It needs review and verification in the target Linux environment before it can be considered working.
 
 ```python
 """Inspection and dense eager prototype for the commaai worldmodel package.

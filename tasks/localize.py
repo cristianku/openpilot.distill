@@ -82,7 +82,7 @@ def parse_args(arguments: list[str]) -> tuple[list[str], bool, bool]:
         elif NAME_RE.fullmatch(argument):
             names.append(argument)
         else:
-            raise TaskError('segmento non valido: ' + argument)
+            raise TaskError('invalid segment: ' + argument)
     return names, status_only, False
 
 
@@ -114,7 +114,7 @@ def read_ionex_status() -> dict[str, tuple[str, str]]:
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, errors='replace',
                             check=False)
     if result.returncode != 0:
-        raise TaskError('controllo delle mappe della ionosfera fallito (codice ' + str(result.returncode) + ')')
+        raise TaskError('ionosphere map check failed (code ' + str(result.returncode) + ')')
     return parse_ionex_lines(result.stdout)
 
 
@@ -152,16 +152,16 @@ def print_status() -> None:
         elif state == 'done':
             used, better = ionex_of(status, name)
             if better != '-':
-                say('refine  ' + name + '  (mappa ' + used + ', uscita ' + better + ')')
+                say('refine  ' + name + '  (map ' + used + ', out now ' + better + ')')
             else:
-                say('done  ' + name + '  (mappa ' + used + ')')
+                say('done  ' + name + '  (map ' + used + ')')
         else:
             say(state + '  ' + name)
     if DISCARD_DIR.is_dir():
         for folder in sorted(DISCARD_DIR.iterdir()):
             if folder.name.startswith('.') or not folder.is_dir():
                 continue
-            say('scartato  ' + folder.name + '  (' + _first_line(folder / FAILED_FILE) + ')')
+            say('discarded  ' + folder.name + '  (' + _first_line(folder / FAILED_FILE) + ')')
 
 
 def segments_to_do() -> list[str]:
@@ -175,7 +175,7 @@ def segments_to_do() -> list[str]:
             continue
         used, better = ionex_of(status, name)
         if better != '-':
-            say(name + ': rifaccio con la mappa ' + better + ' (prima ' + used + ')')
+            say(name + ': redoing with map ' + better + ' (was ' + used + ')')
             names.append(name)
     return names
 
@@ -237,7 +237,7 @@ def localize(names: list[str]) -> int:
         folder = DATA_DIR / name
         say('== ' + name)
         if not (folder / 'rlog.zst').is_file():
-            say('manca ' + str(folder / 'rlog.zst'))
+            say('missing ' + str(folder / 'rlog.zst'))
             failed.append(name)
         else:
             code = run_localizer(name, folder / LOG_FILE)
@@ -250,17 +250,17 @@ def localize(names: list[str]) -> int:
                 # (failed refine) is never moved: its old outputs are still good.
                 if code == UNUSABLE_SEGMENT_EXIT_CODE and not (folder / 'localizer.safetensors').is_file():
                     discard(name)
-                    say(name + ': dati inutilizzabili, spostato in data_scartati/')
+                    say(name + ': unusable data, moved to data_scartati/')
                     discarded.append(name)
                 else:
                     failed.append(name)
         say('PROGRESS ' + str(done) + '/' + str(len(names)))
 
-    say('OK:' + (''.join(' ' + name for name in ok) or ' nessuno'))
+    say('OK:' + (''.join(' ' + name for name in ok) or ' none'))
     if discarded:
-        say('Scartati (in data_scartati/):' + ''.join(' ' + name for name in discarded))
+        say('Discarded (in data_scartati/):' + ''.join(' ' + name for name in discarded))
     if failed:
-        say('Falliti:' + ''.join(' ' + name for name in failed))
+        say('Failed:' + ''.join(' ' + name for name in failed))
         return 1
     return 0
 
@@ -278,11 +278,11 @@ def main() -> int:
         if not names:
             names = segments_to_do()
             if not names:
-                say('Niente da fare: tutti i segmenti sono gia\' localizzati con la mappa migliore uscita.')
+                say('Nothing to do: every segment is already localized with the best map out.')
                 return 0
         return localize(names)
     except OSError as exc:
-        raise TaskError('errore sul disco: ' + str(exc)) from exc
+        raise TaskError('disk error: ' + str(exc)) from exc
 
 
 if __name__ == '__main__':

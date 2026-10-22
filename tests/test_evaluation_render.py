@@ -30,7 +30,7 @@ class RenderTest(unittest.TestCase):
         plan = self.straight_plan()
         scale = render.InsetZoom().update(plan)
         panel = render.draw_panel(
-            frame, np.zeros(3), np.array(MICI_NARROW_K), "studente", render.GREEN, plan, plan, True, 1.234, 12.0, 3.5,
+            frame, np.zeros(3), np.array(MICI_NARROW_K), "student", render.GREEN, plan, plan, True, 1.234, 12.0, 3.5,
             scale,
         )
         np.testing.assert_array_equal(frame, original)
@@ -77,8 +77,8 @@ class RenderTest(unittest.TestCase):
             self.assertEqual(footer.shape[0] % 2, 0)
 
     def test_miss_text(self):
-        self.assertEqual(render.miss_text(None), "avg miss su questo tratto: --")
-        self.assertEqual(render.miss_text(1.234), "avg miss su questo tratto: 1.23 m")
+        self.assertEqual(render.miss_text(None), "avg miss on this clip: --")
+        self.assertEqual(render.miss_text(1.234), "avg miss on this clip: 1.23 m")
 
 
 if __name__ == "__main__":

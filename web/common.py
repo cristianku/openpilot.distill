@@ -22,7 +22,7 @@ COMMA_HOST_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.@-]*$')
 
 
 class WebError(Exception):
-    """A refusal shown to the user: HTTP status, short machine reason, Italian message."""
+    """A refusal shown to the user: HTTP status, short machine reason, message for the user."""
 
     def __init__(self, status: int, reason: str, message: str):
         super().__init__(message)

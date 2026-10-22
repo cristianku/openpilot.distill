@@ -26,8 +26,8 @@ SSH_OPTIONS = ('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAl
 REMOTE_OPENPILOT = '/data/openpilot'
 # The original model, saved by the installation of a trained one.
 BACKUP = '/data/driving_supercombo.onnx.orig'
-NOT_REACHABLE = ('comma non raggiungibile via ssh: e\' acceso e in rete? (serve una chiave ssh registrata '
-                 'sul suo account GitHub)')
+NOT_REACHABLE = ('comma not reachable over ssh: is it on and online? (it needs an ssh key registered on its '
+                 'GitHub account)')
 
 
 def comma_host(explicit: str | None = None) -> str:
@@ -38,7 +38,7 @@ def comma_host(explicit: str | None = None) -> str:
     else:
         host = os.environ.get('COMMA_HOST') or DEFAULT_HOST
     if not HOST_RE.fullmatch(host):
-        raise TaskError('nome del comma non valido: ' + host)
+        raise TaskError('invalid comma name: ' + host)
     return host
 
 
@@ -54,12 +54,12 @@ class Comma:
             result = subprocess.run(command, input=input_text, text=True, capture_output=capture,
                                     stdin=None if input_text is not None else subprocess.DEVNULL, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise TaskError('il comma non risponde (timeout)') from exc
+            raise TaskError('the comma does not answer (timeout)') from exc
         except OSError as exc:
-            raise TaskError('ssh non disponibile su questo server: ' + str(exc)) from exc
+            raise TaskError('ssh not available on this server: ' + str(exc)) from exc
         if check and result.returncode != 0:
             detail = (result.stderr or '').strip().splitlines()[-1:] if capture else []
-            raise TaskError('comando sul comma fallito (codice ' + str(result.returncode) + ')'
+            raise TaskError('command on the comma failed (code ' + str(result.returncode) + ')'
                             + (': ' + detail[0] if detail else ''))
         return result
 
@@ -108,9 +108,9 @@ class Comma:
         try:
             code = subprocess.run([*command, '--', *paths], stdin=subprocess.DEVNULL).returncode
         except OSError as exc:
-            raise TaskError('rsync non disponibile su questo server: ' + str(exc)) from exc
+            raise TaskError('rsync not available on this server: ' + str(exc)) from exc
         if code != 0:
-            raise TaskError('copia con il comma fallita (rsync, codice ' + str(code) + ')')
+            raise TaskError('copy with the comma failed (rsync, code ' + str(code) + ')')
 
 
 # Where this openpilot keeps driving_supercombo.onnx (asked to git: the layout changes between
@@ -141,7 +141,7 @@ def model_info(comma: Comma) -> dict:
     for key in ('reference', 'original', 'current', 'backup'):
         info.setdefault(key, '')
     if not info['reference']:
-        raise TaskError('sul comma non trovo driving_supercombo.onnx nel checkout di openpilot')
+        raise TaskError('driving_supercombo.onnx not found in the openpilot checkout on the comma')
     return info
 
 

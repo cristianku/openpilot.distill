@@ -69,10 +69,10 @@ class ModelSpec:
         if self.kind == "teacher":
             return "teacher (big_driving_supercombo)"
         if self.kind == "logged":
-            return "modello sull'auto (dal log)"
+            return "model in the car (from the log)"
         if self.kind == "run":
-            return f"studente run {self.value}"
-        return f"studente HF {self.value}"
+            return f"student run {self.value}"
+        return f"student HF {self.value}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,21 +84,21 @@ class ResolvedModel:
 
 
 def parse_model_spec(text: str) -> ModelSpec:
-    """Validate a spec string; ValueError with an Italian message when it is not one."""
+    """Validate a spec string; ValueError with an English message when it is not one."""
     if not isinstance(text, str) or not SPEC_PATTERN.fullmatch(text):
-        raise ValueError(f"modello '{text}' non valido: usa stock, teacher, logged, run:<cartella> o hf:<nome>")
+        raise ValueError(f"invalid model '{text}': use stock, teacher, logged, run:<folder> or hf:<name>")
     if ":" not in text:
         return ModelSpec(text=text, kind=text, value="")
     kind, value = text.split(":", 1)
     # "." and ".." pass the character class but would leave outputs/supervised.
     if value.startswith("."):
-        raise ValueError(f"modello '{text}' non valido: il nome non puo' iniziare con un punto")
+        raise ValueError(f"invalid model '{text}': the name cannot start with a dot")
     return ModelSpec(text=text, kind=kind, value=value)
 
 
 def validate_segment_name(name: str) -> str:
     if not isinstance(name, str) or not SEGMENT_PATTERN.fullmatch(name):
-        raise ValueError(f"segmento '{name}' non valido: 20 caratteri esadecimali (es. 00000126f84ad127f010)")
+        raise ValueError(f"invalid segment '{name}': 20 hexadecimal characters (e.g. 00000126f84ad127f010)")
     return name
 
 
@@ -137,11 +137,11 @@ def _hf_file_exists(filename: str) -> bool:
 def _resolve_stock(root: Path, spec: ModelSpec) -> ResolvedModel:
     path = root / STOCK_PATH
     if not path.exists():
-        print(f"{STOCK_PATH} manca: scarico {STOCK_HF_FILE} da Hugging Face ({hf_repo()})", flush=True)
+        print(f"{STOCK_PATH} missing: downloading {STOCK_HF_FILE} from Hugging Face ({hf_repo()})", flush=True)
         path = _hf_download(STOCK_HF_FILE, root / STOCK_CACHE_DIR)
     sha = file_sha256(path)
     if sha != STOCK_SHA256:
-        raise ValueError(f"{path} non e' il modello CD210 originale (sha256 {sha[:16]}, atteso {STOCK_SHA256[:16]})")
+        raise ValueError(f"{path} is not the original CD210 model (sha256 {sha[:16]}, expected {STOCK_SHA256[:16]})")
     return ResolvedModel(spec=spec, path=path, format=FORMAT_ONNX_STREAMING, sha256=sha)
 
 
@@ -155,7 +155,7 @@ def _resolve_run(root: Path, spec: ModelSpec) -> ResolvedModel:
     elif in_progress.is_file():
         path = in_progress
     else:
-        raise ValueError(f"run '{spec.value}': nessun supercombo.pt ne' supercombo.training.pt in {run_dir}")
+        raise ValueError(f"run '{spec.value}': neither supercombo.pt nor supercombo.training.pt in {run_dir}")
     return ResolvedModel(spec=spec, path=path, format=FORMAT_TORCH, sha256=file_sha256(path))
 
 
@@ -170,7 +170,7 @@ def _resolve_hf(root: Path, spec: ModelSpec) -> ResolvedModel:
         path = _hf_download(onnx_file, local_dir)
         file_format = FORMAT_ONNX_STREAMING
     else:
-        raise ValueError(f"hf:{spec.value}: ne' {weights_file} ne' {onnx_file} su {hf_repo()}")
+        raise ValueError(f"hf:{spec.value}: neither {weights_file} nor {onnx_file} on {hf_repo()}")
     return ResolvedModel(spec=spec, path=path, format=file_format, sha256=file_sha256(path))
 
 
@@ -181,7 +181,7 @@ def resolve_model(spec: ModelSpec, root: Path) -> ResolvedModel:
     if spec.kind == "teacher":
         path = root / TEACHER_PATH
         if not path.is_file():
-            raise ValueError(f"{TEACHER_PATH} manca: scaricalo come in supervised/README.md")
+            raise ValueError(f"{TEACHER_PATH} missing: download it as in supervised/README.md")
         return ResolvedModel(spec=spec, path=path, format=FORMAT_ONNX_TEACHER, sha256=file_sha256(path))
     if spec.kind == "logged":
         return ResolvedModel(spec=spec, path=None, format=FORMAT_LOGGED, sha256="logged")
@@ -189,4 +189,4 @@ def resolve_model(spec: ModelSpec, root: Path) -> ResolvedModel:
         return _resolve_run(root, spec)
     if spec.kind == "hf":
         return _resolve_hf(root, spec)
-    raise ValueError(f"tipo di modello sconosciuto: {spec.kind}")
+    raise ValueError(f"unknown model kind: {spec.kind}")

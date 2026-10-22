@@ -71,11 +71,11 @@ def parse_probe(code: int, output: str) -> dict:
               'error': ''}
     if code != 0:
         if code == 124:
-            result['error'] = 'ssh non risponde (timeout)'
+            result['error'] = 'ssh does not answer (timeout)'
         elif code == 127:
-            result['error'] = 'ssh non disponibile su questo server'
+            result['error'] = 'ssh is not available on this server'
         else:
-            result['error'] = 'comma non raggiungibile via ssh (spento o fuori rete)'
+            result['error'] = 'comma not reachable over ssh (off or out of the network)'
         return result
     result['reachable'] = True
     for line in output.splitlines():
@@ -100,7 +100,7 @@ class CommaMonitor:
         self._lock = threading.Lock()
         self._probe_lock = threading.Lock()
         self._state = {'host': host, 'checked': None, 'reachable': None, 'onroad': None, 'bundle': None,
-                       'bundle_default': None, 'backup': None, 'error': 'non ancora controllato'}
+                       'bundle_default': None, 'backup': None, 'error': 'not checked yet'}
         self._last_interest = 0.0
         self._thread = None
 

@@ -29,7 +29,7 @@ def uses_gpu(arguments: list[str]) -> bool:
 
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in MODULES:
-        raise TaskError('uso: python -m tasks.evaluation ' + '|'.join(MODULES) + ' <opzioni>')
+        raise TaskError('usage: python -m tasks.evaluation ' + '|'.join(MODULES) + ' <options>')
     module = MODULES[sys.argv[1]]
     arguments = sys.argv[2:]
     load_env()

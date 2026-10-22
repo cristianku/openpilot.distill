@@ -197,10 +197,10 @@ def load_segment(root: Path, name: str) -> Segment:
     directory = root / "data" / name
     for file_name in ("frame_info.safetensors", "localizer.safetensors", "fcamera.hevc", "ecamera.hevc"):
         if not (directory / file_name).exists():
-            raise ValueError(f"segmento {name}: manca {file_name} in {directory}")
+            raise ValueError(f"segment {name}: {file_name} missing in {directory}")
     frame_info = load_file(directory / "frame_info.safetensors")
     if int(frame_info["device_type"].item()) != MICI_DEVICE_TYPE:
-        raise ValueError(f"segmento {name}: non e' un comma four (mici)")
+        raise ValueError(f"segment {name}: not a comma four (mici)")
     localizer = load_file(directory / "localizer.safetensors")
 
     frame_t = np.asarray(localizer["frame_t"], dtype=np.float64)
@@ -296,7 +296,7 @@ def _nvdec_frames(path: Path, index: np.ndarray, end_frame: int, gpu_id: int = 0
         produced += 1
         if produced >= end_frame:
             return
-    raise RuntimeError(f"{path}: il decoder ha dato {produced} frame, ne servivano {end_frame}")
+    raise RuntimeError(f"{path}: the decoder gave {produced} frames, {end_frame} were needed")
 
 
 def _nvdec_decode(module, decoder, chunk: bytes) -> list[np.ndarray]:
@@ -326,7 +326,7 @@ def _ffmpeg_frames(path: Path, size: tuple[int, int], end_frame: int) -> Iterato
         for _ in range(end_frame):
             data = process.stdout.read(frame_bytes)
             if len(data) != frame_bytes:
-                raise RuntimeError(f"{path}: ffmpeg ha finito prima dei {end_frame} frame richiesti")
+                raise RuntimeError(f"{path}: ffmpeg ended before the {end_frame} frames asked for")
             yield np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3)
     finally:
         process.stdout.close()

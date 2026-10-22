@@ -42,31 +42,31 @@ class Activity:
 
 # The same work started from a terminal, or by the other project on this server.
 ACTIVITIES = (
-    Activity('gpu', 'training distill', 'supervised.train', True),
+    Activity('gpu', 'distill training', 'supervised.train', True),
     # The preparation of a training (teacher download, checks) before supervised.train starts.
-    Activity('gpu', 'training distill', 'tasks.train', True),
-    Activity('gpu', 'valutazione hold-out', 'evaluation.holdout', True),
-    Activity('gpu', 'video di confronto', 'evaluation.compare', True),
-    Activity('data', 'scaricamento dal comma', 'helpers/fetch_comma_segments.sh', False),
-    Activity('data', 'scaricamento dal comma', 'tasks.fetch', False),
-    Activity('data', 'localizzazione', 'helpers/localize_segments.sh', False),
-    Activity('data', 'localizzazione', 'tasks.localize', False),
-    Activity('data', 'localizzazione', 'localizer.run', False),
-    Activity('cpu', 'export ONNX', 'helpers/export_onnx.sh', False),
-    Activity('cpu', 'export ONNX', 'tasks.export', False),
-    Activity('cpu', 'pubblicazione', 'tasks.publish', False),
-    Activity('comma', 'installazione sul comma', 'tasks.install', False),
-    Activity('cpu', 'pubblicazione', 'helpers/publish_model.sh', False),
-    Activity('comma', 'installazione sul comma', 'helpers/install_model_on_comma.sh', False),
-    Activity('system', 'aggiornamento del codice', 'helpers/update.sh', False),
-    Activity('system', 'aggiornamento del codice', 'tasks.update', False),
+    Activity('gpu', 'distill training', 'tasks.train', True),
+    Activity('gpu', 'hold-out evaluation', 'evaluation.holdout', True),
+    Activity('gpu', 'comparison video', 'evaluation.compare', True),
+    Activity('data', 'download from the comma', 'helpers/fetch_comma_segments.sh', False),
+    Activity('data', 'download from the comma', 'tasks.fetch', False),
+    Activity('data', 'localization', 'helpers/localize_segments.sh', False),
+    Activity('data', 'localization', 'tasks.localize', False),
+    Activity('data', 'localization', 'localizer.run', False),
+    Activity('cpu', 'ONNX export', 'helpers/export_onnx.sh', False),
+    Activity('cpu', 'ONNX export', 'tasks.export', False),
+    Activity('cpu', 'publish', 'tasks.publish', False),
+    Activity('comma', 'install on the comma', 'tasks.install', False),
+    Activity('cpu', 'publish', 'helpers/publish_model.sh', False),
+    Activity('comma', 'install on the comma', 'helpers/install_model_on_comma.sh', False),
+    Activity('system', 'code update', 'helpers/update.sh', False),
+    Activity('system', 'code update', 'tasks.update', False),
     # sunnypilot.speedlimits (same server, same GPU). It does not take the GPU lock.
     Activity('other', 'speedlimits: training', 'run_v100_baseline.sh', True),
     Activity('other', 'speedlimits: training', 'helpers/3_train.sh', True),
     Activity('other', 'speedlimits: training', 'nnslr train', True),
-    Activity('other', 'speedlimits: preparazione', 'helpers/1_prepare.sh', False),
-    Activity('other', 'speedlimits: pre-annotazione', 'nnslr preannotate', False),
-    Activity('other', 'speedlimits: estrazione frame', 'nnslr extract-frames', False),
+    Activity('other', 'speedlimits: preparation', 'helpers/1_prepare.sh', False),
+    Activity('other', 'speedlimits: pre-annotation', 'nnslr preannotate', False),
+    Activity('other', 'speedlimits: frame extraction', 'nnslr extract-frames', False),
 )
 
 
@@ -132,7 +132,7 @@ def activities(repo: Path) -> list[dict]:
                 cwd = process_cwd(pid)
                 if cwd is not None and cwd != repo_text and not cwd.startswith(repo_text + '/'):
                     group = 'other'
-                    label = label + ' (altra cartella)'
+                    label = label + ' (other folder)'
             # One entry per label and group: a job has many processes (bash, uv, python, workers).
             key = (group, label)
             if key in seen:
@@ -279,7 +279,7 @@ def gpu_lock_held(lock_file: str = GPU_LOCK_FILE) -> bool | None:
 
 
 def gpu_busy_reason(repo: Path, lock_file: str = GPU_LOCK_FILE) -> str:
-    """'' when a GPU job can start, else why not (Italian). Checks the lock, the processes on the GPU
+    """'' when a GPU job can start, else why not. Checks the lock, the processes on the GPU
     (jobs that do not use the lock, e.g. a speedlimits training) and the known GPU jobs in /proc."""
     # Said in words for the page: which job, never command lines or file paths.
     reasons = []
@@ -288,15 +288,15 @@ def gpu_busy_reason(repo: Path, lock_file: str = GPU_LOCK_FILE) -> str:
             reasons.append(activity['label'])
     held = gpu_lock_held(lock_file)
     if held is True and not reasons:
-        reasons.append('un job che ha preso la GPU')
+        reasons.append('a job that holds the GPU lock')
     elif held is None:
-        reasons.append('non riesco a controllare se la GPU e\' libera')
+        reasons.append('cannot check whether the GPU is free')
     gpu = gpu_info()
     if gpu is not None and gpu['processes'] and not reasons:
-        reasons.append(str(len(gpu['processes'])) + ' processi sulla GPU')
+        reasons.append(str(len(gpu['processes'])) + ' processes on the GPU')
     if not reasons:
         return ''
-    return 'La GPU e\' occupata da un altro job (' + '; '.join(reasons) + '). Riprova quando ha finito.'
+    return 'The GPU is busy with another job (' + '; '.join(reasons) + '). Try again when it has finished.'
 
 
 # -- data ----------------------------------------------------------------------------------------------
@@ -394,7 +394,7 @@ def segments(repo: Path) -> dict:
             continue
         reason = failure_reason(entry / 'localizer.failed')
         if not reason:
-            reason = 'motivo non registrato'
+            reason = 'reason not recorded'
         discarded.append({'name': entry.name, 'reason': reason})
         reasons[reason] = reasons.get(reason, 0) + 1
     counts['discarded'] = len(discarded)

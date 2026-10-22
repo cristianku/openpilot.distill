@@ -40,21 +40,21 @@ while [ $# -gt 0 ]; do
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     usage
   else
-    die "opzione non valida: $1 (vedi --help)"
+    die "invalid option: $1 (see --help)"
   fi
 done
 
-command -v uv > /dev/null 2>&1 || die "uv non trovato nel PATH (sul server e' /root/.local/bin/uv)"
+command -v uv > /dev/null 2>&1 || die "uv not found in PATH (on the server it is /root/.local/bin/uv)"
 
 # 0. Jobs that use this clone.
 if pgrep -f "supervised[.]train" > /dev/null; then
-  die "c'e' un training in corso (supervised.train): aggiorna quando ha finito"
+  die "a training is running (supervised.train): update when it has finished"
 fi
 busy="$(pgrep -a -f -- "$BUSY_PATTERN" || true)"
 if [ -n "$busy" ]; then
-  echo "Job in corso:" >&2
+  echo "Running jobs:" >&2
   echo "$busy" >&2
-  die "c'e' un job in corso che usa .venv: aggiorna quando ha finito"
+  die "a job that uses .venv is running: update when it has finished"
 fi
 # The same lock as every GPU job (helpers/common.sh), held until this script exits.
 if command -v flock > /dev/null 2>&1 && [ -d "$(dirname "$DISTILL_GPU_LOCK_FILE")" ]; then
@@ -62,29 +62,29 @@ if command -v flock > /dev/null 2>&1 && [ -d "$(dirname "$DISTILL_GPU_LOCK_FILE"
   if ! flock -n 9; then
     holder="$(distill_gpu_lock_holder)"
     if [ -n "$holder" ]; then
-      die "La GPU e' occupata da un altro job ($holder): aggiorna quando ha finito"
+      die "The GPU is busy with another job ($holder): update when it has finished"
     fi
-    die "La GPU e' occupata da un altro job (lock $DISTILL_GPU_LOCK_FILE preso): aggiorna quando ha finito"
+    die "The GPU is busy with another job (lock $DISTILL_GPU_LOCK_FILE taken): update when it has finished"
   fi
 fi
 
 cd "$ROOT"
-git rev-parse --is-inside-work-tree > /dev/null 2>&1 || die "$ROOT non e' un clone git: niente da aggiornare"
+git rev-parse --is-inside-work-tree > /dev/null 2>&1 || die "$ROOT is not a git clone: nothing to update"
 
 # 1. git pull.
 modified="$(git status --porcelain --untracked-files=no)"
 if [ -n "$modified" ]; then
-  echo "File del repo modificati in locale:" >&2
+  echo "Repo files modified locally:" >&2
   echo "$modified" >&2
-  die "ci sono modifiche locali ai file del repo (sopra): sistemale prima, non le sovrascrivo"
+  die "the repo files have local changes (above): sort them out first, they are not overwritten"
 fi
 before="$(git rev-parse HEAD)"
 echo "== 1. git pull ($(git branch --show-current))"
 # GIT_TERMINAL_PROMPT=0: a remote that wants a password fails instead of waiting for it.
-GIT_TERMINAL_PROMPT=0 git pull --ff-only || die "git pull non riuscito (branch divergente o rete?): niente e' cambiato"
+GIT_TERMINAL_PROMPT=0 git pull --ff-only || die "git pull failed (diverged branch or network?): nothing changed"
 after="$(git rev-parse HEAD)"
 if [ "$before" = "$after" ]; then
-  echo "Gia' aggiornato: $(git log --oneline -1)"
+  echo "Already up to date: $(git log --oneline -1)"
 else
   git log --oneline "$before..$after"
 fi
@@ -93,11 +93,11 @@ fi
 if [ -n "${DISTILL_UV_EXTRA:-}" ]; then
   echo "== 2. uv sync --locked --extra $DISTILL_UV_EXTRA"
   uv sync --locked --extra "$DISTILL_UV_EXTRA" \
-    || die "uv sync non riuscito: il codice e' aggiornato ma .venv no (uv.lock non allineato a pyproject.toml?)"
+    || die "uv sync failed: the code is updated but .venv is not (uv.lock out of sync with pyproject.toml?)"
 else
   echo "== 2. uv sync --locked"
   uv sync --locked \
-    || die "uv sync non riuscito: il codice e' aggiornato ma .venv no (uv.lock non allineato a pyproject.toml?)"
+    || die "uv sync failed: the code is updated but .venv is not (uv.lock out of sync with pyproject.toml?)"
 fi
 
 # 3. The web site.
@@ -108,17 +108,17 @@ if command -v systemctl > /dev/null 2>&1; then
   fi
 fi
 if [ "$installed" -eq 0 ]; then
-  echo "== 3. servizio $SERVICE non installato: niente da riavviare"
-  echo "Fatto."
+  echo "== 3. service $SERVICE not installed: nothing to restart"
+  echo "Done."
   exit 0
 fi
 
 if [ "$before" != "$after" ] && git diff --name-only "$before" "$after" | grep -q '^deploy/'; then
-  echo "ATTENZIONE: deploy/ e' cambiato: per il nuovo file del servizio lancia deploy/install_web_service.sh"
+  echo "WARNING: deploy/ changed: run deploy/install_web_service.sh for the new service file"
 fi
-echo "== 3. riavvio il servizio $SERVICE"
+echo "== 3. restarting the service $SERVICE"
 systemctl restart "$SERVICE"
 sleep 2
-systemctl is-active --quiet "$SERVICE" || die "il servizio $SERVICE non riparte: journalctl -u $SERVICE -n 50"
-echo "Servizio riavviato con il codice nuovo."
-echo "Fatto."
+systemctl is-active --quiet "$SERVICE" || die "the service $SERVICE does not start again: journalctl -u $SERVICE -n 50"
+echo "Service restarted with the new code."
+echo "Done."

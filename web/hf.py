@@ -32,7 +32,7 @@ def fetch_tree(repo: str, path: str) -> list | None:
         raise
     data = json.loads(raw.decode('utf-8'))
     if not isinstance(data, list):
-        raise ValueError('risposta inattesa da Hugging Face')
+        raise ValueError('unexpected answer from Hugging Face')
     return data
 
 
@@ -68,7 +68,7 @@ class HfCatalog:
                 training = self._fetch(self.repo, 'training')
                 releases = self._fetch(self.repo, 'training/releases')
             except (OSError, ValueError, urllib.error.URLError) as exc:
-                result['error'] = 'Hugging Face non risponde: ' + type(exc).__name__
+                result['error'] = 'Hugging Face does not answer: ' + type(exc).__name__
             else:
                 result['ok'] = True
                 result['models'] = folder_names(models, 'models/')

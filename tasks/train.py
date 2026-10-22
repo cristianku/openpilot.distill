@@ -15,7 +15,7 @@ Start of the model (supervised/train.py --mode):
 per GPU (DistributedDataParallel) and every process takes --batch-size samples per step.
 
 Order: GPU lock (held until the end), the checks that need no run folder (stable weights, run to
-resume), the run folder (a new one: outputs/supervised/<AAAA-MM-GG_hhmmss>/), then everything is
+resume), the run folder (a new one: outputs/supervised/<YYYY-MM-DD_hhmmss>/), then everything is
 printed AND appended to <run>/train.log: teacher download and check, segment checks, training.
 The run folder is printed early on a line of its own: RUN_DIR=<absolute path> (the site reads it).
 """
@@ -43,13 +43,13 @@ TEST_STEPS = 10
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--steps', type=int, default=None, help='step totali (5000, o quelli del run ripreso)')
-    parser.add_argument('--test', action='store_true', help='solo ' + str(TEST_STEPS) + ' step, per vedere che parte')
+    parser.add_argument('--steps', type=int, default=None, help='total steps (5000, or those of the resumed run)')
+    parser.add_argument('--test', action='store_true', help='only ' + str(TEST_STEPS) + ' steps, to see that it starts')
     parser.add_argument('--batch-size', type=int, default=8)
     # Data-loader workers: with 1 the GPU waits for the videos to be decoded.
     parser.add_argument('--workers', type=int, default=6)
     parser.add_argument('--mode', choices=('fresh', 'continue', 'resume'), default='fresh')
-    parser.add_argument('--run', default=None, help='con --mode resume: il run da riprendere')
+    parser.add_argument('--run', default=None, help='with --mode resume: the run to resume')
     parser.add_argument('--teacher', choices=tuple(TEACHERS), default=None, help='default md-v3')
     parser.add_argument('--wandb', choices=('online', 'offline', 'disabled'), default=None)
     parser.add_argument('--gpus', default='all')
@@ -59,16 +59,16 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     for name in ('steps', 'batch_size', 'workers'):
         value = getattr(args, name)
         if value is not None and (value < 0 or (value == 0 and name != 'workers')):
-            parser.error('--' + name.replace('_', '-') + ' non valido')
+            parser.error('invalid --' + name.replace('_', '-'))
     if args.mode == 'resume':
         if not args.run:
-            parser.error('--mode resume vuole --run <run>')
+            parser.error('--mode resume needs --run <run>')
         if args.teacher is not None:
-            parser.error('con --mode resume il teacher e\' quello del run interrotto: togli --teacher')
+            parser.error('with --mode resume the teacher is the one of the interrupted run: remove --teacher')
     elif args.run:
-        parser.error('--run serve solo con --mode resume')
+        parser.error('--run only goes with --mode resume')
     if not GPUS_RE.fullmatch(args.gpus):
-        parser.error('--gpus vuole all o gli indici delle GPU (es. 0 o 0,1)')
+        parser.error('--gpus needs all or the GPU indices (e.g. 0 or 0,1)')
     return args
 
 
@@ -81,7 +81,7 @@ def wandb_mode(requested: str | None) -> str:
         except OSError:
             pass
     if requested == 'online' and not logged_in:
-        raise TaskError('wandb online ma wandb non ha le credenziali su questo server: scegli offline')
+        raise TaskError('wandb online but wandb has no credentials on this server: choose offline')
     if requested:
         return requested
     if os.environ.get('WANDB_MODE'):
@@ -96,24 +96,24 @@ def check_stable_weights(hf_repo: str) -> None:
     try:
         response = requests.get(url, timeout=30)
     except requests.RequestException as exc:
-        raise TaskError('non riesco a leggere ' + url + ': ' + str(exc)) from exc
+        raise TaskError('cannot read ' + url + ': ' + str(exc)) from exc
     if response.status_code == 404:
-        raise TaskError('su ' + hf_repo + ' non ci sono ancora pesi «stable»: pubblica prima un modello come stable')
+        raise TaskError(hf_repo + ' has no "stable" weights yet: publish a model as stable first')
     if response.status_code != 200:
-        raise TaskError('non riesco a leggere ' + url + ' (HTTP ' + str(response.status_code) + ')')
+        raise TaskError('cannot read ' + url + ' (HTTP ' + str(response.status_code) + ')')
 
 
 def resume_info(run: str) -> tuple[Path, int, str]:
     """Folder, total steps and saved --teacher of an interrupted run."""
     if not RUN_NAME_RE.fullmatch(run) or not (RUNS_DIR / run).is_dir():
-        raise TaskError('il run ' + run + ' non esiste in outputs/supervised/')
+        raise TaskError('run ' + run + ' does not exist in outputs/supervised/')
     folder = RUNS_DIR / run
     checkpoint = folder / 'supercombo.training.pt'
     if not checkpoint.is_file():
-        raise TaskError('il run ' + run + ' non ha un checkpoint (supercombo.training.pt): non si puo\' riprendere')
+        raise TaskError('run ' + run + ' has no checkpoint (supercombo.training.pt): it cannot be resumed')
     if (folder / 'supercombo.pt').is_file():
-        raise TaskError('il run ' + run + ' e\' gia\' finito: per allenarlo ancora pubblicalo come stable e '
-                        'parti «dai pesi stable»')
+        raise TaskError('run ' + run + ' has already finished: to train it further publish it as stable and '
+                        'start "from the stable weights"')
     import torch
 
     saved = torch.load(checkpoint, map_location='cpu', weights_only=True)
@@ -140,13 +140,13 @@ def check_segments() -> int:
         if not (folder / 'localizer.safetensors').is_file() or not (folder / 'frame_info.safetensors').is_file():
             missing.append(folder.name)
     if broken:
-        raise TaskError('video mancanti nella cartella comune dei segmenti (disco non montato o segmento '
-                        'rimosso), il training si fermerebbe: ' + ' '.join(broken))
+        raise TaskError('videos missing in the shared folder of the segments (disk not mounted or segment '
+                        'removed), the training would stop: ' + ' '.join(broken))
     if total == 0:
-        raise TaskError('nessun segmento in data/: scaricali prima dal comma (Dati)')
+        raise TaskError('no segment in data/: download them from the comma first (Data)')
     if missing:
-        raise TaskError('segmenti non localizzati, fermerebbero il training: ' + ' '.join(missing)
-                        + '. Localizzali prima (Dati).')
+        raise TaskError('segments not localized, they would stop the training: ' + ' '.join(missing)
+                        + '. Localize them first (Data).')
     return total
 
 
@@ -184,7 +184,7 @@ def train(args: argparse.Namespace) -> int:
             steps = saved_steps
         teacher = teacher_of_file(teacher_arg)
         if teacher is None:
-            raise TaskError('il run usa il teacher ' + teacher_arg + ', che non so scaricare')
+            raise TaskError('the run uses the teacher ' + teacher_arg + ', which cannot be downloaded from here')
     else:
         teacher = TEACHERS[args.teacher or 'md-v3']
         teacher_arg = str(REPO / teacher.path)
@@ -193,7 +193,7 @@ def train(args: argparse.Namespace) -> int:
         try:
             run_dir.mkdir()
         except FileExistsError:
-            raise TaskError(run_dir.name + ' esiste gia\' (due partenze nello stesso secondo?): riavvia') from None
+            raise TaskError(run_dir.name + ' already exists (two starts in the same second?): start it again') from None
     mode = wandb_mode(args.wandb)
     say('RUN_DIR=' + str(run_dir))
 
@@ -202,17 +202,17 @@ def train(args: argparse.Namespace) -> int:
         # Prints of ensure_teacher and of the checks go to train.log too.
         sys.stdout = TeeText(log)
         ensure_teacher(teacher.name)
-        say('Segmenti: ' + str(check_segments()) + ', tutti localizzati.')
+        say('Segments: ' + str(check_segments()) + ', all localized.')
     except TaskError as exc:
-        log.say('ERRORE: ' + str(exc))
+        log.say('ERROR: ' + str(exc))
         raise SystemExit(1) from None
     finally:
         sys.stdout = sys.__stdout__
 
-    start = {'fresh': 'da zero', 'continue': 'dai pesi stable di ' + hf_repo,
-             'resume': 'ripresa dall\'ultimo checkpoint'}[args.mode]
+    start = {'fresh': 'from scratch', 'continue': 'from the stable weights of ' + hf_repo,
+             'resume': 'resumed from the last checkpoint'}[args.mode]
     gpu_text = 'GPU ' + ','.join(str(index) for index in gpus)
-    log.say('Training (' + start + '): ' + str(steps) + ' step, batch ' + str(args.batch_size) + ' per GPU, workers '
+    log.say('Training (' + start + '): ' + str(steps) + ' steps, batch ' + str(args.batch_size) + ' per GPU, workers '
             + str(args.workers) + ', teacher ' + teacher.name + ', ' + gpu_text + ', wandb ' + mode)
 
     command = [sys.executable, '-m', 'torch.distributed.run', '--standalone', '--nproc-per-node', str(len(gpus)),
@@ -239,9 +239,9 @@ def train(args: argparse.Namespace) -> int:
         log.write(chunk)
     code = child.wait()
     if code == 0:
-        log.say('Fatto. Modello: ' + str(run_dir / 'supercombo.pt'))
+        log.say('Done. Model: ' + str(run_dir / 'supercombo.pt'))
     else:
-        log.say('Training finito con codice ' + str(code) + '.')
+        log.say('Training ended with code ' + str(code) + '.')
     lock.release()
     return 0 if code == 0 else 1
 

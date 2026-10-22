@@ -2,21 +2,21 @@
 (function () {
   'use strict';
 
-  const TABS = ['stato', 'dati', 'training', 'valutazione', 'confronto', 'pubblica', 'comma', 'job'];
+  const TABS = ['status', 'data', 'training', 'evaluation', 'compare', 'publish', 'comma', 'jobs'];
   const JOB_PILL = {running: 'run', ok: 'ok', failed: 'bad', stopped: 'todo', unknown: 'muted'};
-  const RUN_STATE = {running: ['in corso', 'run'], finished: ['finito', 'ok'], interrupted: ['interrotto', 'todo']};
-  const SEGMENT_STATE = {localized: ['localizzato', 'ok'], failed: ['fallito', 'bad'], todo: ['da localizzare', 'todo']};
-  const CHART_TITLES = {'loss': 'loss', 'gt': 'gt (la tua guida)', 'distill': 'distill (il teacher)',
-    'gt/plan': 'gt/plan (traiettoria)', 'grad_norm': 'grad_norm', 'step_time': 'tempo per step (s)'};
+  const RUN_STATE = {running: ['running', 'run'], finished: ['finished', 'ok'], interrupted: ['interrupted', 'todo']};
+  const SEGMENT_STATE = {localized: ['localized', 'ok'], failed: ['failed', 'bad'], todo: ['to localize', 'todo']};
+  const CHART_TITLES = {'loss': 'loss', 'gt': 'gt (your driving)', 'distill': 'distill (the teacher)',
+    'gt/plan': 'gt/plan (path)', 'grad_norm': 'grad_norm', 'step_time': 'time per step (s)'};
   // How often (ms) the data of each tab is read again while the tab is open.
-  const TAB_PERIOD = {dati: 15000, training: 10000, valutazione: 30000, confronto: 30000, pubblica: 15000,
-    comma: 0, job: 0, stato: 0};
+  const TAB_PERIOD = {data: 15000, training: 10000, evaluation: 30000, compare: 30000, publish: 15000,
+    comma: 0, jobs: 0, status: 0};
   const STATUS_PERIOD = 4000;
   const SMOOTHING = 0.85;
 
   let status = null;
   let firstCode = null;
-  let currentTab = 'stato';
+  let currentTab = 'status';
   const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null};
   const loadedAt = {};
   let selectedRun = null;
@@ -65,7 +65,7 @@
     if (typeof unix === 'string') date = new Date(unix);
     else date = new Date(unix * 1000);
     if (isNaN(date.getTime())) return String(unix);
-    return date.toLocaleString('it-IT', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+    return date.toLocaleString('en-GB', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
   }
   function fmtDuration(seconds) {
     if (seconds === null || seconds === undefined || !isFinite(seconds)) return '–';
@@ -94,7 +94,7 @@
   async function api(path, options) {
     const response = await fetch(path, Object.assign({credentials: 'same-origin', cache: 'no-store'}, options || {}));
     let body = null;
-    try { body = await response.json(); } catch (error) { body = {message: 'Risposta non valida (HTTP ' + response.status + ').'}; }
+    try { body = await response.json(); } catch (error) { body = {message: 'Invalid response (HTTP ' + response.status + ').'}; }
     if (!response.ok) throw new Error(body.message || ('HTTP ' + response.status));
     return body;
   }
@@ -159,7 +159,7 @@
       if (name.slice(0, slash) === 'training') openRun = decodeURIComponent(name.slice(slash + 1)) || null;
       name = name.slice(0, slash);
     }
-    if (TABS.indexOf(name) < 0) name = 'stato';
+    if (TABS.indexOf(name) < 0) name = 'status';
     currentTab = name;
     for (const tab of TABS) {
       const button = byId('tab-' + tab);
@@ -188,11 +188,11 @@
 
   // Which data each tab needs.
   function needs(tab) {
-    if (tab === 'dati') return ['segments'];
+    if (tab === 'data') return ['segments'];
     if (tab === 'training') return ['runs', 'hf'];
-    if (tab === 'valutazione') return ['runs', 'hf', 'evalResults'];
-    if (tab === 'confronto') return ['segments', 'runs', 'hf', 'videos'];
-    if (tab === 'pubblica') return ['runs', 'hf'];
+    if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
+    if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos'];
+    if (tab === 'publish') return ['runs', 'hf'];
     if (tab === 'comma') return ['runs'];
     return [];
   }
@@ -230,11 +230,11 @@
   }
 
   function renderTab() {
-    if (currentTab === 'dati') renderData();
+    if (currentTab === 'data') renderData();
     else if (currentTab === 'training') renderTraining();
-    else if (currentTab === 'valutazione') renderEval();
-    else if (currentTab === 'confronto') renderCompare();
-    else if (currentTab === 'pubblica') renderPublish();
+    else if (currentTab === 'evaluation') renderEval();
+    else if (currentTab === 'compare') renderCompare();
+    else if (currentTab === 'publish') renderPublish();
     else if (currentTab === 'comma') renderCommaTab();
     updateButtons();
   }
@@ -244,15 +244,15 @@
     try {
       status = await api('/api/status');
       byId('live-dot').className = 'dot';
-      byId('live-text').textContent = 'aggiornato ' + new Date().toLocaleTimeString('it-IT');
+      byId('live-text').textContent = 'updated ' + new Date().toLocaleTimeString('en-GB');
     } catch (error) {
       byId('live-dot').className = 'dot off';
-      byId('live-text').textContent = 'non raggiungibile: ' + error.message;
+      byId('live-text').textContent = 'unreachable: ' + error.message;
       return;
     }
     if (firstCode === null) firstCode = status.code;
     byId('code-banner').hidden = !(status.code && firstCode && status.code !== firstCode);
-    byId('code-version').textContent = status.code || 'sconosciuta';
+    byId('code-version').textContent = status.code || 'unknown';
     byId('selftest-box').hidden = !status.test_actions;
     renderMachine();
     renderRunning();
@@ -281,33 +281,33 @@
       if (gpu.memory_total_mb) text += ' · ' + (gpu.memory_used_mb / 1024).toFixed(1) + ' / ' + (gpu.memory_total_mb / 1024).toFixed(0) + ' GB';
       if (gpu.temperature !== null) text += ' · ' + gpu.temperature + ' °C';
       if (gpu.power_w !== null) text += ' · ' + Math.round(gpu.power_w) + ' W';
-      text += gpu.processes.length ? ' · ' + gpu.processes.length + ' processi' : ' · libera';
+      text += gpu.processes.length ? ' · ' + gpu.processes.length + (gpu.processes.length === 1 ? ' process' : ' processes') : ' · idle';
       byId('gpu-sub').textContent = text;
     } else {
-      byId('gpu-value').textContent = 'n/d';
+      byId('gpu-value').textContent = 'n/a';
       setBar('gpu-bar', 0, '');
-      byId('gpu-sub').textContent = 'nvidia-smi non disponibile';
+      byId('gpu-sub').textContent = 'nvidia-smi not available';
     }
     if (system.cpus) {
       const load = system.load ? system.load[0] : 0;
-      byId('cpu-value').textContent = system.cpus + ' core';
+      byId('cpu-value').textContent = system.cpus + (system.cpus === 1 ? ' core' : ' cores');
       setBar('cpu-bar', load * 100 / system.cpus, load > system.cpus ? 'warn' : '');
-      byId('cpu-sub').textContent = system.load ? 'carico ' + system.load.join(' · ') : 'carico n/d';
+      byId('cpu-sub').textContent = system.load ? 'load ' + system.load.join(' · ') : 'load n/a';
     }
     const memory = system.memory;
     if (memory) {
-      byId('ram-value').textContent = memory.available_gb + ' GB liberi';
+      byId('ram-value').textContent = memory.available_gb + ' GB free';
       setBar('ram-bar', memory.used_percent, memory.used_percent > 90 ? 'bad' : (memory.used_percent > 75 ? 'warn' : ''));
-      byId('ram-sub').textContent = 'su ' + memory.total_gb + ' GB · usata ' + memory.used_percent + '%';
+      byId('ram-sub').textContent = 'of ' + memory.total_gb + ' GB · ' + memory.used_percent + '% used';
     } else {
-      byId('ram-value').textContent = 'n/d';
+      byId('ram-value').textContent = 'n/a';
     }
     const disk = system.disk;
     if (disk) {
       const used = 100 - disk.free_gb * 100 / disk.total_gb;
-      byId('disk-value').textContent = disk.free_gb + ' GB liberi';
+      byId('disk-value').textContent = disk.free_gb + ' GB free';
       setBar('disk-bar', used, disk.free_gb < 10 ? 'bad' : (used > 80 ? 'warn' : ''));
-      byId('disk-sub').textContent = 'su ' + disk.total_gb + ' GB';
+      byId('disk-sub').textContent = 'of ' + disk.total_gb + ' GB';
     }
     if (same('gpu-procs', gpu ? gpu.processes : [])) return;
     const body = byId('gpu-procs');
@@ -331,22 +331,22 @@
     text.appendChild(node('div', 'what', job.label));
     let sub = job.summary || '';
     sub += (sub ? ' · ' : '') + fmtTime(job.started);
-    if (job.state === 'running') sub += ' · da ' + fmtDuration(Date.now() / 1000 - job.started);
-    else if (job.finished) sub += ' · durata ' + fmtDuration(job.finished - job.started);
-    if (job.exit_code !== null && job.exit_code !== undefined) sub += ' · codice ' + job.exit_code;
+    if (job.state === 'running') sub += ' · for ' + fmtDuration(Date.now() / 1000 - job.started);
+    else if (job.finished) sub += ' · took ' + fmtDuration(job.finished - job.started);
+    if (job.exit_code !== null && job.exit_code !== undefined) sub += ' · exit code ' + job.exit_code;
     text.appendChild(node('div', 'sub', sub));
     item.appendChild(text);
     if (withButtons) {
       if (job.run) {
-        const charts = node('button', 'btn small', 'Grafici');
+        const charts = node('button', 'btn small', 'Charts');
         charts.type = 'button';
         charts.addEventListener('click', () => openRunView(job.run));
         item.appendChild(charts);
       }
       if (job.video) {
-        const play = node('button', 'btn small', 'Guarda');
+        const play = node('button', 'btn small', 'Watch');
         play.type = 'button';
-        play.addEventListener('click', () => { showTab('confronto'); playVideo(job.video); });
+        play.addEventListener('click', () => { showTab('compare'); playVideo(job.video); });
         item.appendChild(play);
       }
       const view = node('button', 'btn small', 'Log');
@@ -354,7 +354,7 @@
       view.addEventListener('click', () => openLog(job.id, job.label));
       item.appendChild(view);
       if (job.stoppable) {
-        const stop = node('button', 'btn small danger', 'Ferma');
+        const stop = node('button', 'btn small danger', 'Stop');
         stop.type = 'button';
         stop.addEventListener('click', () => stopJob(job));
         item.appendChild(stop);
@@ -404,19 +404,19 @@
       list.appendChild(cell);
     }
     row('Host', comma.host);
-    if (comma.reachable === null) row('Raggiungibile', 'non ancora controllato', 'muted');
-    else if (comma.reachable) row('Raggiungibile', 'sì', 'ok');
-    else row('Raggiungibile', 'no', 'bad');
+    if (comma.reachable === null) row('Reachable', 'not checked yet', 'muted');
+    else if (comma.reachable) row('Reachable', 'yes', 'ok');
+    else row('Reachable', 'no', 'bad');
     if (comma.reachable) {
-      if (comma.onroad === true) row('Stato', 'onroad (in marcia)', 'todo');
-      else row('Stato', 'offroad (fermo)', 'ok');
-      if (comma.bundle_default === false) row('Modello scelto nel menu Modelli', comma.bundle, 'imp');
-      else row('Menu Modelli', 'Default (il modello di openpilot)');
-      row('Copia dell\'originale', comma.backup ? 'presente (/data/driving_supercombo.onnx.orig)' : 'nessuna');
+      if (comma.onroad === true) row('State', 'onroad (driving)', 'todo');
+      else row('State', 'offroad (parked)', 'ok');
+      if (comma.bundle_default === false) row('Model chosen in the Models menu', comma.bundle, 'imp');
+      else row('Models menu', 'Default (openpilot\'s model)');
+      row('Copy of the original', comma.backup ? 'present (/data/driving_supercombo.onnx.orig)' : 'none');
     } else if (comma.error) {
-      row('Errore', comma.error);
+      row('Error', comma.error);
     }
-    row('Controllato', comma.checked ? fmtTime(comma.checked) + ' (ogni 30 s mentre la pagina è aperta)' : '–');
+    row('Checked', comma.checked ? fmtTime(comma.checked) + ' (every 30 s while the page is open)' : '–');
   }
 
   function renderTrainingNow() {
@@ -426,16 +426,16 @@
     box.replaceChildren();
     for (const run of status.training) {
       const item = node('div', 'item');
-      item.appendChild(pill('in corso', 'run'));
+      item.appendChild(pill('running', 'run'));
       const text = node('div', 'grow');
       text.appendChild(node('div', 'what', run.name));
       let sub = 'step ' + run.steps_done + (run.steps_total ? ' / ' + run.steps_total : '');
-      if (run.eta_seconds !== null) sub += ' · mancano ' + fmtDuration(run.eta_seconds);
+      if (run.eta_seconds !== null) sub += ' · ' + fmtDuration(run.eta_seconds) + ' left';
       if (run.avg_step_time !== null) sub += ' · ' + run.avg_step_time.toFixed(2) + ' s/step';
       if (run.last && run.last.loss !== undefined) sub += ' · loss ' + fmt(run.last.loss);
       text.appendChild(node('div', 'sub', sub));
       item.appendChild(text);
-      const charts = node('button', 'btn small', 'Grafici');
+      const charts = node('button', 'btn small', 'Charts');
       charts.type = 'button';
       charts.addEventListener('click', () => openRunView(run.name));
       item.appendChild(charts);
@@ -456,7 +456,7 @@
 
   // -- action buttons --------------------------------------------------------------------------
   function actionReason(name) {
-    if (!status || !status.actions[name]) return 'stato del server non ancora letto';
+    if (!status || !status.actions[name]) return 'server status not read yet';
     const state = status.actions[name];
     return state.allowed ? '' : state.reason;
   }
@@ -472,7 +472,7 @@
     if (question && !window.confirm(question)) return null;
     try {
       const answer = await post('/api/run/' + name, params);
-      toast('Partito: ' + answer.job.label);
+      toast('Started: ' + answer.job.label);
       openLog(answer.job.id, answer.job.label);
       await refreshStatus();
       return answer.job;
@@ -484,10 +484,10 @@
   }
 
   async function stopJob(job) {
-    if (!window.confirm('Fermo "' + job.label + '"? Si ferma entro una ventina di secondi.')) return;
+    if (!window.confirm('Stop "' + job.label + '"? It stops within about twenty seconds.')) return;
     try {
       await post('/api/jobs/' + job.id + '/stop', {});
-      toast('Fermo: ' + job.label);
+      toast('Stopping: ' + job.label);
     } catch (error) {
       toast(error.message, true);
     }
@@ -499,29 +499,29 @@
     setAction('btn-fetch', 'fetch');
     setAction('btn-localize', 'localize');
     updateTrainButtons();
-    setAction('btn-eval', 'eval', byId('eval-model').value ? '' : 'nessun modello da valutare');
+    setAction('btn-eval', 'eval', byId('eval-model').value ? '' : 'no model to evaluate');
     setAction('btn-compare', 'compare', compareFormReason());
-    setAction('btn-export', 'export', byId('export-run').value ? '' : 'nessun run finito');
+    setAction('btn-export', 'export', byId('export-run').value ? '' : 'no finished run');
     updatePublishButtons();
     const installRun = byId('install-run').value;
     let installReason = '';
-    if (!installRun) installReason = 'nessun run finito';
-    else if (byId('install-confirm').value !== 'INSTALLA') installReason = 'scrivi INSTALLA per confermare';
+    if (!installRun) installReason = 'no finished run';
+    else if (byId('install-confirm').value !== 'INSTALL') installReason = 'type INSTALL to confirm';
     setAction('btn-install', 'install', installReason);
-    setAction('btn-restore', 'restore', byId('restore-confirm').value !== 'RIPRISTINA' ? 'scrivi RIPRISTINA per confermare' : '');
+    setAction('btn-restore', 'restore', byId('restore-confirm').value !== 'RESTORE' ? 'type RESTORE to confirm' : '');
     setAction('btn-update', 'update');
     if (status.test_actions) setAction('btn-selftest', 'selftest');
   }
 
-  // -- Dati ------------------------------------------------------------------------------------
+  // -- Data ------------------------------------------------------------------------------------
   function renderData() {
     const segments = data.segments;
     if (!segments || same('data', segments)) return;
     const counts = segments.counts;
     const tiles = byId('data-tiles');
     tiles.replaceChildren();
-    const items = [[counts.total, 'segmenti in data/'], [counts.localized, 'localizzati'], [counts.failed, 'falliti'],
-      [counts.todo, 'da localizzare'], [counts.heldout_localized, 'hold-out pronti'], [counts.discarded, 'scartati']];
+    const items = [[counts.total, 'segments in data/'], [counts.localized, 'localized'], [counts.failed, 'failed'],
+      [counts.todo, 'to localize'], [counts.heldout_localized, 'hold-out ready'], [counts.discarded, 'discarded']];
     for (const [value, label] of items) {
       const tile = node('div', 'tile');
       tile.appendChild(node('div', 'big', String(value)));
@@ -563,7 +563,7 @@
       row.appendChild(cell);
       row.appendChild(node('td', 'mono', segment.map || '–'));
       let note = segment.reason || '';
-      if (segment.broken_video) note = 'video mancante nella cartella comune. ' + note;
+      if (segment.broken_video) note = 'video missing from the shared folder. ' + note;
       row.appendChild(node('td', 'note', note));
       body.appendChild(row);
     }
@@ -576,7 +576,7 @@
   byId('btn-localize').addEventListener('click', () => runAction('localize', {}));
 
   // -- Training --------------------------------------------------------------------------------
-  const MODE_TEXT = {fresh: 'da zero', continue: 'dai pesi stable', resume: 'ripresa'};
+  const MODE_TEXT = {fresh: 'from scratch', continue: 'from the stable weights', resume: 'resumed'};
 
   function runsWith(filter) { return (data.runs || []).filter(filter); }
   function runningRun() { return (data.runs || []).find((run) => run.status === 'running') || null; }
@@ -605,7 +605,7 @@
     if (!path) return '–';
     const file = String(path).split('/').pop();
     if (file === 'big_driving_supercombo_1365126a_12864.onnx') return 'MD v3';
-    if (file === 'big_driving_supercombo.onnx') return '084747c7 (vecchio)';
+    if (file === 'big_driving_supercombo.onnx') return '084747c7 (old)';
     return file;
   }
 
@@ -620,11 +620,11 @@
     byId('train-teacher').disabled = mode === 'resume';
     byId('train-resume-run').disabled = mode !== 'resume';
     let extra = '';
-    if (mode === 'resume' && !byId('train-resume-run').value) extra = 'nessun run da riprendere';
-    if (mode === 'continue' && data.hf && data.hf.ok && data.hf.stable === false) extra = 'su Hugging Face non ci sono pesi stable';
-    if (!byId('train-gpus').value) extra = extra || 'nessuna GPU trovata';
+    if (mode === 'resume' && !byId('train-resume-run').value) extra = 'no run to resume';
+    if (mode === 'continue' && data.hf && data.hf.ok && data.hf.stable === false) extra = 'no stable weights on Hugging Face';
+    if (!byId('train-gpus').value) extra = extra || 'no GPU found';
     setAction('btn-train', 'train', extra);
-    setAction('btn-train-test', 'train_test', byId('train-gpus').value ? '' : 'nessuna GPU trovata');
+    setAction('btn-train-test', 'train_test', byId('train-gpus').value ? '' : 'no GPU found');
   }
 
   function numberOrText(value) {
@@ -635,7 +635,7 @@
   }
 
   function gpuText(gpus) {
-    if (!gpus || gpus === 'all') return 'tutte le GPU';
+    if (!gpus || gpus === 'all') return 'all GPUs';
     return 'GPU ' + gpus;
   }
 
@@ -647,12 +647,12 @@
     let question = '';
     if (mode === 'resume') {
       params.run = byId('train-resume-run').value;
-      question = 'Riprendo il run ' + params.run + ' dall\'ultimo checkpoint su ' + gpuText(params.gpus) + '. Avvio?';
+      question = 'Resume run ' + params.run + ' from its last checkpoint on ' + gpuText(params.gpus) + '. Start?';
     } else {
       params.steps = numberOrText(byId('train-steps').value);
       params.teacher = byId('train-teacher').value;
-      question = 'Training ' + MODE_TEXT[mode] + ' di ' + params.steps + ' step su ' + gpuText(params.gpus)
-        + ': la GPU resta occupata a lungo. Avvio?';
+      question = 'Training ' + MODE_TEXT[mode] + ', ' + params.steps + ' steps on ' + gpuText(params.gpus)
+        + ': the GPU stays busy for a long time. Start?';
     }
     runAction('train', params, question).then((job) => { if (job) openRunView(null); });
   });
@@ -671,7 +671,7 @@
   function renderTrainForm() {
     const gpus = (status && status.system.gpus) || [];
     const gpuOptions = [];
-    if (gpus.length > 1) gpuOptions.push({value: 'all', label: 'Tutte (' + gpus.length + ' GPU)'});
+    if (gpus.length > 1) gpuOptions.push({value: 'all', label: 'All (' + gpus.length + ' GPUs)'});
     for (const gpu of gpus) {
       const memory = gpu.memory_total_mb ? ' · ' + Math.round(gpu.memory_total_mb / 1024) + ' GB' : '';
       gpuOptions.push({value: String(gpu.index), label: 'GPU ' + gpu.index + ' · ' + gpu.name + memory});
@@ -679,12 +679,12 @@
     fillSelect(byId('train-gpus'), gpuOptions);
 
     const resumable = runsWith((run) => run.resumable);
-    const options = resumable.map((run) => ({value: run.name, label: run.name + ' (' + run.steps_done + (run.steps_total ? '/' + run.steps_total : '') + ' step)'}));
+    const options = resumable.map((run) => ({value: run.name, label: run.name + ' (' + run.steps_done + (run.steps_total ? '/' + run.steps_total : '') + ' steps)'}));
     fillSelect(byId('train-resume-run'), options);
     byId('mode-resume').disabled = resumable.length === 0;
     let note = '';
-    if (data.hf && data.hf.ok && data.hf.stable === false) note = 'Su Hugging Face non ci sono ancora pesi stable: pubblica prima un modello come «stable».';
-    else if (data.hf && !data.hf.ok) note = 'Non so se su Hugging Face ci sono pesi stable (' + data.hf.error + ').';
+    if (data.hf && data.hf.ok && data.hf.stable === false) note = 'There are no stable weights on Hugging Face yet: publish a model as “stable” first.';
+    else if (data.hf && !data.hf.ok) note = 'Cannot tell whether Hugging Face has stable weights (' + data.hf.error + ').';
     byId('continue-note').textContent = note;
   }
 
@@ -715,14 +715,14 @@
       return;
     }
     const isRunning = run.status === 'running';
-    byId('run-view-title').textContent = isRunning ? 'Training in corso' : 'Run';
+    byId('run-view-title').textContent = isRunning ? 'Training in progress' : 'Run';
     const state = RUN_STATE[run.status] || [run.status, 'muted'];
     byId('run-view-state').replaceChildren(pill(state[0], state[1]));
 
     setBar('run-view-bar', run.percent, isRunning ? 'run' : (run.status === 'finished' ? '' : 'warn'));
     let steps = 'step ' + run.steps_done + (run.steps_total ? ' / ' + run.steps_total : '');
     if (run.percent !== null) steps += ' · ' + run.percent + '%';
-    if (isRunning && run.eta_seconds !== null) steps += ' · mancano ' + fmtDuration(run.eta_seconds);
+    if (isRunning && run.eta_seconds !== null) steps += ' · ' + fmtDuration(run.eta_seconds) + ' left';
     if (run.avg_step_time !== null) steps += ' · ' + run.avg_step_time.toFixed(2) + ' s/step';
     byId('run-view-steps').textContent = steps;
 
@@ -737,57 +737,57 @@
         box.appendChild(element);
       }
       if (isRunning && job) {
-        button('Log in diretta', '', () => openLog(job.id, job.label));
-        button('Ferma', 'danger', () => stopJob(job));
+        button('Live log', '', () => openLog(job.id, job.label));
+        button('Stop', 'danger', () => stopJob(job));
       }
       if (run.resumable) {
-        button('Riprendi', 'primary', () => {
+        button('Resume', 'primary', () => {
           const config = run.config || {};
           const params = {mode: 'resume', run: name, batch_size: config.batch_size || 8,
             workers: config.workers !== undefined ? config.workers : 6, gpus: byId('train-gpus').value || 'all'};
-          runAction('train', params, 'Riprendo il run ' + name + ' dall\'ultimo checkpoint. Avvio?');
+          runAction('train', params, 'Resume run ' + name + ' from its last checkpoint. Start?');
         });
       }
       if (run.has_pt || run.has_training_pt) {
-        button('Valuta', '', () => goTo('valutazione', 'eval-model', 'run:' + name));
-        button('Video di confronto', '', () => goTo('confronto', 'cmp-student', 'run:' + name));
+        button('Evaluate', '', () => goTo('evaluation', 'eval-model', 'run:' + name));
+        button('Comparison video', '', () => goTo('compare', 'cmp-student', 'run:' + name));
       }
-      if (run.has_pt) button('Esporta / pubblica', '', () => { pendingChoice['export-run'] = name; goTo('pubblica', 'publish-run', name); });
+      if (run.has_pt) button('Export / publish', '', () => { pendingChoice['export-run'] = name; goTo('publish', 'publish-run', name); });
     }
 
     const config = run.config || {};
     const settings = byId('run-view-settings');
     settings.replaceChildren();
-    kvRow(settings, 'Partenza', MODE_TEXT[config.mode] || config.mode);
+    kvRow(settings, 'Start', MODE_TEXT[config.mode] || config.mode);
     kvRow(settings, 'Teacher', teacherName(config.teacher));
-    kvRow(settings, 'Step', run.steps_total);
+    kvRow(settings, 'Steps', run.steps_total);
     kvRow(settings, 'Batch per GPU', config.batch_size);
     kvRow(settings, 'Workers', config.workers);
     let gpus = null;
     if (config.gpus) gpus = 'GPU ' + config.gpus;
     else if (config.world_size) gpus = config.world_size + ' GPU';
     kvRow(settings, 'GPU', gpus);
-    kvRow(settings, 'Precisione', config.precision);
-    kvRow(settings, 'Iniziato', fmtTime(run.started));
-    if (run.finished) kvRow(settings, 'Finito', fmtTime(run.finished) + ' · durata ' + fmtDuration(run.finished - run.started));
-    if (detail && detail.resumed.length) kvRow(settings, 'Ripreso', detail.resumed.length + (detail.resumed.length === 1 ? ' volta' : ' volte'));
+    kvRow(settings, 'Precision', config.precision);
+    kvRow(settings, 'Started', fmtTime(run.started));
+    if (run.finished) kvRow(settings, 'Finished', fmtTime(run.finished) + ' · took ' + fmtDuration(run.finished - run.started));
+    if (detail && detail.resumed.length) kvRow(settings, 'Resumed', detail.resumed.length + (detail.resumed.length === 1 ? ' time' : ' times'));
     const files = [];
-    if (run.has_pt) files.push('modello finale');
+    if (run.has_pt) files.push('final model');
     if (run.has_onnx) files.push('ONNX');
     if (run.has_training_pt) files.push('checkpoint');
-    kvRow(settings, 'File', files.join(' · ') || 'nessuno');
+    kvRow(settings, 'Files', files.join(' · ') || 'none');
 
     const last = byId('run-view-last');
     last.replaceChildren();
     for (const key of ['loss', 'gt', 'distill', 'gt/plan', 'grad_norm']) {
-      kvRow(last, (CHART_TITLES[key] || key) + ' (ultimo step)', run.last ? fmt(run.last[key]) : null);
+      kvRow(last, (CHART_TITLES[key] || key) + ' (last step)', run.last ? fmt(run.last[key]) : null);
     }
 
     const pre = byId('run-view-log');
     const text = detail ? detail.log_tail : '';
     if (pre.textContent !== text) {
       const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-      pre.textContent = text || 'Ancora nessuna riga.';
+      pre.textContent = text || 'No lines yet.';
       if (atEnd) pre.scrollTop = pre.scrollHeight;
     }
   }
@@ -802,7 +802,7 @@
       const row = node('tr', 'clickable' + (run.name === viewed ? ' selected' : ''));
       row.tabIndex = 0;
       row.setAttribute('role', 'link');
-      row.setAttribute('aria-label', 'Dettagli del run ' + run.name);
+      row.setAttribute('aria-label', 'Details of run ' + run.name);
       row.addEventListener('click', () => openRunView(run.name));
       row.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRunView(run.name); }
@@ -876,7 +876,7 @@
     box.replaceChildren();
     byId('charts-empty').hidden = metrics.steps.length > 0;
     let note = '';
-    if (metrics.bucket > 1) note = 'ogni punto è la media di ' + metrics.bucket + ' step';
+    if (metrics.bucket > 1) note = 'each point is the mean of ' + metrics.bucket + ' steps';
     byId('chart-note').textContent = note;
     if (!metrics.steps.length) return;
     for (const key of metrics.available) {
@@ -906,7 +906,7 @@
       if (values[index] !== null && values[index] !== undefined) points.push([steps[index], values[index]]);
     }
     if (!points.length) {
-      box.appendChild(node('p', 'empty', 'nessun valore'));
+      box.appendChild(node('p', 'empty', 'no values'));
       return box;
     }
     let useLog = logScale;
@@ -921,7 +921,7 @@
       }
     }
     const shown = smoothed || points;
-    lastText.textContent = 'ultimo ' + fmt(shown[shown.length - 1][1]);
+    lastText.textContent = 'last ' + fmt(shown[shown.length - 1][1]);
 
     const transform = (value) => (useLog ? Math.log10(value) : value);
     let low = Infinity;
@@ -940,7 +940,7 @@
     const svg = document.createElementNS(SVG, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', title + ', ultimo valore ' + fmt(shown[shown.length - 1][1]));
+    svg.setAttribute('aria-label', title + ', last value ' + fmt(shown[shown.length - 1][1]));
     svg.setAttribute('tabindex', '0');
     function element(tag, attributes, className) {
       const item = document.createElementNS(SVG, tag);
@@ -1036,7 +1036,7 @@
     const options = [];
     if (data.hf && data.hf.ok) {
       for (const name of data.hf.models) {
-        if (/^[a-z0-9_]+$/.test(name)) options.push({value: 'hf:' + name, label: 'HF ' + name, group: 'Pubblicati su Hugging Face'});
+        if (/^[a-z0-9_]+$/.test(name)) options.push({value: 'hf:' + name, label: 'HF ' + name, group: 'Published on Hugging Face'});
       }
     }
     return options;
@@ -1044,16 +1044,16 @@
   function runModelOptions() {
     const options = [];
     for (const run of runsWith((item) => item.has_pt || item.has_training_pt)) {
-      options.push({value: 'run:' + run.name, label: 'run ' + run.name + (run.has_pt ? '' : ' (checkpoint, non finito)'), group: 'Run locali'});
+      options.push({value: 'run:' + run.name, label: 'run ' + run.name + (run.has_pt ? '' : ' (checkpoint, not finished)'), group: 'Local runs'});
     }
     return options;
   }
 
-  // -- Valutazione -------------------------------------------------------------------------------
+  // -- Evaluation -------------------------------------------------------------------------------
   function renderEval() {
-    const options = [{value: 'stock', label: 'Stock CD210 (il modello del comma)', group: 'Riferimenti'},
-      {value: 'teacher', label: 'Teacher (il modello grande)', group: 'Riferimenti'},
-      {value: 'logged', label: 'Logged (quello che ha guidato nel giro)', group: 'Riferimenti'}]
+    const options = [{value: 'stock', label: 'Stock CD210 (the comma\'s model)', group: 'References'},
+      {value: 'teacher', label: 'Teacher (the big model)', group: 'References'},
+      {value: 'logged', label: 'Logged (the model that drove at the time)', group: 'References'}]
       .concat(runModelOptions(), hfModelOptions());
     const firstRun = runModelOptions();
     fillSelect(byId('eval-model'), options, firstRun.length ? firstRun[0].value : 'stock');
@@ -1068,9 +1068,9 @@
       const modelCell = node('td');
       modelCell.appendChild(node('div', 'mono', result.model));
       let note = result.label && result.label !== result.model ? result.label : '';
-      if (result.selection && result.selection !== 'heldout') note += (note ? ' · ' : '') + 'segmenti: ' + result.selection;
+      if (result.selection && result.selection !== 'heldout') note += (note ? ' · ' : '') + 'segments: ' + result.selection;
       if (result.rate_hz && result.rate_hz !== 5) note += (note ? ' · ' : '') + result.rate_hz + ' Hz';
-      if (result.skipped) note += (note ? ' · ' : '') + result.skipped + ' saltati';
+      if (result.skipped) note += (note ? ' · ' : '') + result.skipped + ' skipped';
       if (note) modelCell.appendChild(node('div', 'note', note));
       row.appendChild(modelCell);
       row.appendChild(node('td', 'num', result.avg_miss_m === null ? '–' : result.avg_miss_m.toFixed(2) + ' m'));
@@ -1082,13 +1082,13 @@
   }
   byId('btn-eval').addEventListener('click', () => {
     const model = byId('eval-model').value;
-    runAction('eval', {model: model}, 'Valuto ' + model + ' sui segmenti hold-out (usa la GPU). Avvio?');
+    runAction('eval', {model: model}, 'Evaluate ' + model + ' on the hold-out segments (uses the GPU). Start?');
   });
 
-  // -- Confronto video ---------------------------------------------------------------------------
+  // -- Comparison video ---------------------------------------------------------------------------
   function compareFormReason() {
-    if (!byId('cmp-segment').value) return 'nessun segmento localizzato';
-    if (!byId('cmp-student').value) return 'nessun modello studente (run o HF)';
+    if (!byId('cmp-segment').value) return 'no localized segment';
+    if (!byId('cmp-student').value) return 'no student model (run or HF)';
     return '';
   }
 
@@ -1098,12 +1098,12 @@
     let firstHeldout = null;
     for (const segment of segments) {
       if (segment.heldout) {
-        options.push({value: segment.name, label: '★ ' + segment.name + ' (hold-out)', group: 'Hold-out: mai visti nel training'});
+        options.push({value: segment.name, label: '★ ' + segment.name + ' (hold-out)', group: 'Hold-out: never seen in training'});
         if (!firstHeldout) firstHeldout = segment.name;
       }
     }
     for (const segment of segments) {
-      if (!segment.heldout) options.push({value: segment.name, label: segment.name, group: 'Usati nel training'});
+      if (!segment.heldout) options.push({value: segment.name, label: segment.name, group: 'Used in training'});
     }
     fillSelect(byId('cmp-segment'), options, firstHeldout);
     const students = runModelOptions().concat(hfModelOptions());
@@ -1117,15 +1117,15 @@
     for (const video of videos) {
       const item = node('li', 'item');
       const text = node('div', 'grow');
-      const who = (video.student.label || video.student.model || '?') + ' contro '
+      const who = (video.student.label || video.student.model || '?') + ' vs '
         + (video.reference.label || video.reference.model || '?');
       text.appendChild(node('div', 'what', video.has_json ? who : video.name));
       let sub = (video.segment || video.name) + ' · ' + fmtTime(video.modified) + ' · ' + fmtBytes(video.size);
-      if (video.student.avg_miss_m !== null) sub += ' · studente ' + video.student.avg_miss_m.toFixed(2) + ' m';
-      if (video.reference.avg_miss_m !== null) sub += ' · riferimento ' + video.reference.avg_miss_m.toFixed(2) + ' m';
+      if (video.student.avg_miss_m !== null) sub += ' · student ' + video.student.avg_miss_m.toFixed(2) + ' m';
+      if (video.reference.avg_miss_m !== null) sub += ' · reference ' + video.reference.avg_miss_m.toFixed(2) + ' m';
       text.appendChild(node('div', 'sub', sub));
       item.appendChild(text);
-      const play = node('button', 'btn small', 'Guarda');
+      const play = node('button', 'btn small', 'Watch');
       play.type = 'button';
       play.addEventListener('click', () => playVideo(video.name));
       item.appendChild(play);
@@ -1148,16 +1148,16 @@
       const name = side.label || side.model;
       element.appendChild(node('div', 'who', who + (name ? ': ' + name : '')));
       element.appendChild(node('div', 'num', side.avg_miss_m === null ? '–' : side.avg_miss_m.toFixed(2) + ' m'));
-      let note = 'avg miss su questo tratto';
-      if (side.lateral_miss_m !== null) note += ' · laterale ' + side.lateral_miss_m.toFixed(2) + ' m';
+      let note = 'avg miss on this stretch';
+      if (side.lateral_miss_m !== null) note += ' · lateral ' + side.lateral_miss_m.toFixed(2) + ' m';
       element.appendChild(node('div', 'who', note));
       return element;
     }
     if (video) {
-      miss.appendChild(box('Riferimento (sopra)', video.reference));
-      miss.appendChild(box('Studente (sotto)', video.student));
-      let sub = video.segment ? 'segmento ' + video.segment : '';
-      if (video.start !== null) sub += ' · da ' + video.start + ' s';
+      miss.appendChild(box('Reference (top)', video.reference));
+      miss.appendChild(box('Student (bottom)', video.student));
+      let sub = video.segment ? 'segment ' + video.segment : '';
+      if (video.start !== null) sub += ' · from ' + video.start + ' s';
       if (video.duration !== null) sub += ' · ' + video.duration + ' s';
       if (video.speed !== null) sub += ' · ' + video.speed + '×';
       miss.appendChild(node('div', 'note', sub));
@@ -1176,7 +1176,7 @@
   });
   for (const id of ['cmp-segment', 'cmp-student']) byId(id).addEventListener('change', updateButtons);
 
-  // -- Pubblica --------------------------------------------------------------------------------
+  // -- Publish --------------------------------------------------------------------------------
   function slugOf(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '_'); }
   function publishParams() {
     return {run: byId('publish-run').value, name: byId('publish-name').value, stable: byId('publish-stable').checked};
@@ -1200,7 +1200,7 @@
 
   let lastPublishRun = '';
   function renderPublish() {
-    const finished = runsWith((run) => run.has_pt).map((run) => ({value: run.name, label: run.name + (run.has_onnx ? ' (onnx fatto)' : '')}));
+    const finished = runsWith((run) => run.has_pt).map((run) => ({value: run.name, label: run.name + (run.has_onnx ? ' (onnx done)' : '')}));
     fillSelect(byId('export-run'), finished);
     fillSelect(byId('publish-run'), finished);
     // The name follows the run until the user writes another one.
@@ -1222,9 +1222,9 @@
       link.rel = 'noopener noreferrer';
       repoCell.appendChild(link);
       kv.appendChild(repoCell);
-      kv.appendChild(node('dt', '', 'Pesi stable'));
-      kv.appendChild(node('dd', '', hf.ok ? (hf.stable ? 'sì' : 'no') : '?'));
-      kv.appendChild(node('dt', '', 'Letto'));
+      kv.appendChild(node('dt', '', 'Stable weights'));
+      kv.appendChild(node('dd', '', hf.ok ? (hf.stable ? 'yes' : 'no') : '?'));
+      kv.appendChild(node('dt', '', 'Checked'));
       kv.appendChild(node('dd', '', fmtTime(hf.checked) + (hf.ok ? '' : ' · ' + hf.error)));
       const list = byId('hf-models');
       list.replaceChildren();
@@ -1232,7 +1232,7 @@
       for (const name of hf.models) {
         const item = node('li', 'item');
         item.appendChild(node('span', 'what mono', name));
-        if (hf.releases.indexOf(name) >= 0) item.appendChild(pill('pesi PyTorch', 'ok'));
+        if (hf.releases.indexOf(name) >= 0) item.appendChild(pill('PyTorch weights', 'ok'));
         list.appendChild(item);
       }
     }
@@ -1243,21 +1243,21 @@
     const validName = /^[A-Za-z0-9_.-]{1,64}$/.test(params.name);
     const taken = nameOnHf(params.name);
     let nameNote = '';
-    if (params.name && !validName) nameNote = 'Nome non valido: lettere, cifre, _ . - (massimo 64).';
-    else if (taken) nameNote = 'Su Hugging Face c\'è già ' + slugOf(params.name) + ': la pubblicazione vera sarà rifiutata.';
-    else if (params.name) nameNote = 'Su Hugging Face diventa models/' + slugOf(params.name) + '/.';
+    if (params.name && !validName) nameNote = 'Invalid name: letters, digits, _ . - (64 at most).';
+    else if (taken) nameNote = 'Hugging Face already has ' + slugOf(params.name) + ': the real publish will be refused.';
+    else if (params.name) nameNote = 'On Hugging Face it becomes models/' + slugOf(params.name) + '/.';
     byId('publish-name-note').textContent = nameNote;
 
     let dryReason = '';
-    if (!params.run) dryReason = 'nessun run finito';
-    else if (!validName) dryReason = 'scrivi un nome valido';
+    if (!params.run) dryReason = 'no finished run';
+    else if (!validName) dryReason = 'type a valid name';
     setAction('btn-publish-dry', 'publish_dry', dryReason);
 
     const dry = lastDryRun();
     const dryStatus = byId('dry-status');
     dryStatus.replaceChildren();
     if (dry) {
-      dryStatus.appendChild(document.createTextNode('Prova per questi parametri: '));
+      dryStatus.appendChild(document.createTextNode('Dry run for these settings: '));
       dryStatus.appendChild(pill(dry.state_label, JOB_PILL[dry.state] || 'muted'));
       dryStatus.appendChild(document.createTextNode(' ' + fmtTime(dry.started) + ' '));
       const view = node('button', 'btn small', 'Log');
@@ -1265,15 +1265,15 @@
       view.addEventListener('click', () => openLog(dry.id, dry.label));
       dryStatus.appendChild(view);
     } else if (params.run && validName) {
-      dryStatus.textContent = 'Nessuna prova ancora per questo run, nome e «stable».';
+      dryStatus.textContent = 'No dry run yet for this run, name and “stable” setting.';
     }
 
     let reason = '';
-    if (!params.run) reason = 'nessun run finito';
-    else if (!validName) reason = 'scrivi un nome valido';
-    else if (taken) reason = 'nome già usato su Hugging Face';
-    else if (!dry || dry.state !== 'ok') reason = 'prima una prova (dry run) finita bene con gli stessi parametri';
-    else if (byId('publish-confirm').value !== params.name) reason = 'scrivi il nome esatto per confermare';
+    if (!params.run) reason = 'no finished run';
+    else if (!validName) reason = 'type a valid name';
+    else if (taken) reason = 'name already used on Hugging Face';
+    else if (!dry || dry.state !== 'ok') reason = 'first a successful dry run with the same settings';
+    else if (byId('publish-confirm').value !== params.name) reason = 'type the exact name to confirm';
     setAction('btn-publish', 'publish', reason);
   }
 
@@ -1318,8 +1318,8 @@
   });
   for (const id of ['install-confirm', 'restore-confirm', 'install-run']) byId(id).addEventListener('input', updateButtons);
 
-  // -- Job -------------------------------------------------------------------------------------
-  byId('btn-update').addEventListener('click', () => runAction('update', {}, 'Aggiorno il codice: scarico l\'ultima versione, aggiorno le librerie e riavvio il sito (qualche secondo). Avvio?'));
+  // -- Jobs -------------------------------------------------------------------------------------
+  byId('btn-update').addEventListener('click', () => runAction('update', {}, 'Update the code: pull the latest version, update the libraries and restart the site (a few seconds). Start?'));
   byId('btn-selftest').addEventListener('click', () => runAction('selftest', {}));
   byId('reload-page').addEventListener('click', () => location.reload());
 
@@ -1343,7 +1343,7 @@
       if (log.id !== id) return;
       const pre = byId('term-text');
       if (chunk.text) {
-        if (log.offset === 0 && chunk.offset - chunk.text.length > 0) pre.textContent = '… (inizio tagliato)\n';
+        if (log.offset === 0 && chunk.offset - chunk.text.length > 0) pre.textContent = '… (beginning cut)\n';
         pre.textContent += chunk.text;
         if (log.follow) pre.scrollTop = pre.scrollHeight;
       }
@@ -1374,7 +1374,7 @@
   });
 
   // -- start -----------------------------------------------------------------------------------
-  showTab(location.hash ? location.hash.slice(1) : 'stato');
+  showTab(location.hash ? location.hash.slice(1) : 'status');
   refreshStatus();
   setInterval(refreshStatus, STATUS_PERIOD);
   setInterval(() => { if (!document.hidden) loadTab(false); }, 5000);

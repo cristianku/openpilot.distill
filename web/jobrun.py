@@ -4,7 +4,7 @@
 
 The site starts this wrapper in a new session (its own process group) with stdout and stderr on
 the job log; the wrapper runs the job's argv (no shell) in the same group, waits for it, appends
-"== finito con codice N" to the log and records exit_code and finished in the job file. Because the
+"== finished with code N" to the log and records exit_code and finished in the job file. Because the
 wrapper and not the site records the result, a restart of the site (systemd KillMode=process keeps
 the jobs alive) never loses an exit code.
 
@@ -59,24 +59,24 @@ def update_job_file(job_file: Path, changes: dict) -> dict:
 
 def _ignore_stop_signal(signal_number, frame):
     # The job (same process group) got the same signal: wait for it to end and record its code.
-    print('\n== ricevuto il segnale ' + str(signal_number) + ': aspetto che il job si fermi', flush=True)
+    print('\n== received signal ' + str(signal_number) + ': waiting for the job to stop', flush=True)
 
 
 def main(arguments: list[str] | None = None) -> int:
     if arguments is None:
         arguments = sys.argv[1:]
     if len(arguments) != 1:
-        print('uso: python -m web.jobrun <file del job .json>', file=sys.stderr)
+        print('usage: python -m web.jobrun <job file .json>', file=sys.stderr)
         return 2
     job_file = Path(arguments[0])
     job = read_job_file(job_file)
     if job is None:
-        print('== file del job illeggibile: ' + str(job_file), flush=True)
+        print('== unreadable job file: ' + str(job_file), flush=True)
         return 2
     argv = job.get('argv')
     cwd = job.get('cwd')
     if not isinstance(argv, list) or not argv or not isinstance(cwd, str):
-        print('== file del job senza argv o cwd: ' + str(job_file), flush=True)
+        print('== job file without argv or cwd: ' + str(job_file), flush=True)
         return 2
 
     signal.signal(signal.SIGTERM, _ignore_stop_signal)
@@ -91,7 +91,7 @@ def main(arguments: list[str] | None = None) -> int:
         # Same stdout/stderr (the log) and same process group as this wrapper.
         child = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL)
     except OSError as exc:
-        print('== non riesco ad avviare ' + str(argv[0]) + ': ' + str(exc), flush=True)
+        print('== cannot start ' + str(argv[0]) + ': ' + str(exc), flush=True)
         code = 127
     else:
         update_job_file(job_file, {'child_pid': child.pid})
@@ -100,9 +100,9 @@ def main(arguments: list[str] | None = None) -> int:
 
     finished = time.time()
     if code < 0:
-        print('\n== finito con codice ' + str(code) + ' (fermato dal segnale ' + str(-code) + ')', flush=True)
+        print('\n== finished with code ' + str(code) + ' (stopped by signal ' + str(-code) + ')', flush=True)
     else:
-        print('\n== finito con codice ' + str(code), flush=True)
+        print('\n== finished with code ' + str(code), flush=True)
     update_job_file(job_file, {'exit_code': code, 'finished': finished})
     # The wrapper ends like its job: 128 + signal for a job killed by a signal, as a shell does.
     if code < 0:

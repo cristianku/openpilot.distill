@@ -51,17 +51,17 @@ PROGRESS_EVERY_FRAMES = 20
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--segment", required=True, help="cartella in data/, es. 00000126f84ad127f010")
-    parser.add_argument("--reference", default="stock", help="modello in alto, linea bianca (default stock)")
-    parser.add_argument("--student", required=True, help="modello in basso, linea verde, es. run:2026-10-21_1544")
-    parser.add_argument("--start", type=float, default=10.0, help="inizio del tratto in secondi (default 10)")
-    parser.add_argument("--duration", type=float, default=15.0, help="durata del tratto in secondi (default 15)")
-    parser.add_argument("--speed", type=float, default=0.5, help="velocita' del video: 0.25, 0.5 o 1 (default 0.5)")
-    parser.add_argument("--inset", action=argparse.BooleanOptionalAction, default=True, help="vista dall'alto")
-    parser.add_argument("--show-gt", action="store_true", help="disegna anche il percorso reale (giallo)")
-    parser.add_argument("--horizon", type=float, default=DEFAULT_HORIZON_S, help="secondi di piano nel miss")
-    parser.add_argument("--out", type=Path, help="mp4 da scrivere (default outputs/compare/<id>.mp4)")
-    parser.add_argument("--json", type=Path, help="json da scrivere (default accanto al mp4)")
+    parser.add_argument("--segment", required=True, help="folder in data/, e.g. 00000126f84ad127f010")
+    parser.add_argument("--reference", default="stock", help="model on top, white line (default stock)")
+    parser.add_argument("--student", required=True, help="model below, green line, e.g. run:2026-10-21_1544")
+    parser.add_argument("--start", type=float, default=10.0, help="start of the clip in seconds (default 10)")
+    parser.add_argument("--duration", type=float, default=15.0, help="length of the clip in seconds (default 15)")
+    parser.add_argument("--speed", type=float, default=0.5, help="video speed: 0.25, 0.5 or 1 (default 0.5)")
+    parser.add_argument("--inset", action=argparse.BooleanOptionalAction, default=True, help="top-down view")
+    parser.add_argument("--show-gt", action="store_true", help="also draws the real path (yellow)")
+    parser.add_argument("--horizon", type=float, default=DEFAULT_HORIZON_S, help="seconds of plan in the miss")
+    parser.add_argument("--out", type=Path, help="mp4 to write (default outputs/compare/<id>.mp4)")
+    parser.add_argument("--json", type=Path, help="json to write (default next to the mp4)")
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     return parser.parse_args()
 
@@ -77,12 +77,12 @@ def clip_frames(frame_count: int, start_s: float, duration_s: float) -> tuple[in
     start_frame = int(round(start_s * CAMERA_FPS))
     if start_frame < EVAL_WARMUP_FRAMES:
         print(
-            f"inizio spostato a {EVAL_WARMUP_FRAMES / CAMERA_FPS:.1f} s: prima i modelli si riscaldano",
+            f"start moved to {EVAL_WARMUP_FRAMES / CAMERA_FPS:.1f} s: the models warm up before it",
             flush=True,
         )
         start_frame = EVAL_WARMUP_FRAMES
     if start_frame >= usable_end:
-        raise SystemExit(f"ERRORE: --start oltre la fine del segmento ({usable_end / CAMERA_FPS:.1f} s)")
+        raise SystemExit(f"ERROR: --start beyond the end of the segment ({usable_end / CAMERA_FPS:.1f} s)")
     clip_end = min(start_frame + int(round(duration_s * CAMERA_FPS)), usable_end)
     decode_start = ((start_frame - EVAL_WARMUP_FRAMES) // BLOCK_FRAMES) * BLOCK_FRAMES
     end_frame = ((clip_end + BLOCK_FRAMES - 1) // BLOCK_FRAMES) * BLOCK_FRAMES
@@ -155,35 +155,35 @@ def main() -> None:
         reference_spec = parse_model_spec(args.reference)
         student_spec = parse_model_spec(args.student)
     except ValueError as error:
-        raise SystemExit(f"ERRORE: {error}") from None
+        raise SystemExit(f"ERROR: {error}") from None
     if args.speed not in SPEEDS:
-        raise SystemExit(f"ERRORE: --speed deve essere 0.25, 0.5 o 1, non {args.speed:g}")
+        raise SystemExit(f"ERROR: --speed must be 0.25, 0.5 or 1, not {args.speed:g}")
     if args.start < 0:
-        raise SystemExit("ERRORE: --start deve essere >= 0")
+        raise SystemExit("ERROR: --start must be >= 0")
     if args.duration <= 0 or args.duration > MAX_DURATION_S:
-        raise SystemExit(f"ERRORE: --duration tra 0 e {MAX_DURATION_S:.0f} secondi")
+        raise SystemExit(f"ERROR: --duration between 0 and {MAX_DURATION_S:.0f} seconds")
     if not (ROOT / "data" / args.segment).is_dir():
-        raise SystemExit(f"ERRORE: segmento {args.segment} non trovato in data/")
+        raise SystemExit(f"ERROR: segment {args.segment} not found in data/")
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     started = time.time()
 
     segment = load_segment(ROOT, args.segment)
     decode_start, start_frame, clip_end, end_frame = clip_frames(segment.frame_count, args.start, args.duration)
     print(
-        f"segmento {segment.name} ({segment.duration_s:.1f} s): tratto {start_frame / CAMERA_FPS:.2f}"
-        f"-{clip_end / CAMERA_FPS:.2f} s, riscaldamento da {decode_start / CAMERA_FPS:.2f} s",
+        f"segment {segment.name} ({segment.duration_s:.1f} s): clip {start_frame / CAMERA_FPS:.2f}"
+        f"-{clip_end / CAMERA_FPS:.2f} s, warm-up from {decode_start / CAMERA_FPS:.2f} s",
         flush=True,
     )
 
     reference = resolve_model(reference_spec, ROOT)
     student = resolve_model(student_spec, ROOT)
-    for role, model in (("riferimento", reference), ("studente", student)):
+    for role, model in (("reference", reference), ("student", student)):
         print(f"{role}: {model.spec.label} = {model.path} (sha256 {model.sha256[:16]})", flush=True)
     reference_runner = build_runner(reference, args.device, BLOCK_FRAMES)
     student_runner = build_runner(student, args.device, BLOCK_FRAMES)
     for runner in (reference_runner, student_runner):
         if runner.warmup_frames > EVAL_WARMUP_FRAMES:
-            print(f"ATTENZIONE: {runner.name} vuole {runner.warmup_frames} frame di riscaldamento", flush=True)
+            print(f"WARNING: {runner.name} needs {runner.warmup_frames} warm-up frames", flush=True)
         runner.reset(segment)
 
     if args.out is not None:
@@ -293,7 +293,7 @@ def main() -> None:
 
         encoder.stdin.close()
         if encoder.wait() != 0:
-            raise SystemExit("ERRORE: ffmpeg non e' riuscito a scrivere il video")
+            raise SystemExit("ERROR: ffmpeg could not write the video")
         partial_path.replace(video_path)
         finished = True
     finally:
@@ -350,7 +350,7 @@ def main() -> None:
 
     print(
         f"avg miss: {reference.spec.label} {_metres(reference_miss.average)}, "
-        f"{student.spec.label} {_metres(student_miss.average)} ({reference_miss.count} frame, {elapsed:.0f} s)",
+        f"{student.spec.label} {_metres(student_miss.average)} ({reference_miss.count} frames, {elapsed:.0f} s)",
         flush=True,
     )
     print(f"OUTPUT_MP4={video_path}", flush=True)
@@ -367,5 +367,5 @@ if __name__ == "__main__":
     try:
         main()
     except BrokenPipeError:
-        print("ERRORE: ffmpeg si e' fermato (vedi il messaggio sopra)", file=sys.stderr)
+        print("ERROR: ffmpeg stopped (see the message above)", file=sys.stderr)
         raise SystemExit(1) from None

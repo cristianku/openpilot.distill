@@ -126,9 +126,9 @@ class ArgvTest(ActionTestCase):
                          [PY, '-m', 'tasks.publish', '--name=prova.1', '--run', RUN])
         self.assertEqual(self.build('publish', {'run': RUN, 'name': 'prova', 'stable': True, 'confirm': 'prova'}).argv,
                          [PY, '-m', 'tasks.publish', '--upload', '--name=prova', '--stable', '--run', RUN])
-        self.assertEqual(self.build('install', {'run': RUN, 'confirm': 'INSTALLA'}).argv,
+        self.assertEqual(self.build('install', {'run': RUN, 'confirm': 'INSTALL'}).argv,
                          [PY, '-m', 'tasks.install', '--run', RUN])
-        self.assertEqual(self.build('restore', {'confirm': 'RIPRISTINA'}).argv,
+        self.assertEqual(self.build('restore', {'confirm': 'RESTORE'}).argv,
                          [PY, '-m', 'tasks.install', '--restore'])
         self.assertEqual(self.build('update', {}).argv, [PY, '-m', 'tasks.update'])
         self.assertEqual(self.build('export', {'run': RUN_SECONDS}).argv[-1], RUN_SECONDS)
@@ -266,7 +266,7 @@ class ValidationTest(ActionTestCase):
         self.refused('publish', {'run': RUN, 'name': 'prova'}, 400)
         self.refused('install', {'run': RUN, 'confirm': 'installa'}, 400)
         self.refused('install', {'run': RUN}, 400)
-        self.refused('restore', {'confirm': 'RIPRISTINA '}, 400)
+        self.refused('restore', {'confirm': 'RESTORE '}, 400)
         self.refused('restore', {}, 400)
 
     def test_slug_matches_publish_model_sh(self):
@@ -275,7 +275,7 @@ class ValidationTest(ActionTestCase):
         self.assertEqual(slug_of('cd210-native'), 'cd210_native')
 
     def test_missing_scripts(self):
-        self.assertIn('questa versione del codice', script_missing(self.repo, 'eval'))
+        self.assertIn('this version of the code', script_missing(self.repo, 'eval'))
         (self.repo / 'tasks').mkdir()
         (self.repo / 'tasks' / 'evaluation.py').write_text('')
         self.assertEqual(script_missing(self.repo, 'eval'), '')
