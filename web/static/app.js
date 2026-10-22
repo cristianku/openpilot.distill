@@ -273,10 +273,11 @@
 
   // The last few minutes of CPU and GPU use, one point per status (every 4 s), kept in the page.
   const HISTORY_POINTS = 90;
-  const history = {cpu: [], gpu: []};
+  // Not called history: that would hide the browser's history (replaceState in showTab).
+  const usageHistory = {cpu: [], gpu: []};
   function pushHistory(key, value) {
-    history[key].push(value);
-    if (history[key].length > HISTORY_POINTS) history[key].shift();
+    usageHistory[key].push(value);
+    if (usageHistory[key].length > HISTORY_POINTS) usageHistory[key].shift();
   }
 
   // An area chart 0-100% of a history, newest on the right.
@@ -340,7 +341,7 @@
       byId('gpu-value').textContent = util + '%';
       setBar('gpu-bar', util, util > 85 ? 'warn' : '');
       pushHistory('gpu', util);
-      renderSpark('gpu-spark', history.gpu, '#34c759');
+      renderSpark('gpu-spark', usageHistory.gpu, '#34c759');
       const rows = [['Card', gpu.name.replace(/^Tesla /, '')]];
       if (gpu.memory_total_mb) {
         rows.push(['Memory', (gpu.memory_used_mb / 1024).toFixed(1) + ' of ' + Math.round(gpu.memory_total_mb / 1024) + ' GB']);
@@ -364,7 +365,7 @@
       } else {
         byId('cpu-value').textContent = '…';
       }
-      renderSpark('cpu-spark', history.cpu, '#007aff');
+      renderSpark('cpu-spark', usageHistory.cpu, '#007aff');
       const rows = [];
       if (cpu) rows.push(['Busy cores', cpu.cores.filter((value) => value >= 50).length + ' of ' + system.cpus]);
       else rows.push(['Cores', String(system.cpus)]);
