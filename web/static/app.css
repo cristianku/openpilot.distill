@@ -308,3 +308,33 @@ place-items:center;font-size:16px;line-height:1;transition:transform .3s cubic-b
 @keyframes picker-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .picker-row:active{background:var(--surface)}
 @media (prefers-reduced-motion:reduce){.picker-drawer,.picker-chevron{transition:none}.picker.open .picker-row{animation:none}}
+
+/* results: ranking bars and the per-drive dot plot */
+.ranking{display:flex;flex-direction:column;gap:18px;margin-top:6px}
+.rank-row{animation:picker-in .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 70ms)}
+.rank-head{display:flex;align-items:baseline;gap:10px}
+.rank-pos{flex:none;width:26px;height:26px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;
+font-size:13px;font-weight:700;align-self:center}
+.rank-row:first-child .rank-pos{background:var(--ok);color:#fff}
+.rank-name{flex:1;min-width:0;font-weight:600;font-size:15px}
+.rank-value{font-size:24px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.rank-value small{font-size:14px;font-weight:600;color:var(--muted)}
+.rank-track{height:12px;border-radius:6px;background:var(--surface-2);margin:8px 0 6px 36px;overflow:hidden}
+.rank-fill{display:block;height:100%;border-radius:6px;width:var(--w);animation:rank-grow .9s cubic-bezier(.2,.8,.2,1) both;
+animation-delay:calc(var(--i) * 70ms + .1s)}
+@keyframes rank-grow{from{width:0}}
+.rank-notes{margin-left:36px;color:var(--muted);font-size:13px}
+.dot-legend{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-wrap:wrap;gap:14px;font-size:13.5px}
+.dot-legend li{display:flex;align-items:center;gap:6px}
+.dot-swatch{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dotplot{display:flex;flex-direction:column;gap:2px}
+.dot-row{display:flex;align-items:center;gap:10px;min-height:28px;animation:picker-in .4s ease both;
+animation-delay:calc(var(--i) * 25ms)}
+.dot-label{flex:none;width:96px;font-family:var(--font-data);font-size:11.5px;color:var(--muted)}
+.dot-lane{position:relative;flex:1;height:24px;border-bottom:1px solid var(--surface-2)}
+.dot{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;transform:translate(-50%,-50%);
+box-shadow:0 0 0 2px var(--surface)}
+.dot-span{position:absolute;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
+.dot-axis{position:relative;height:20px;margin-left:106px;font-size:11px;color:var(--muted)}
+.dot-axis span{position:absolute;transform:translateX(-50%)}
+@media (prefers-reduced-motion:reduce){.rank-row,.rank-fill,.dot-row{animation:none}}

@@ -536,6 +536,18 @@ def eval_results(repo: Path) -> list[dict]:
         date = data.get('created')
         if not _is_date_value(date):
             date = path.stat().st_mtime
+        # The result of every segment, for the per-drive chart of the page.
+        per_segment = []
+        raw_segments = data.get('per_segment')
+        if isinstance(raw_segments, list):
+            for entry in raw_segments[:200]:
+                if not isinstance(entry, dict) or not isinstance(entry.get('segment'), str):
+                    continue
+                if not SEGMENT_RE.fullmatch(entry['segment']):
+                    continue
+                per_segment.append({'segment': entry['segment'],
+                                    'avg_miss_m': _first_number(entry, ('avg_miss_m',)),
+                                    'lateral_miss_m': _first_number(entry, ('avg_lateral_miss_m',))})
         skipped = data.get('skipped')
         skipped_count = 0
         if isinstance(skipped, list) or isinstance(skipped, dict):
@@ -547,7 +559,7 @@ def eval_results(repo: Path) -> list[dict]:
                         'selection': _text(data, 'selection', 60) or '',
                         'rate_hz': _first_number(settings, ('rate_hz',)),
                         'horizon_s': _first_number(settings, ('horizon_s',)),
-                        'date': date, 'sha256': _text(model, 'sha256', 64) or ''})
+                        'date': date, 'sha256': _text(model, 'sha256', 64) or '', 'per_segment': per_segment})
 
     def sort_key(row):
         if row['avg_miss_m'] is None:

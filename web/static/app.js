@@ -1320,28 +1320,110 @@
     const firstRun = runModelOptions();
     fillSelect(byId('eval-model'), options, firstRun.length ? firstRun[0].value : 'stock');
     renderPicker('eval-model');
-    const results = data.evalResults || [];
+    renderResults(data.evalResults || []);
+  }
+
+  // Colours of the models in the results, in ranking order (Apple system colours).
+  const MODEL_COLORS = ['#34c759', '#007aff', '#ff9500', '#af52de', '#ff2d55', '#5ac8fa', '#a2845e'];
+
+  function renderResults(all) {
+    // The default evaluation only (hold-out, 5 Hz): the others are not comparable with it.
+    const results = all.filter((result) => (!result.selection || result.selection === 'heldout')
+      && (!result.rate_hz || result.rate_hz === 5) && result.avg_miss_m !== null);
     if (same('leaderboard', results)) return;
-    const body = byId('leaderboard');
-    body.replaceChildren();
+    const box = byId('leaderboard');
+    box.replaceChildren();
     byId('leaderboard-empty').hidden = results.length > 0;
+    const best = results.length ? results[0].avg_miss_m : 0;
+    const worst = results.length ? results[results.length - 1].avg_miss_m : 1;
     results.forEach((result, index) => {
-      const row = node('tr', index === 0 && result.avg_miss_m !== null ? 'best' : '');
-      row.appendChild(node('td', 'num', String(index + 1)));
-      const modelCell = node('td');
-      modelCell.appendChild(node('div', 'model-name', modelInfo(result.model).title));
-      let note = '';
-      if (result.selection && result.selection !== 'heldout') note += (note ? ' · ' : '') + 'segments: ' + result.selection;
-      if (result.rate_hz && result.rate_hz !== 5) note += (note ? ' · ' : '') + result.rate_hz + ' Hz';
-      if (result.skipped) note += (note ? ' · ' : '') + result.skipped + ' skipped';
-      if (note) modelCell.appendChild(node('div', 'note', note));
-      row.appendChild(modelCell);
-      row.appendChild(node('td', 'num', result.avg_miss_m === null ? '–' : result.avg_miss_m.toFixed(2) + ' m'));
-      row.appendChild(node('td', 'num', result.lateral_miss_m === null ? '–' : result.lateral_miss_m.toFixed(2) + ' m'));
-      row.appendChild(node('td', 'num', result.segments === null ? '–' : String(result.segments)));
-      row.appendChild(node('td', 'note', fmtTime(result.date)));
-      body.appendChild(row);
+      const color = MODEL_COLORS[index % MODEL_COLORS.length];
+      const row = node('div', 'rank-row');
+      row.style.setProperty('--i', String(index));
+      const head = node('div', 'rank-head');
+      head.appendChild(node('span', 'rank-pos', String(index + 1)));
+      head.appendChild(node('span', 'rank-name', modelInfo(result.model).title));
+      const value = node('span', 'rank-value', result.avg_miss_m.toFixed(2));
+      value.appendChild(node('small', '', ' m'));
+      head.appendChild(value);
+      row.appendChild(head);
+      const track = node('div', 'rank-track');
+      const fill = node('span', 'rank-fill');
+      fill.style.background = color;
+      fill.style.setProperty('--w', Math.max(4, result.avg_miss_m * 100 / worst) + '%');
+      track.appendChild(fill);
+      row.appendChild(track);
+      const notes = [];
+      if (index === 0) notes.push('best');
+      else notes.push((result.avg_miss_m / best).toFixed(1) + '\u00d7 the error of the best');
+      if (result.lateral_miss_m !== null) notes.push('sideways ' + result.lateral_miss_m.toFixed(2) + ' m');
+      if (result.segments !== null) notes.push(result.segments + ' drives');
+      notes.push(fmtDay(typeof result.date === 'string' ? Date.parse(result.date) / 1000 : result.date));
+      row.appendChild(node('div', 'rank-notes', notes.join(' \u00b7 ')));
+      box.appendChild(row);
     });
+    renderPerDrive(results);
+  }
+
+  // A dot plot: one line per hold-out segment, one dot per model, on a shared metre scale.
+  function renderPerDrive(results) {
+    const withSegments = results.filter((result) => result.per_segment && result.per_segment.length);
+    byId('per-drive-card').hidden = withSegments.length === 0;
+    if (!withSegments.length) return;
+    const legend = byId('per-drive-legend');
+    legend.replaceChildren();
+    const segments = [];
+    let maximum = 0;
+    withSegments.forEach((result) => {
+      const index = results.indexOf(result);
+      const item = node('li');
+      const dot = node('span', 'dot-swatch');
+      dot.style.background = MODEL_COLORS[index % MODEL_COLORS.length];
+      item.appendChild(dot);
+      item.appendChild(document.createTextNode(modelInfo(result.model).title));
+      legend.appendChild(item);
+      for (const entry of result.per_segment) {
+        if (segments.indexOf(entry.segment) < 0) segments.push(entry.segment);
+        if (entry.avg_miss_m !== null) maximum = Math.max(maximum, entry.avg_miss_m);
+      }
+    });
+    const scale = Math.ceil(maximum / 5) * 5 || 5;
+    const plot = byId('per-drive');
+    plot.replaceChildren();
+    segments.sort();
+    segments.forEach((segment, row) => {
+      const line = node('div', 'dot-row');
+      line.style.setProperty('--i', String(row));
+      line.appendChild(node('span', 'dot-label', segment.slice(0, 8) + '\u2026' + ' #' + Number(segment.slice(18))));
+      const lane = node('div', 'dot-lane');
+      const values = [];
+      withSegments.forEach((result) => {
+        const entry = result.per_segment.find((item) => item.segment === segment);
+        if (!entry || entry.avg_miss_m === null) return;
+        const index = results.indexOf(result);
+        const dot = node('span', 'dot');
+        dot.style.left = (entry.avg_miss_m * 100 / scale) + '%';
+        dot.style.background = MODEL_COLORS[index % MODEL_COLORS.length];
+        dot.title = modelInfo(result.model).title + ': ' + entry.avg_miss_m.toFixed(2) + ' m';
+        lane.appendChild(dot);
+        values.push(entry.avg_miss_m);
+      });
+      if (values.length > 1) {
+        const span = node('span', 'dot-span');
+        span.style.left = (Math.min(...values) * 100 / scale) + '%';
+        span.style.width = ((Math.max(...values) - Math.min(...values)) * 100 / scale) + '%';
+        lane.prepend(span);
+      }
+      line.appendChild(lane);
+      plot.appendChild(line);
+    });
+    const axis = node('div', 'dot-axis');
+    for (let tick = 0; tick <= scale; tick += scale / 5) {
+      const label = node('span', '', tick + ' m');
+      label.style.left = (tick * 100 / scale) + '%';
+      axis.appendChild(label);
+    }
+    plot.appendChild(axis);
   }
   byId('btn-eval').addEventListener('click', () => {
     const model = byId('eval-model').value;

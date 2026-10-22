@@ -211,14 +211,17 @@
       <div class="job-live" data-actions="eval"></div>
     </div>
     <div class="card">
-      <h2>Leaderboard</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th class="num">#</th><th>Model</th><th class="num">avg miss</th><th class="num">lateral</th>
-          <th class="num">Segments</th><th>Date</th></tr></thead>
-        <tbody id="leaderboard"></tbody>
-      </table></div>
-      <p class="empty" id="leaderboard-empty" hidden>No evaluations yet.</p>
-      <p class="note">avg miss: mean distance in metres between the predicted path and the real one; lower is better.</p>
+      <h2>Results</h2>
+      <p class="lead">How far, on average, each model's predicted path is from where you really drove over the next
+        10 s. <b>Shorter bar, better model.</b></p>
+      <div class="ranking" id="leaderboard"></div>
+      <p class="empty" id="leaderboard-empty" hidden>No evaluations yet: pick a model above and tap Evaluate.</p>
+    </div>
+    <div class="card" id="per-drive-card" hidden>
+      <h2>Drive by drive</h2>
+      <p class="lead">Every row is one hold-out drive, every dot a model: the further left, the closer to your driving.</p>
+      <ul class="dot-legend" id="per-drive-legend"></ul>
+      <div class="dotplot" id="per-drive"></div>
     </div>
   </section>
 
