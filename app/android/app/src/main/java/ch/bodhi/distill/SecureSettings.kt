@@ -18,7 +18,8 @@ data class Connection(val url: String = "", val token: String = "", val allowHtt
 
 object ServerAddress {
     // A pasted browser login URL is split before it can enter normal preferences.
-    fun extractLoginLink(input: String): Pair<String, String>? = try {
+    fun extractLoginLink(input: String): Pair<String, String>? {
+        return try {
         val uri = URI(input.trim())
         val query = uri.rawQuery?.split("&") ?: return null
         if (query.size != 1) return null
@@ -29,8 +30,9 @@ object ServerAddress {
         val clean = URI(uri.scheme, uri.rawAuthority, uri.path, null, null)
         val base = parse(clean.toString(), allowHttp = true) ?: return null
         base to token
-    } catch (_: Exception) {
-        null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun parse(input: String, allowHttp: Boolean): String? = try {
