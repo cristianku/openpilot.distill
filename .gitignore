@@ -10,6 +10,8 @@ models/model.fp8_nvfp4.torchpackage
 # Teachers (0.8 and 1.8 GB), downloaded by helpers/train_supervised.sh
 models/big_driving_supercombo*.onnx
 models/big_driving_supercombo*.onnx.part
+# The comma's original model, copied from the comma by helpers/export_onnx.sh as export reference
+models/comma_driving_supercombo.onnx
 .env
 data_scartati/
 worldmodel-inspected/
