@@ -419,3 +419,8 @@ button.tile:hover{box-shadow:0 4px 14px rgba(0,0,0,.08)}
 transition:height .6s ease}
 .core.warm::after{background:var(--todo)}.core.hot::after{background:var(--bad)}
 @media (prefers-reduced-motion:reduce){.core::after{transition:none}}
+
+/* label: value lines under the machine cards */
+.sub.stats{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:8px;font-size:14px}
+.stat-label{color:var(--muted)}
+.stat-value{font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg)}

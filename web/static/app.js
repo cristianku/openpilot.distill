@@ -318,6 +318,18 @@
     });
   }
 
+  // Label: value lines under a machine card, in place of one dense line of numbers.
+  function statRows(id, rows) {
+    const box = byId(id);
+    if (same('stats:' + id, rows)) return;
+    box.replaceChildren();
+    box.classList.add('stats');
+    for (const [label, value] of rows) {
+      box.appendChild(node('span', 'stat-label', label));
+      box.appendChild(node('span', 'stat-value', value));
+    }
+  }
+
   function renderMachine() {
     const system = status.system;
     const gpu = system.gpu;
@@ -327,16 +339,19 @@
       setBar('gpu-bar', util, util > 85 ? 'warn' : '');
       pushHistory('gpu', util);
       renderSpark('gpu-spark', history.gpu, '#34c759');
-      let text = gpu.name;
-      if (gpu.memory_total_mb) text += ' · ' + (gpu.memory_used_mb / 1024).toFixed(1) + ' / ' + (gpu.memory_total_mb / 1024).toFixed(0) + ' GB';
-      if (gpu.temperature !== null) text += ' · ' + gpu.temperature + ' °C';
-      if (gpu.power_w !== null) text += ' · ' + Math.round(gpu.power_w) + ' W';
-      text += gpu.processes.length ? ' · ' + gpu.processes.length + (gpu.processes.length === 1 ? ' process' : ' processes') : ' · idle';
-      byId('gpu-sub').textContent = text;
+      const rows = [['Card', gpu.name.replace(/^Tesla /, '')]];
+      if (gpu.memory_total_mb) {
+        rows.push(['Memory', (gpu.memory_used_mb / 1024).toFixed(1) + ' of ' + Math.round(gpu.memory_total_mb / 1024) + ' GB']);
+      }
+      if (gpu.temperature !== null) rows.push(['Temperature', gpu.temperature + ' °C']);
+      if (gpu.power_w !== null) rows.push(['Power', Math.round(gpu.power_w) + ' W']);
+      rows.push(['Doing', gpu.processes.length ? gpu.processes.length + (gpu.processes.length === 1 ? ' job' : ' jobs')
+        : 'nothing (idle)']);
+      statRows('gpu-sub', rows);
     } else {
       byId('gpu-value').textContent = 'n/a';
       setBar('gpu-bar', 0, '');
-      byId('gpu-sub').textContent = 'nvidia-smi not available';
+      statRows('gpu-sub', [['Card', 'no NVIDIA GPU found']]);
     }
     if (system.cpus) {
       const cpu = system.cpu;
@@ -348,16 +363,26 @@
         byId('cpu-value').textContent = '…';
       }
       renderSpark('cpu-spark', history.cpu, '#007aff');
-      let sub = system.cpus + (system.cpus === 1 ? ' core' : ' cores');
-      if (cpu) sub += ' · ' + cpu.cores.filter((value) => value >= 50).length + ' busy';
-      if (system.load) sub += ' · load ' + system.load.map((value) => value.toFixed(1)).join(' / ') + ' (1 / 5 / 15 min)';
-      byId('cpu-sub').textContent = sub;
+      const rows = [];
+      if (cpu) rows.push(['Busy cores', cpu.cores.filter((value) => value >= 50).length + ' of ' + system.cpus]);
+      else rows.push(['Cores', String(system.cpus)]);
+      if (system.load) {
+        // Load average = programs running or waiting, on average: per core it says how loaded the
+        // machine was over the last 15 minutes, and comparing 1 and 15 minutes gives the trend.
+        const perCore = system.load[2] / system.cpus;
+        rows.push(['Last 15 minutes', perCore < 0.25 ? 'light' : (perCore < 0.7 ? 'moderate' : 'heavy')]);
+        const trend = system.load[0] > system.load[2] * 1.3 + 0.5 ? 'rising'
+          : (system.load[0] < system.load[2] * 0.7 - 0.5 ? 'calming down' : 'steady');
+        rows.push(['Trend', trend]);
+      }
+      statRows('cpu-sub', rows);
     }
     const memory = system.memory;
     if (memory) {
       byId('ram-value').textContent = memory.available_gb + ' GB free';
       setBar('ram-bar', memory.used_percent, memory.used_percent > 90 ? 'bad' : (memory.used_percent > 75 ? 'warn' : ''));
-      byId('ram-sub').textContent = 'of ' + memory.total_gb + ' GB · ' + memory.used_percent + '% used';
+      statRows('ram-sub', [['In use', (memory.total_gb - memory.available_gb).toFixed(1) + ' GB (' + memory.used_percent + '%)'],
+        ['Total', memory.total_gb + ' GB']]);
     } else {
       byId('ram-value').textContent = 'n/a';
     }
@@ -366,7 +391,8 @@
       const used = 100 - disk.free_gb * 100 / disk.total_gb;
       byId('disk-value').textContent = disk.free_gb + ' GB free';
       setBar('disk-bar', used, disk.free_gb < 10 ? 'bad' : (used > 80 ? 'warn' : ''));
-      byId('disk-sub').textContent = 'of ' + disk.total_gb + ' GB';
+      statRows('disk-sub', [['In use', (disk.total_gb - disk.free_gb).toFixed(1) + ' GB (' + Math.round(used) + '%)'],
+        ['Total', disk.total_gb + ' GB']]);
     }
     if (same('gpu-procs', gpu ? gpu.processes : [])) return;
     const body = byId('gpu-procs');
@@ -378,7 +404,6 @@
       row.appendChild(node('td', 'mono', process.pid === null ? '?' : String(process.pid)));
       row.appendChild(node('td', '', process.name));
       row.appendChild(node('td', 'num', process.memory_mb === null ? '–' : Math.round(process.memory_mb) + ' MiB'));
-      row.appendChild(node('td', 'mono', process.command || '–'));
       body.appendChild(row);
     }
   }
