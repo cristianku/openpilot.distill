@@ -271,10 +271,6 @@
       <div class="reason" id="publish-name-note"></div>
       <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-publish-dry">Dry run</button><div class="reason" id="reason-publish_dry"></div></div></div>
       <div id="dry-status" class="note"></div>
-      <hr class="divider">
-      <div class="form-grid wide">
-        <label class="field">Type the name to confirm<input type="text" id="publish-confirm" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-      </div>
       <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Publish to Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
     </div>
     <div class="card">
@@ -297,15 +293,11 @@
       <p class="lead">Puts the run's model in place of openpilot's and reboots the comma (the first boot recompiles, a few extra minutes). Only when parked (offroad) and with the Models menu set to Default.</p>
       <div class="form-grid wide">
         <label class="field">Run<select id="install-run"></select></label>
-        <label class="field">Type INSTALL to confirm<input type="text" id="install-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
       </div>
       <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
     </div>
     <div class="card">
       <h2>Restore the original model</h2>
-      <div class="form-grid wide">
-        <label class="field">Type RESTORE to confirm<input type="text" id="restore-confirm" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
-      </div>
       <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Restore and reboot</button><div class="reason" id="reason-restore"></div></div></div>
     </div>
   </section>

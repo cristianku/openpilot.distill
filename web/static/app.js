@@ -503,12 +503,8 @@
     setAction('btn-compare', 'compare', compareFormReason());
     setAction('btn-export', 'export', byId('export-run').value ? '' : 'no finished run');
     updatePublishButtons();
-    const installRun = byId('install-run').value;
-    let installReason = '';
-    if (!installRun) installReason = 'no finished run';
-    else if (byId('install-confirm').value !== 'INSTALL') installReason = 'type INSTALL to confirm';
-    setAction('btn-install', 'install', installReason);
-    setAction('btn-restore', 'restore', byId('restore-confirm').value !== 'RESTORE' ? 'type RESTORE to confirm' : '');
+    setAction('btn-install', 'install', byId('install-run').value ? '' : 'no finished run');
+    setAction('btn-restore', 'restore');
     setAction('btn-update', 'update');
     if (status.test_actions) setAction('btn-selftest', 'selftest');
   }
@@ -1273,7 +1269,6 @@
     else if (!validName) reason = 'type a valid name';
     else if (taken) reason = 'name already used on Hugging Face';
     else if (!dry || dry.state !== 'ok') reason = 'first a successful dry run with the same settings';
-    else if (byId('publish-confirm').value !== params.name) reason = 'type the exact name to confirm';
     setAction('btn-publish', 'publish', reason);
   }
 
@@ -1281,10 +1276,12 @@
   byId('btn-publish-dry').addEventListener('click', () => runAction('publish_dry', publishParams()));
   byId('btn-publish').addEventListener('click', () => {
     const params = publishParams();
-    params.confirm = byId('publish-confirm').value;
-    runAction('publish', params).then((job) => { if (job) byId('publish-confirm').value = ''; });
+    // The confirmation the server asks for is the popup's OK: it sends the name back.
+    params.confirm = params.name;
+    runAction('publish', params, 'Publish run ' + params.run + ' to Hugging Face as "' + params.name + '"'
+      + (params.stable ? ' and make it the stable weights' : '') + '? Anyone can download it once published.');
   });
-  for (const id of ['publish-run', 'publish-name', 'publish-stable', 'publish-confirm']) {
+  for (const id of ['publish-run', 'publish-name', 'publish-stable']) {
     byId(id).addEventListener('input', () => { renderPublish(); updateButtons(); });
     byId(id).addEventListener('change', () => { renderPublish(); updateButtons(); });
   }
@@ -1311,12 +1308,13 @@
   });
   byId('btn-install').addEventListener('click', () => {
     const run = byId('install-run').value;
-    runAction('install', {run: run, confirm: byId('install-confirm').value}).then((job) => { if (job) byId('install-confirm').value = ''; });
+    runAction('install', {run: run, confirm: 'INSTALL'},
+      'Install the model of run ' + run + ' on the comma? It replaces openpilot\'s model and reboots the comma.');
   });
   byId('btn-restore').addEventListener('click', () => {
-    runAction('restore', {confirm: byId('restore-confirm').value}).then((job) => { if (job) byId('restore-confirm').value = ''; });
+    runAction('restore', {confirm: 'RESTORE'}, 'Put the original openpilot model back on the comma? The comma reboots.');
   });
-  for (const id of ['install-confirm', 'restore-confirm', 'install-run']) byId(id).addEventListener('input', updateButtons);
+  byId('install-run').addEventListener('input', updateButtons);
 
   // -- Jobs -------------------------------------------------------------------------------------
   byId('btn-update').addEventListener('click', () => runAction('update', {}, 'Update the code: pull the latest version, update the libraries and restart the site (a few seconds). Start?'));
