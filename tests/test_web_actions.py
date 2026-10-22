@@ -54,13 +54,13 @@ class ActionTestCase(unittest.TestCase):
 
 class ArgvTest(ActionTestCase):
     def test_fetch(self):
-        self.assertEqual(self.build('fetch', {}).argv, ['helpers/fetch_comma_segments.sh'])
-        self.assertEqual(self.build('fetch', {'since': ''}).argv, ['helpers/fetch_comma_segments.sh'])
+        self.assertEqual(self.build('fetch', {}).argv, [PY, '-m', 'tasks.fetch'])
+        self.assertEqual(self.build('fetch', {'since': ''}).argv, [PY, '-m', 'tasks.fetch'])
         self.assertEqual(self.build('fetch', {'since': '2026-10-20'}).argv,
-                         ['helpers/fetch_comma_segments.sh', '--since=2026-10-20'])
+                         [PY, '-m', 'tasks.fetch', '--since=2026-10-20'])
 
     def test_localize(self):
-        self.assertEqual(self.build('localize', {}).argv, ['helpers/localize_segments.sh'])
+        self.assertEqual(self.build('localize', {}).argv, [PY, '-m', 'tasks.localize'])
 
     def test_train_fresh(self):
         spec = self.build('train', {'steps': 5000, 'batch_size': 8, 'workers': 6, 'mode': 'fresh', 'wandb': ''})
@@ -121,19 +121,17 @@ class ArgvTest(ActionTestCase):
         self.assertIn('--no-inset', spec.argv)
 
     def test_export_publish_install_restore_update(self):
-        pt = 'outputs/supervised/' + RUN + '/supercombo.pt'
-        self.assertEqual(self.build('export', {'run': RUN}).argv, ['helpers/export_onnx.sh', pt])
+        self.assertEqual(self.build('export', {'run': RUN}).argv, [PY, '-m', 'tasks.export', '--run', RUN])
         self.assertEqual(self.build('publish_dry', {'run': RUN, 'name': 'prova.1', 'stable': False}).argv,
-                         ['helpers/publish_model.sh', '--no-upload', '--name=prova.1', pt])
+                         [PY, '-m', 'tasks.publish', '--name=prova.1', '--run', RUN])
         self.assertEqual(self.build('publish', {'run': RUN, 'name': 'prova', 'stable': True, 'confirm': 'prova'}).argv,
-                         ['helpers/publish_model.sh', '--name=prova', '--stable', pt])
+                         [PY, '-m', 'tasks.publish', '--upload', '--name=prova', '--stable', '--run', RUN])
         self.assertEqual(self.build('install', {'run': RUN, 'confirm': 'INSTALLA'}).argv,
-                         ['helpers/install_model_on_comma.sh', pt])
+                         [PY, '-m', 'tasks.install', '--run', RUN])
         self.assertEqual(self.build('restore', {'confirm': 'RIPRISTINA'}).argv,
-                         ['helpers/install_model_on_comma.sh', '--restore'])
-        self.assertEqual(self.build('update', {}).argv, ['helpers/update.sh'])
-        self.assertEqual(self.build('export', {'run': RUN_SECONDS}).argv[1],
-                         'outputs/supervised/' + RUN_SECONDS + '/supercombo.pt')
+                         [PY, '-m', 'tasks.install', '--restore'])
+        self.assertEqual(self.build('update', {}).argv, [PY, '-m', 'tasks.update'])
+        self.assertEqual(self.build('export', {'run': RUN_SECONDS}).argv[-1], RUN_SECONDS)
 
     def test_publish_params_are_kept_for_the_dry_run_match(self):
         dry = self.build('publish_dry', {'run': RUN, 'name': 'x', 'stable': True})
@@ -277,7 +275,7 @@ class ValidationTest(ActionTestCase):
         self.assertEqual(slug_of('cd210-native'), 'cd210_native')
 
     def test_missing_scripts(self):
-        self.assertIn('tasks/evaluation.py', script_missing(self.repo, 'eval'))
+        self.assertIn('questa versione del codice', script_missing(self.repo, 'eval'))
         (self.repo / 'tasks').mkdir()
         (self.repo / 'tasks' / 'evaluation.py').write_text('')
         self.assertEqual(script_missing(self.repo, 'eval'), '')

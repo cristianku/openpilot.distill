@@ -97,7 +97,7 @@ def parse_progress(text: str) -> dict | None:
 
 
 def parse_run_dir(text: str, repo: Path) -> str | None:
-    """The run folder name from the "RUN_DIR=<abs path>" line of helpers/train_supervised.sh."""
+    """The run folder name from the "RUN_DIR=<abs path>" line of tasks/train.py."""
     for line in log_lines(text):
         match = RUN_DIR_RE.match(line.strip())
         if match is None:

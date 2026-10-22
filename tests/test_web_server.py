@@ -48,11 +48,12 @@ class FakeHf:
                 'checked': 1.0, 'models': list(self.models), 'releases': ['2026_10_21_1544'], 'stable': False}
 
 
-def write_script(repo: Path, name: str, body: str) -> None:
-    path = repo / 'helpers' / name
+def write_task(repo: Path, name: str, body: str) -> None:
+    """A fake tasks/<name>.py in the test repo: the jobs run "python -m tasks.<name>" from the repo."""
+    path = repo / 'tasks' / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('#!/bin/sh\n' + body + '\n')
-    path.chmod(0o755)
+    (path.parent / '__init__.py').touch()
+    path.write_text('import sys\n' + body + '\n')
 
 
 class ServerTestCase(unittest.TestCase):
@@ -235,7 +236,7 @@ class PageTest(ServerTestCase):
         for key in ('system', 'activities', 'jobs', 'comma', 'training', 'actions', 'code', 'limits'):
             self.assertIn(key, status)
         self.assertEqual(status['actions']['localize']['allowed'], False)
-        self.assertIn('helpers/localize_segments.sh', status['actions']['localize']['reason'])
+        self.assertIn('questa versione del codice', status['actions']['localize']['reason'])
         self.assertNotIn('selftest', status['actions'])
 
     def test_runs_and_metrics(self):
@@ -309,14 +310,14 @@ class PostTest(ServerTestCase):
     def test_unknown_action_and_parameter(self):
         response, body = self.post('/api/run/format_disk', {})
         self.assertEqual(response.status, 404)
-        write_script(self.repo, 'localize_segments.sh', 'echo ok')
+        write_task(self.repo, 'localize.py', 'print("ok")')
         response, body = self.post('/api/run/localize', {'segment': '../../etc'})
         self.assertEqual(response.status, 400)
         response, body = self.post('/api/run/selftest', {})
         self.assertEqual(response.status, 404)
 
     def test_start_a_job_and_read_its_log(self):
-        write_script(self.repo, 'localize_segments.sh', 'echo "localizzo $#"; echo PROGRESS 1/1')
+        write_task(self.repo, 'localize.py', 'print("localizzo", len(sys.argv) - 1)\nprint("PROGRESS 1/1")')
         response, body = self.post('/api/run/localize', {})
         self.assertEqual(response.status, 200, body)
         job = json.loads(body)['job']
@@ -339,7 +340,7 @@ class PostTest(ServerTestCase):
         self.assertEqual(response.status, 404)
 
     def test_publish_needs_a_free_name_and_a_good_dry_run(self):
-        write_script(self.repo, 'publish_model.sh', 'echo "publish $*"')
+        write_task(self.repo, 'publish.py', 'print("publish", *sys.argv[1:])')
         params = {'run': RUN, 'name': 'nuovo', 'stable': False, 'confirm': 'nuovo'}
         response, body = self.post('/api/run/publish', {'run': RUN, 'name': '2026_10_21_1544', 'stable': False,
                                                         'confirm': '2026_10_21_1544'})
@@ -371,7 +372,7 @@ class PostTest(ServerTestCase):
         self.assertEqual(job['params'], {'run': RUN, 'name': 'nuovo', 'stable': False})
 
     def test_install_needs_the_comma_offroad(self):
-        write_script(self.repo, 'install_model_on_comma.sh', 'echo install')
+        write_task(self.repo, 'install.py', 'print("install")')
         self.comma.state['reachable'] = False
         self.comma.state['error'] = 'comma non raggiungibile via ssh'
         response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALLA'})

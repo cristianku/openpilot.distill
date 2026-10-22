@@ -21,7 +21,7 @@ GPU_LOCK_FILE = '/run/lock/v100-gpu.lock'
 
 # Model specs of evaluation/ (python -m evaluation.compare / evaluation.holdout).
 MODEL_SPEC_RE = re.compile(r'^(stock|teacher|logged|run:[A-Za-z0-9_.-]+|hf:[a-z0-9_]+)$')
-# Name of a published model (helpers/publish_model.sh --name).
+# Name of a published model (tasks/publish.py --name).
 NAME_RE = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')
 DATE_RE = re.compile(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
 # A number typed in a form: digits with an optional decimal part, nothing else (no "1e3", no "nan").
@@ -64,20 +64,20 @@ class Action:
 
 
 ACTIONS = {
-    'fetch': Action('Scarica i segmenti dal comma', 'data', 'helpers/fetch_comma_segments.sh'),
-    'localize': Action('Localizza i segmenti', 'data', 'helpers/localize_segments.sh'),
+    'fetch': Action('Scarica i segmenti dal comma', 'data', 'tasks/fetch.py'),
+    'localize': Action('Localizza i segmenti', 'data', 'tasks/localize.py'),
     'train': Action('Training', 'gpu', 'tasks/train.py', needs_gpu=True),
     'train_test': Action('Prova del training (10 step)', 'gpu', 'tasks/train.py', needs_gpu=True),
     'eval': Action('Valutazione sui segmenti hold-out', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
     'compare': Action('Video di confronto', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
-    'export': Action('Export ONNX', 'cpu', 'helpers/export_onnx.sh'),
-    'publish_dry': Action('Pubblicazione di prova (dry run)', 'cpu', 'helpers/publish_model.sh'),
-    'publish': Action('Pubblicazione su Hugging Face', 'cpu', 'helpers/publish_model.sh'),
-    'install': Action('Installazione sul comma', 'comma', 'helpers/install_model_on_comma.sh',
+    'export': Action('Export ONNX', 'cpu', 'tasks/export.py'),
+    'publish_dry': Action('Pubblicazione di prova (dry run)', 'cpu', 'tasks/publish.py'),
+    'publish': Action('Pubblicazione su Hugging Face', 'cpu', 'tasks/publish.py'),
+    'install': Action('Installazione sul comma', 'comma', 'tasks/install.py',
                       needs_comma_offroad=True),
-    'restore': Action('Ripristino del modello originale', 'comma', 'helpers/install_model_on_comma.sh',
+    'restore': Action('Ripristino del modello originale', 'comma', 'tasks/install.py',
                       needs_comma_offroad=True),
-    'update': Action('Aggiornamento del codice', 'system', 'helpers/update.sh'),
+    'update': Action('Aggiornamento del codice', 'system', 'tasks/update.py'),
 }
 
 # Only with "python -m web.server --test-actions": a harmless job to test the job runner and the GPU
@@ -326,7 +326,7 @@ def gpus_text(gpus: str) -> str:
 
 
 def slug_of(name: str) -> str:
-    """The folder name helpers/publish_model.sh uses on Hugging Face for --name:
+    """The folder name tasks/publish.py uses on Hugging Face for --name:
     lowercase, every character other than a-z 0-9 becomes '_' (tr -c 'a-z0-9' '_')."""
     result = []
     for character in name.lower():
@@ -357,7 +357,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
     if action_id == 'fetch':
         check_keys(params, ('since',))
         since = date_param(params, 'since')
-        argv = ['helpers/fetch_comma_segments.sh']
+        argv = [sys.executable, '-m', 'tasks.fetch']
         summary = 'giri nuovi dal comma'
         if since:
             argv.append('--since=' + since)
@@ -366,7 +366,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
 
     elif action_id == 'localize':
         check_keys(params, ())
-        argv = ['helpers/localize_segments.sh']
+        argv = [sys.executable, '-m', 'tasks.localize']
         summary = 'segmenti da fare e da raffinare'
 
     elif action_id == 'train':
@@ -455,7 +455,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
     elif action_id == 'export':
         check_keys(params, ('run',))
         run = run_param(repo, params.get('run'), 'final')
-        argv = ['helpers/export_onnx.sh', 'outputs/supervised/' + run + '/supercombo.pt']
+        argv = [sys.executable, '-m', 'tasks.export', '--run', run]
         clean['run'] = run
         summary = run
 
@@ -472,13 +472,13 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             if text_param(params, 'confirm') != name:
                 raise WebError(400, 'confirmation_required',
                                'Per pubblicare scrivi esattamente il nome del modello (' + name + ').')
-            argv = ['helpers/publish_model.sh']
+            argv = [sys.executable, '-m', 'tasks.publish', '--upload']
         else:
-            argv = ['helpers/publish_model.sh', '--no-upload']
+            argv = [sys.executable, '-m', 'tasks.publish']
         argv.append('--name=' + name)
         if stable:
             argv.append('--stable')
-        argv.append('outputs/supervised/' + run + '/supercombo.pt')
+        argv += ['--run', run]
         clean = {'run': run, 'name': name, 'stable': stable}
         summary = run + ' come ' + name
         if stable:
@@ -489,7 +489,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         run = run_param(repo, params.get('run'), 'final')
         if text_param(params, 'confirm') != CONFIRM_INSTALL:
             raise WebError(400, 'confirmation_required', 'Per installare scrivi ' + CONFIRM_INSTALL + '.')
-        argv = ['helpers/install_model_on_comma.sh', 'outputs/supervised/' + run + '/supercombo.pt']
+        argv = [sys.executable, '-m', 'tasks.install', '--run', run]
         clean['run'] = run
         summary = run + ' sul comma (si riavvia)'
 
@@ -497,12 +497,12 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         check_keys(params, ('confirm',))
         if text_param(params, 'confirm') != CONFIRM_RESTORE:
             raise WebError(400, 'confirmation_required', 'Per ripristinare scrivi ' + CONFIRM_RESTORE + '.')
-        argv = ['helpers/install_model_on_comma.sh', '--restore']
+        argv = [sys.executable, '-m', 'tasks.install', '--restore']
         summary = 'modello originale sul comma (si riavvia)'
 
     elif action_id == 'update':
         check_keys(params, ())
-        argv = ['helpers/update.sh']
+        argv = [sys.executable, '-m', 'tasks.update']
         summary = 'ultima versione del codice, librerie, riavvio del sito'
 
     elif action_id == 'selftest':
@@ -526,4 +526,4 @@ def script_missing(repo: Path, action_id: str, test_actions: bool = False) -> st
         return ''
     if (repo / action.script).is_file():
         return ''
-    return 'manca ' + action.script + ' in questa versione del repo'
+    return 'questa versione del codice non ha ancora «' + action.label + '»'

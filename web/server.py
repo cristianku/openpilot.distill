@@ -57,7 +57,7 @@ STATIC_FILES = {
 }
 BUNDLE_REASON = ('sul comma e\' scelto un modello nel menu Modelli: rimetti Default (Impostazioni > Modelli) '
                  'e controlla di nuovo')
-TOKEN_MESSAGE = 'Accesso negato: apri l\'indirizzo con il token (helpers/web.sh lo stampa).'
+TOKEN_MESSAGE = 'Accesso negato: apri il link del sito che contiene il token.'
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 PROBLEM_CSP = ("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
                "frame-ancestors 'none'")

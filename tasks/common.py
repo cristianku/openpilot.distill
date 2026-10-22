@@ -20,7 +20,7 @@ from web.common import read_env_file
 REPO = Path(__file__).resolve().parents[1]
 GPU_LOCK_FILE = '/run/lock/v100-gpu.lock'
 # The keys of the repo .env that the tasks use; every other key (the site token) is ignored.
-ENV_KEYS = ('HF_REPO', 'COMMA_HOST', 'COMMA_VIDEOS_DIR')
+ENV_KEYS = ('HF_REPO', 'COMMA_HOST', 'COMMA_VIDEOS_DIR', 'DISTILL_UV_EXTRA')
 DEFAULT_HF_REPO = 'cristianku/openpilot-distill-models'
 
 
