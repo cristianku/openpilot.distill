@@ -8,6 +8,7 @@ frame_info.safetensors next to rlog.zst).
   python -m tasks.localize 6616faac453a3064/0000011c--8152ba83cf/1    (connect format)
   python -m tasks.localize 0000011c--8152ba83cf 1 2 3
   python -m tasks.localize 0000011c--8152ba83cf 2-9
+  python -m tasks.localize --jobs 4                                   (4 segments at a time)
 
 State of a segment folder:
   done     localizer.safetensors and frame_info.safetensors both present (written only on success)
@@ -15,6 +16,11 @@ State of a segment folder:
   failed   localizer.failed present (date + last lines of the error); removed on the next success
   todo     neither
 Every run also leaves the full output in localizer.log.
+
+Several segments run at the same time (--jobs, by default up to 8, fewer with few cores or little free
+memory): one localizer.run uses about one core. Each one gets at most 2 numeric threads, so they do
+not fight over the cores. The job log gets one line per segment when it ends; the full output of a
+segment is in its localizer.log.
 
 Ionosphere map: the localizer writes the one it used in localizer.ionex ("2026/293 P1D"). P1D
 (prediction) is the only one for a drive of today, RAP comes out about one day later, FIN about two
@@ -36,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tasks.common import REPO, TaskError, load_env, run_main, say
@@ -58,15 +65,47 @@ NUMBER_RE = re.compile(r'^[0-9]+$')
 NAME_RE = re.compile(r'^[0-9a-f]+$')
 
 
+# Segments localized at the same time: at most this many, and never more than half the cores or one
+# per MEMORY_PER_JOB_GB of free memory.
+MAX_JOBS = 8
+MEMORY_PER_JOB_GB = 1.5
+# Numeric threads (BLAS, OpenMP) of every localizer.run.
+THREADS_PER_JOB = '2'
+THREAD_VARIABLES = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
+# --jobs N or --jobs=N, read by parse_args into this (None = default_jobs()).
+jobs_option = {'value': None}
+
+
+def default_jobs() -> int:
+    jobs = min(MAX_JOBS, max(1, (os.cpu_count() or 1) // 2))
+    try:
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemAvailable:'):
+                available_gb = int(line.split()[1]) / 1024 / 1024
+                jobs = min(jobs, max(1, int(available_gb / MEMORY_PER_JOB_GB)))
+    except (OSError, ValueError, IndexError):
+        pass
+    return jobs
+
+
 def parse_args(arguments: list[str]) -> tuple[list[str], bool, bool]:
     """(segment folder names, --status, --help). Names are read as they come: a route
-    (0000011c--8152ba83cf) applies to the numbers and ranges that follow it."""
+    (0000011c--8152ba83cf) applies to the numbers and ranges that follow it. --jobs goes to jobs_option."""
     names = []
     route = ''
     status_only = False
-    for argument in arguments:
+    jobs_option['value'] = None
+    arguments = list(arguments)
+    while arguments:
+        argument = arguments.pop(0)
         if argument in ('-h', '--help'):
             return names, status_only, True
+        if argument == '--jobs' or argument.startswith('--jobs='):
+            value = argument.split('=', 1)[1] if '=' in argument else (arguments.pop(0) if arguments else '')
+            if not value.isdigit() or not 1 <= int(value) <= 64:
+                raise TaskError('--jobs wants a number from 1 to 64')
+            jobs_option['value'] = int(value)
+            continue
         if argument == '--status':
             status_only = True
         elif CONNECT_SEGMENT_RE.fullmatch(argument):
@@ -187,23 +226,16 @@ def tail_lines(data: bytes, count: int) -> bytes:
 
 
 def run_localizer(name: str, log_path: Path) -> int:
-    """localizer.run on one segment: its output (stdout and stderr) goes here AND to localizer.log.
-    The exit code, 128 + signal when a signal killed it."""
+    """localizer.run on one segment, its output (stdout and stderr) into localizer.log. The exit code,
+    128 + signal when a signal killed it. Runs in a worker thread: it touches only its own folder."""
     environment = dict(os.environ)
     environment['PYTHONUNBUFFERED'] = '1'
+    for variable in THREAD_VARIABLES:
+        environment[variable] = THREADS_PER_JOB
     with log_path.open('wb') as log:
-        child = subprocess.Popen([sys.executable, '-m', 'localizer.run', '--segment', name], cwd=REPO,
-                                 env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT)
-        while True:
-            chunk = child.stdout.read1(65536)
-            if not chunk:
-                break
-            sys.stdout.buffer.write(chunk)
-            sys.stdout.buffer.flush()
-            log.write(chunk)
-            log.flush()
-        code = child.wait()
+        code = subprocess.run([sys.executable, '-m', 'localizer.run', '--segment', name], cwd=REPO,
+                              env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                              check=False).returncode
     return code if code >= 0 else 128 - code
 
 
@@ -228,34 +260,68 @@ def discard(name: str) -> None:
     shutil.move(str(DATA_DIR / name), str(target))
 
 
-def localize(names: list[str]) -> int:
+def localize(names: list[str], jobs: int | None = None) -> int:
+    """Localizes the segments, `jobs` at a time; the outcome of each one (localizer.failed, moving an
+    unusable one to data_scartati/) is handled here, one at a time, as they end."""
+    if jobs is None:
+        jobs = jobs_option['value'] or default_jobs()
     ok = []
     failed = []
     discarded = []
+    done = 0
     say('PROGRESS 0/' + str(len(names)))
-    for done, name in enumerate(names, start=1):
-        folder = DATA_DIR / name
-        say('== ' + name)
-        if not (folder / 'rlog.zst').is_file():
-            say('missing ' + str(folder / 'rlog.zst'))
-            failed.append(name)
+    runnable = []
+    for name in names:
+        if (DATA_DIR / name / 'rlog.zst').is_file():
+            runnable.append(name)
         else:
-            code = run_localizer(name, folder / LOG_FILE)
+            say('missing ' + str(DATA_DIR / name / 'rlog.zst'))
+            failed.append(name)
+            done = done + 1
+            say('PROGRESS ' + str(done) + '/' + str(len(names)))
+    if runnable:
+        say('Localizing ' + str(len(runnable)) + ' segments, ' + str(min(jobs, len(runnable))) + ' at a time.')
+
+    with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+        started = {}
+        futures = {}
+        for name in runnable:
+            started[name] = time.monotonic()
+            futures[pool.submit(run_localizer, name, DATA_DIR / name / LOG_FILE)] = name
+        for future in as_completed(futures):
+            name = futures[future]
+            folder = DATA_DIR / name
+            took = str(round(time.monotonic() - started[name])) + ' s'
+            try:
+                code = future.result()
+            except OSError as exc:
+                say('failed  ' + name + ': ' + str(exc))
+                code = None
             if code == 0:
                 (folder / FAILED_FILE).unlink(missing_ok=True)
                 ok.append(name)
+                say('ok      ' + name + ' (' + took + ')')
+            elif code is None:
+                failed.append(name)
             else:
                 write_failed(folder)
+                reason = tail_lines((folder / LOG_FILE).read_bytes(), 1).decode('utf-8', 'replace').strip()
                 # Unusable because of its data: out of data/. A segment that already has outputs
                 # (failed refine) is never moved: its old outputs are still good.
                 if code == UNUSABLE_SEGMENT_EXIT_CODE and not (folder / 'localizer.safetensors').is_file():
                     discard(name)
-                    say(name + ': unusable data, moved to data_scartati/')
+                    say(name + ': unusable data, moved to data_scartati/ (' + reason + ')')
                     discarded.append(name)
                 else:
+                    say('failed  ' + name + ' (' + took + '): ' + reason)
                     failed.append(name)
-        say('PROGRESS ' + str(done) + '/' + str(len(names)))
+            done = done + 1
+            say('PROGRESS ' + str(done) + '/' + str(len(names)))
 
+    # In the order they were asked for, whatever order they ended in.
+    order = {name: index for index, name in enumerate(names)}
+    for outcome in (ok, failed, discarded):
+        outcome.sort(key=lambda name: order[name])
     say('OK:' + (''.join(' ' + name for name in ok) or ' none'))
     if discarded:
         say('Discarded (in data_scartati/):' + ''.join(' ' + name for name in discarded))

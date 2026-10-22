@@ -425,6 +425,41 @@ class LocalizeTest(unittest.TestCase):
         self.assertEqual(self.output[-3:], ['OK: a1', 'Discarded (in data_scartati/): a2 a4', 'Failed: a3 a5 a9'])
         self.assertIn('PROGRESS 6/6', self.output)
 
+    def test_runs_in_parallel(self):
+        import threading
+        import time as clock
+        for name in ('a1', 'a2', 'a3', 'a4'):
+            self.segment(name)
+        running = []
+        peak = []
+        lock = threading.Lock()
+
+        def run(name, log_path):
+            with lock:
+                running.append(name)
+                peak.append(len(running))
+            clock.sleep(0.2)
+            log_path.write_bytes(b'done\n')
+            with lock:
+                running.remove(name)
+            return 0
+        with mock.patch.object(localize, 'run_localizer', side_effect=run):
+            self.assertEqual(localize.localize(['a1', 'a2', 'a3', 'a4'], jobs=2), 0)
+        self.assertEqual(max(peak), 2)
+        self.assertEqual(self.output[-1], 'OK: a1 a2 a3 a4')
+
+    def test_jobs_option(self):
+        self.assertEqual(localize.parse_args(['--jobs', '3', 'a1'])[0], ['a1'])
+        self.assertEqual(localize.jobs_option['value'], 3)
+        localize.parse_args(['--jobs=5'])
+        self.assertEqual(localize.jobs_option['value'], 5)
+        localize.parse_args([])
+        self.assertIsNone(localize.jobs_option['value'])
+        for bad in (['--jobs'], ['--jobs', '0'], ['--jobs=x'], ['--jobs', '99']):
+            with self.assertRaises(TaskError):
+                localize.parse_args(bad)
+        self.assertTrue(1 <= localize.default_jobs() <= localize.MAX_JOBS)
+
     def test_all_ok(self):
         self.segment('a1')
         with self.fake_localizer({'a1': 0}):
