@@ -259,15 +259,13 @@
     renderComma('comma-kv-stato');
     renderTrainingNow();
     renderJobs();
+    renderLiveJobs();
     // A job just ended: what it produced shows up in the open tab at once.
     const running = status.jobs.filter((job) => job.state === 'running').map((job) => job.id).join(',');
     if (previousRunning && running !== previousRunning) loadTab(true);
     else renderTab();
     previousRunning = running;
-    if (log.id) {
-      const job = status.jobs.find((item) => item.id === log.id);
-      byId('term-state').hidden = !(job && job.state === 'running');
-    }
+    if (log.id) renderSheetStatus();
   }
 
   function renderMachine() {
@@ -447,6 +445,90 @@
     }
   }
 
+  // -- live progress next to the buttons --------------------------------------------------------
+  // Every action card has a <div class="job-live" data-actions="a,b">: it shows the running job of
+  // those actions (bar, percentage, elapsed and remaining time, stop) and, for a few minutes after
+  // it ends, how it went.
+  const RECENT_SECONDS = 600;
+
+  function liveJob(actions) {
+    const jobs = (status.jobs || []).filter((job) => actions.indexOf(job.action) >= 0);
+    const running = jobs.find((job) => job.state === 'running');
+    if (running) return running;
+    const now = Date.now() / 1000;
+    const recent = jobs.filter((job) => job.finished && now - job.finished < RECENT_SECONDS);
+    recent.sort((a, b) => b.finished - a.finished);
+    return recent[0] || null;
+  }
+
+  function liveTexts(job) {
+    const now = Date.now() / 1000;
+    if (job.state !== 'running') {
+      const took = job.finished ? fmtDuration(job.finished - job.started) : '–';
+      if (job.state === 'ok') return {head: 'Done in ' + took, sub: 'Finished at ' + fmtTime(job.finished) + '.'};
+      if (job.state === 'stopped') return {head: 'Stopped after ' + took, sub: ''};
+      return {head: 'Failed after ' + took, sub: 'Open the details to see what went wrong.'};
+    }
+    const elapsed = now - job.started;
+    const progress = job.progress;
+    if (!progress || !progress.total) return {head: 'Starting…', sub: fmtDuration(elapsed) + ' elapsed'};
+    let sub = progress.done.toLocaleString('en-GB') + ' of ' + progress.total.toLocaleString('en-GB')
+      + ' · ' + fmtDuration(elapsed) + ' elapsed';
+    if (progress.done >= progress.total) sub += ' · finishing';
+    else if (progress.done > 0 && progress.percent >= 1) {
+      sub += ' · about ' + fmtDuration(Math.max(1, elapsed * (progress.total - progress.done) / progress.done)) + ' left';
+    }
+    return {head: Math.floor(progress.percent) + '%', sub: sub};
+  }
+
+  function renderLiveJobs() {
+    for (const box of document.querySelectorAll('.job-live')) {
+      const job = liveJob(box.dataset.actions.split(','));
+      if (!job) {
+        box.replaceChildren();
+        box.dataset.job = '';
+        continue;
+      }
+      const kind = job.state === 'running' ? 'running' : (job.state === 'ok' ? 'ok' : 'bad');
+      const key = job.id + ':' + job.state + ':' + job.stoppable;
+      if (box.dataset.job !== key) {
+        box.dataset.job = key;
+        const card = node('div', 'jobcard ' + kind);
+        const head = node('div', 'jobcard-head');
+        if (kind === 'running') head.appendChild(node('span', 'spinner'));
+        head.appendChild(node('strong', 'jobcard-label', job.label));
+        head.appendChild(node('span', 'jobcard-state'));
+        card.appendChild(head);
+        const bar = node('div', 'jobcard-bar');
+        bar.appendChild(node('span'));
+        card.appendChild(bar);
+        card.appendChild(node('div', 'jobcard-sub'));
+        const buttons = node('div', 'jobcard-buttons');
+        const details = node('button', 'btn small', 'Details');
+        details.type = 'button';
+        details.addEventListener('click', () => openLog(job.id, job.label));
+        buttons.appendChild(details);
+        if (job.state === 'running' && job.stoppable) {
+          const stop = node('button', 'btn small danger', 'Stop');
+          stop.type = 'button';
+          stop.addEventListener('click', () => stopJob(job));
+          buttons.appendChild(stop);
+        }
+        card.appendChild(buttons);
+        box.replaceChildren(card);
+      }
+      const texts = liveTexts(job);
+      box.querySelector('.jobcard-state').textContent = texts.head;
+      box.querySelector('.jobcard-sub').textContent = texts.sub;
+      const bar = box.querySelector('.jobcard-bar');
+      const known = job.progress && job.progress.total;
+      bar.classList.toggle('indeterminate', job.state === 'running' && !known);
+      let percent = known ? job.progress.percent : 0;
+      if (job.state === 'ok') percent = 100;
+      bar.firstChild.style.width = Math.max(0, Math.min(100, percent)) + '%';
+    }
+  }
+
   function renderJobs() {
     const list = byId('jobs');
     list.replaceChildren();
@@ -473,7 +555,6 @@
     try {
       const answer = await post('/api/run/' + name, params);
       toast('Started: ' + answer.job.label);
-      openLog(answer.job.id, answer.job.label);
       await refreshStatus();
       return answer.job;
     } catch (error) {
@@ -779,12 +860,12 @@
       kvRow(last, (CHART_TITLES[key] || key) + ' (last step)', run.last ? fmt(run.last[key]) : null);
     }
 
-    const pre = byId('run-view-log');
+    const list = byId('run-view-log');
     const text = detail ? detail.log_tail : '';
-    if (pre.textContent !== text) {
-      const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-      pre.textContent = text || 'No lines yet.';
-      if (atEnd) pre.scrollTop = pre.scrollHeight;
+    if (!same('run-log', [name, text])) {
+      const atEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 20;
+      renderMessages(list, readLog(text).messages, 'No messages yet.');
+      if (atEnd) list.scrollTop = list.scrollHeight;
     }
   }
 
@@ -1040,19 +1121,110 @@
   function runModelOptions() {
     const options = [];
     for (const run of runsWith((item) => item.has_pt || item.has_training_pt)) {
-      options.push({value: 'run:' + run.name, label: 'run ' + run.name + (run.has_pt ? '' : ' (checkpoint, not finished)'), group: 'Local runs'});
+      options.push({value: 'run:' + run.name, label: 'run ' + run.name + (run.has_pt ? '' : ' (checkpoint, not finished)'), group: 'Your models'});
     }
     return options;
   }
 
+  // -- model picker ----------------------------------------------------------------------------
+  // A tappable list in place of a <select> of model specs (the select stays, hidden, and holds the
+  // value): every row says what the model is and, when it was evaluated, how it did.
+  const REFERENCE_INFO = {
+    stock: ['comma model (stock)', 'The model on your comma today: the one to beat.'],
+    teacher: ['openpilot big model (teacher)', 'MD v3, the large model your models learn from.'],
+    logged: ['What the car actually did', 'The path recorded in the drive logs; no model is run.'],
+  };
+
+  function fmtDay(unix) {
+    if (!unix) return '';
+    return new Date(unix * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+  }
+
+  function evalResultOf(spec) {
+    return (data.evalResults || []).find((result) => result.model === spec && (!result.selection
+      || result.selection === 'heldout')) || null;
+  }
+
+  function modelInfo(spec) {
+    if (REFERENCE_INFO[spec]) return {title: REFERENCE_INFO[spec][0], detail: REFERENCE_INFO[spec][1], badge: ''};
+    if (spec.startsWith('run:')) {
+      const name = spec.slice(4);
+      const run = (data.runs || []).find((item) => item.name === name);
+      if (!run) return {title: 'Model ' + name, detail: '', badge: ''};
+      const details = [];
+      if (run.config && run.config.teacher) details.push('teacher ' + teacherName(run.config.teacher));
+      if (run.steps_total) details.push(run.steps_total.toLocaleString('en-GB') + ' steps');
+      if (run.last && run.last.loss !== null && run.last.loss !== undefined) details.push('loss ' + fmt(run.last.loss));
+      if (!run.has_pt) details.push('not finished');
+      const latest = runsWith((item) => item.has_pt)[0];
+      return {title: 'Your model · ' + (fmtDay(run.started) || name), detail: details.join(' · '),
+        badge: latest && latest.name === name ? 'Latest' : ''};
+    }
+    if (spec.startsWith('hf:')) return {title: 'Published · ' + spec.slice(3), detail: 'Downloaded from Hugging Face', badge: ''};
+    return {title: spec, detail: '', badge: ''};
+  }
+
+  function renderPicker(selectId) {
+    const select = byId(selectId);
+    const box = byId(selectId + '-picker');
+    const options = Array.from(select.options).map((option) => ({value: option.value,
+      group: option.parentElement.tagName === 'OPTGROUP' ? option.parentElement.label : ''}));
+    if (same('picker:' + selectId, [options, select.value, data.runs, data.evalResults])) return;
+    box.replaceChildren();
+    if (!options.length) {
+      box.appendChild(node('p', 'empty', 'No models yet.'));
+      return;
+    }
+    let list = null;
+    let group = null;
+    for (const option of options) {
+      if (list === null || option.group !== group) {
+        group = option.group;
+        if (group) box.appendChild(node('div', 'picker-group', group));
+        list = node('div', 'picker-list');
+        box.appendChild(list);
+      }
+      const info = modelInfo(option.value);
+      const row = node('button', 'picker-row');
+      row.type = 'button';
+      row.setAttribute('role', 'radio');
+      row.setAttribute('aria-checked', String(option.value === select.value));
+      const text = node('div', 'picker-text');
+      const title = node('div', 'picker-title', info.title);
+      if (info.badge) title.appendChild(node('span', 'picker-badge', info.badge));
+      text.appendChild(title);
+      if (info.detail) text.appendChild(node('div', 'picker-detail', info.detail));
+      row.appendChild(text);
+      const result = evalResultOf(option.value);
+      const score = node('div', 'picker-score');
+      if (result && result.avg_miss_m !== null) {
+        score.appendChild(node('strong', '', result.avg_miss_m.toFixed(2) + ' m'));
+        score.appendChild(node('small', '', 'avg miss'));
+      } else {
+        score.appendChild(node('small', '', 'not evaluated'));
+      }
+      row.appendChild(score);
+      row.appendChild(node('span', 'picker-check', option.value === select.value ? '\u2713' : ''));
+      row.addEventListener('click', () => {
+        select.value = option.value;
+        select.dispatchEvent(new Event('change'));
+        renderPicker(selectId);
+      });
+      list.appendChild(row);
+    }
+  }
+  for (const id of ['eval-model', 'cmp-student', 'cmp-reference']) {
+    byId(id).addEventListener('change', () => { renderPicker(id); updateButtons(); });
+  }
+
   // -- Evaluation -------------------------------------------------------------------------------
   function renderEval() {
-    const options = [{value: 'stock', label: 'Stock CD210 (the comma\'s model)', group: 'References'},
-      {value: 'teacher', label: 'Teacher (the big model)', group: 'References'},
-      {value: 'logged', label: 'Logged (the model that drove at the time)', group: 'References'}]
-      .concat(runModelOptions(), hfModelOptions());
+    const options = runModelOptions().concat([{value: 'stock', label: 'Stock', group: 'Reference models'},
+      {value: 'teacher', label: 'Teacher', group: 'Reference models'},
+      {value: 'logged', label: 'Logged', group: 'Reference models'}], hfModelOptions());
     const firstRun = runModelOptions();
     fillSelect(byId('eval-model'), options, firstRun.length ? firstRun[0].value : 'stock');
+    renderPicker('eval-model');
     const results = data.evalResults || [];
     if (same('leaderboard', results)) return;
     const body = byId('leaderboard');
@@ -1062,8 +1234,8 @@
       const row = node('tr', index === 0 && result.avg_miss_m !== null ? 'best' : '');
       row.appendChild(node('td', 'num', String(index + 1)));
       const modelCell = node('td');
-      modelCell.appendChild(node('div', 'mono', result.model));
-      let note = result.label && result.label !== result.model ? result.label : '';
+      modelCell.appendChild(node('div', 'model-name', modelInfo(result.model).title));
+      let note = '';
       if (result.selection && result.selection !== 'heldout') note += (note ? ' · ' : '') + 'segments: ' + result.selection;
       if (result.rate_hz && result.rate_hz !== 5) note += (note ? ' · ' : '') + result.rate_hz + ' Hz';
       if (result.skipped) note += (note ? ' · ' : '') + result.skipped + ' skipped';
@@ -1104,6 +1276,8 @@
     fillSelect(byId('cmp-segment'), options, firstHeldout);
     const students = runModelOptions().concat(hfModelOptions());
     fillSelect(byId('cmp-student'), students);
+    renderPicker('cmp-student');
+    renderPicker('cmp-reference');
 
     const videos = data.videos || [];
     if (same('videos', videos)) return;
@@ -1321,16 +1495,126 @@
   byId('btn-selftest').addEventListener('click', () => runAction('selftest', {}));
   byId('reload-page').addEventListener('click', () => location.reload());
 
-  // -- log drawer ------------------------------------------------------------------------------
+  // -- job panel -------------------------------------------------------------------------------
+  // A job's output, made readable: progress lines become the progress bar, machine lines
+  // (RUN_DIR=, OUTPUT_*=) and blank lines go away, paths are shown relative to the repo, a line
+  // rewritten with \r keeps its last state and consecutive training steps collapse into the last one.
+  const MACHINE_LINE = /^(RUN_DIR|OUTPUT_MP4|OUTPUT_JSON)=/;
+  const PROGRESS_LINE = /^PROGRESS (\d+)\/(\d+)$/;
+  const STEP_LINE = /^step (\d+)\/(\d+):/;
+  const MAX_MESSAGES = 400;
+
+  function readLog(text) {
+    const messages = [];
+    let progress = null;
+    for (const raw of text.split('\n')) {
+      const parts = raw.split('\r');
+      let line = parts[parts.length - 1].trim() || parts.map((part) => part.trim()).filter(Boolean).pop() || '';
+      if (!line || MACHINE_LINE.test(line)) continue;
+      const match = PROGRESS_LINE.exec(line) || STEP_LINE.exec(line);
+      if (match) progress = {done: Number(match[1]), total: Number(match[2])};
+      if (PROGRESS_LINE.test(line)) continue;
+      line = line.replace(/\/[^\s]*\/openpilot\.distill\//g, '');
+      // "== ..." lines are the site's own header and footer: the sheet shows that as its status.
+      if (line.startsWith('== ')) continue;
+      const kind = /^(ERROR|Traceback)/.test(line) ? 'error' : '';
+      const last = messages[messages.length - 1];
+      if (STEP_LINE.test(line) && last && STEP_LINE.test(last.text)) messages.pop();
+      messages.push({text: line, kind: kind});
+    }
+    return {messages: messages.slice(-MAX_MESSAGES), progress: progress};
+  }
+
+  function renderMessages(list, messages, empty) {
+    list.replaceChildren();
+    if (!messages.length) list.appendChild(node('li', 'muted', empty));
+    for (const message of messages) list.appendChild(node('li', message.kind, message.text));
+  }
+
   function openLog(id, label) {
     clearTimeout(log.timer);
-    log = {id: id, offset: 0, timer: null, follow: true};
-    byId('term-title').textContent = 'Log · ' + label + ' · ' + id;
-    byId('term-text').textContent = '';
-    byId('term-follow').setAttribute('aria-pressed', 'true');
+    log = {id: id, offset: 0, timer: null, text: '', view: null};
+    byId('term-title').textContent = label;
+    byId('term-sub').replaceChildren();
+    byId('term-text').replaceChildren(node('li', 'muted', 'Loading…'));
+    byId('term-progress').hidden = true;
+    byId('term-actions').replaceChildren();
+    byId('term-actions').dataset.job = '';
     byId('terminal').classList.add('open');
-    document.body.classList.add('log-open');
+    byId('sheet-backdrop').classList.add('open');
+    document.body.classList.add('sheet-open');
     pollLog();
+  }
+
+  function sheetJob() {
+    return status && log.id ? status.jobs.find((item) => item.id === log.id) || null : null;
+  }
+
+  // Status line, progress and buttons of the open sheet, from the job as the status reports it.
+  function renderSheetStatus() {
+    const job = sheetJob();
+    const sub = byId('term-sub');
+    sub.replaceChildren();
+    if (!job) return;
+    const now = Date.now() / 1000;
+    if (job.state === 'running') {
+      sub.appendChild(node('span', 'run', 'Running'));
+      sub.appendChild(document.createTextNode(' · started ' + fmtTime(job.started) + ' · ' + fmtDuration(now - job.started)));
+    } else {
+      const took = job.finished ? fmtDuration(job.finished - job.started) : '–';
+      const text = job.state === 'ok' ? 'Done' : (job.state === 'stopped' ? 'Stopped' : 'Failed');
+      sub.appendChild(node('span', job.state === 'ok' ? 'ok' : 'bad', text));
+      sub.appendChild(document.createTextNode(' · ' + fmtTime(job.started) + ' · took ' + took));
+    }
+
+    const progress = job.progress || (log.view && log.view.progress);
+    byId('term-progress').hidden = !progress || !progress.total;
+    if (progress && progress.total) {
+      let percent = progress.done * 100 / progress.total;
+      if (job.state === 'ok') percent = 100;
+      byId('term-percent').textContent = Math.floor(percent) + '%';
+      byId('term-bar').style.width = Math.max(0, Math.min(100, percent)) + '%';
+      let eta = progress.done.toLocaleString('en-GB') + ' of ' + progress.total.toLocaleString('en-GB');
+      if (job.state === 'running' && progress.done >= progress.total) eta += ' · finishing';
+      else if (job.state === 'running' && progress.done > 0) {
+        eta += ' · about ' + fmtDuration(Math.max(1, (now - job.started) * (progress.total - progress.done) / progress.done))
+          + ' left';
+      }
+      byId('term-progress-text').textContent = eta;
+    }
+
+    const actions = byId('term-actions');
+    const key = job.id + ':' + job.state + ':' + job.stoppable;
+    if (actions.dataset.job !== key) {
+      actions.dataset.job = key;
+      actions.replaceChildren();
+      if (job.state === 'running' && job.stoppable) {
+        const stop = node('button', 'btn danger', 'Stop');
+        stop.type = 'button';
+        stop.addEventListener('click', () => stopJob(job));
+        actions.appendChild(stop);
+      }
+    }
+
+    // The newest line is the step in progress while the job runs; the end gets its own line.
+    const items = byId('term-text').children;
+    if (items.length) {
+      const last = items[items.length - 1];
+      last.classList.toggle('current', job.state === 'running' && !last.classList.contains('muted'));
+    }
+  }
+
+  function renderTimeline() {
+    const list = byId('term-text');
+    const body = byId('term-body');
+    const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 30;
+    const job = sheetJob();
+    const messages = log.view.messages.slice();
+    if (job && job.state === 'ok') messages.push({text: 'Finished', kind: 'done'});
+    else if (job && job.state === 'failed') messages.push({text: 'Failed (exit code ' + job.exit_code + ')', kind: 'error'});
+    else if (job && job.state === 'stopped') messages.push({text: 'Stopped', kind: 'error'});
+    renderMessages(list, messages, 'Starting…');
+    if (atEnd) body.scrollTop = body.scrollHeight;
   }
 
   async function pollLog() {
@@ -1339,36 +1623,35 @@
     try {
       const chunk = await api('/api/jobs/' + id + '/log?offset=' + log.offset);
       if (log.id !== id) return;
-      const pre = byId('term-text');
-      if (chunk.text) {
-        if (log.offset === 0 && chunk.offset - chunk.text.length > 0) pre.textContent = '… (beginning cut)\n';
-        pre.textContent += chunk.text;
-        if (log.follow) pre.scrollTop = pre.scrollHeight;
-      }
       log.offset = chunk.offset;
+      log.text += chunk.text;
+      const previous = log.view ? JSON.stringify(log.view) : '';
+      log.view = readLog(log.text);
+      const job = sheetJob();
+      const signature = JSON.stringify(log.view) + (job ? job.state : '');
+      if (signature !== previous + (log.state || '')) renderTimeline();
+      log.state = job ? job.state : '';
+      renderSheetStatus();
     } catch (error) {
       toast(error.message, true);
       return;
     }
-    const job = status && status.jobs.find((item) => item.id === id);
+    const job = sheetJob();
     const running = !job || job.state === 'running';
-    byId('term-state').hidden = !running;
     log.timer = setTimeout(pollLog, running ? 1500 : 5000);
   }
 
-  byId('term-close').addEventListener('click', () => {
+  function closeSheet() {
     clearTimeout(log.timer);
     log.id = null;
     byId('terminal').classList.remove('open');
-    document.body.classList.remove('log-open');
-  });
-  byId('term-follow').addEventListener('click', (event) => {
-    log.follow = !log.follow;
-    event.currentTarget.setAttribute('aria-pressed', String(log.follow));
-    if (log.follow) byId('term-text').scrollTop = byId('term-text').scrollHeight;
-  });
+    byId('sheet-backdrop').classList.remove('open');
+    document.body.classList.remove('sheet-open');
+  }
+  byId('term-close').addEventListener('click', closeSheet);
+  byId('sheet-backdrop').addEventListener('click', closeSheet);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && log.id) byId('term-close').click();
+    if (event.key === 'Escape' && log.id) closeSheet();
   });
 
   // -- start -----------------------------------------------------------------------------------

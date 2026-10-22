@@ -88,6 +88,7 @@
         <div class="action"><button class="btn primary" type="button" id="btn-fetch">Download from the comma</button><div class="reason" id="reason-fetch"></div></div>
         <div class="action"><button class="btn" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
       </div>
+      <div class="job-live" data-actions="fetch,localize"></div>
     </div>
     <div class="card">
       <h2>Routes</h2>
@@ -141,7 +142,7 @@
       <p class="empty" id="charts-empty" hidden>This run has no logged steps yet.</p>
       <details class="run-log" id="run-view-log-box">
         <summary>Training log</summary>
-        <pre id="run-view-log"></pre>
+        <ol id="run-view-log"></ol>
       </details>
     </div>
 
@@ -175,6 +176,7 @@
         <div class="action"><button class="btn primary" type="button" id="btn-train">Start training</button><div class="reason" id="reason-train"></div></div>
         <div class="action"><button class="btn" type="button" id="btn-train-test">Test 10 steps</button><div class="reason" id="reason-train_test"></div></div>
       </div>
+      <div class="job-live" data-actions="train,train_test"></div>
     </div>
 
     <div class="card">
@@ -194,10 +196,10 @@
     <div class="card">
       <h2>Evaluate a model</h2>
       <p class="lead">Runs the model on the hold-out segments (never seen in training) and measures by how many metres the predicted path misses the one you actually drove (next 10 s).</p>
-      <div class="form-grid wide">
-        <label class="field">Model<select id="eval-model"></select></label>
-      </div>
+      <select id="eval-model" hidden aria-hidden="true"></select>
+      <div class="field-label" id="eval-model-label">Choose a model</div><div class="picker" id="eval-model-picker" role="radiogroup" aria-labelledby="eval-model-label"></div>
       <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-eval">Evaluate</button><div class="reason" id="reason-eval"></div></div></div>
+      <div class="job-live" data-actions="eval"></div>
     </div>
     <div class="card">
       <h2>Leaderboard</h2>
@@ -217,13 +219,15 @@
       <h2>New comparison video</h2>
       <div class="form-grid wide">
         <label class="field">Segment<select id="cmp-segment"></select></label>
-        <label class="field">Reference (top)<select id="cmp-reference">
-          <option value="stock">Stock CD210 (the comma's model)</option>
-          <option value="teacher">Teacher (the big model)</option>
-          <option value="logged">Logged (the model that drove at the time)</option>
-        </select></label>
-        <label class="field">Student (bottom)<select id="cmp-student"></select></label>
       </div>
+      <select id="cmp-student" hidden aria-hidden="true"></select>
+      <div class="field-label" id="cmp-student-label">Your model (bottom of the video)</div><div class="picker" id="cmp-student-picker" role="radiogroup" aria-labelledby="cmp-student-label"></div>
+      <select id="cmp-reference" hidden aria-hidden="true">
+        <option value="stock">Stock</option>
+        <option value="teacher">Teacher</option>
+        <option value="logged">Logged</option>
+      </select>
+      <div class="field-label" id="cmp-reference-label">Compare it with (top of the video)</div><div class="picker" id="cmp-reference-picker" role="radiogroup" aria-labelledby="cmp-reference-label"></div>
       <div class="form-grid">
         <label class="field">Start (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
         <label class="field">Duration (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>
@@ -237,6 +241,7 @@
       </div>
       <p class="note">The earliest start is 5.2 s: before that the models are warming up (a lower value is moved there). On the GPU a 15 s video takes about a minute.</p>
       <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-compare">Make the video</button><div class="reason" id="reason-compare"></div></div></div>
+      <div class="job-live" data-actions="compare"></div>
     </div>
     <div class="card" id="player-card" hidden>
       <h2 id="player-title">Video</h2>
@@ -259,6 +264,7 @@
       <p class="lead">Builds the ONNX model for the comma from a finished run (needs the comma's original model as a reference).</p>
       <div class="form-grid wide"><label class="field">Run<select id="export-run"></select></label></div>
       <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-export">Export ONNX</button><div class="reason" id="reason-export"></div></div></div>
+      <div class="job-live" data-actions="export"></div>
     </div>
     <div class="card">
       <h2>Publish to Hugging Face</h2>
@@ -272,6 +278,7 @@
       <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-publish-dry">Dry run</button><div class="reason" id="reason-publish_dry"></div></div></div>
       <div id="dry-status" class="note"></div>
       <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Publish to Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
+      <div class="job-live" data-actions="publish_dry,publish"></div>
     </div>
     <div class="card">
       <h2>Already on Hugging Face</h2>
@@ -295,10 +302,12 @@
         <label class="field">Run<select id="install-run"></select></label>
       </div>
       <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
+      <div class="job-live" data-actions="install"></div>
     </div>
     <div class="card">
       <h2>Restore the original model</h2>
       <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Restore and reboot</button><div class="reason" id="reason-restore"></div></div></div>
+      <div class="job-live" data-actions="restore"></div>
     </div>
   </section>
 
@@ -311,6 +320,7 @@
         <div class="action"><button class="btn" type="button" id="btn-update">Update the code</button><div class="reason" id="reason-update"></div></div>
         <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Site self-test</button><div class="reason" id="reason-selftest"></div></div>
       </div>
+      <div class="job-live" data-actions="update,selftest"></div>
     </div>
     <div class="card">
       <h2>Jobs</h2>
@@ -320,12 +330,23 @@
   </section>
 </main>
 
-<section class="terminal" id="terminal" aria-label="Job log">
-  <header><strong id="term-title">Log</strong><span class="pill run" id="term-state" hidden>running</span>
-    <span class="grow"></span>
-    <button class="btn small" id="term-follow" type="button" aria-pressed="true">Follow</button>
-    <button class="btn small" id="term-close" type="button">Close</button></header>
-  <pre id="term-text" tabindex="0"></pre>
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+<section class="sheet" id="terminal" role="dialog" aria-modal="true" aria-labelledby="term-title">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <header class="sheet-head">
+    <div class="grow"><h2 id="term-title">Job</h2><div class="sheet-sub" id="term-sub"></div></div>
+    <button class="icon-btn" id="term-close" type="button" aria-label="Close">&#x2715;</button>
+  </header>
+  <div class="sheet-body" id="term-body">
+    <div class="sheet-progress" id="term-progress" hidden>
+      <div class="sheet-percent" id="term-percent"></div>
+      <div class="jobcard-bar"><span id="term-bar"></span></div>
+      <div class="sheet-eta" id="term-progress-text"></div>
+    </div>
+    <div class="sheet-actions" id="term-actions"></div>
+    <h3 class="sheet-section">Activity</h3>
+    <ol class="timeline" id="term-text"></ol>
+  </div>
 </section>
 <div class="toast" id="toast" role="alert"></div>
 
