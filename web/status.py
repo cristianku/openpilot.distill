@@ -43,6 +43,8 @@ class Activity:
 # The same work started from a terminal, or by the other project on this server.
 ACTIVITIES = (
     Activity('gpu', 'training distill', 'supervised.train', True),
+    # The preparation of a training (teacher download, checks) before supervised.train starts.
+    Activity('gpu', 'training distill', 'tasks.train', True),
     Activity('gpu', 'valutazione hold-out', 'evaluation.holdout', True),
     Activity('gpu', 'video di confronto', 'evaluation.compare', True),
     Activity('data', 'scaricamento dal comma', 'helpers/fetch_comma_segments.sh', False),
@@ -215,8 +217,23 @@ def gpu_info() -> dict | None:
     return info
 
 
+def gpu_list() -> list[dict]:
+    """Every NVIDIA GPU of the machine: index, name, total memory (the choices of a training)."""
+    output = _run(['nvidia-smi', '--query-gpu=index,name,memory.total', '--format=csv,noheader,nounits'])
+    gpus = []
+    if not output:
+        return gpus
+    for line in output.splitlines():
+        parts = [part.strip() for part in line.split(',')]
+        if len(parts) < 3 or not parts[0].isdigit():
+            continue
+        gpus.append({'index': int(parts[0]), 'name': ','.join(parts[1:-1]), 'memory_total_mb': _number(parts[-1])})
+    return gpus
+
+
 def system_info(repo: Path) -> dict:
-    info = {'cpus': os.cpu_count(), 'load': None, 'memory': memory_info(), 'disk': None, 'gpu': gpu_info()}
+    info = {'cpus': os.cpu_count(), 'load': None, 'memory': memory_info(), 'disk': None, 'gpu': gpu_info(),
+            'gpus': gpu_list()}
     try:
         load = os.getloadavg()
         info['load'] = [round(load[0], 2), round(load[1], 2), round(load[2], 2)]
@@ -255,57 +272,22 @@ def gpu_lock_held(lock_file: str = GPU_LOCK_FILE) -> bool | None:
         os.close(handle)
 
 
-def gpu_lock_holders(lock_file: str = GPU_LOCK_FILE, limit: int = 3) -> list[str]:
-    """'pid N: command' of the processes that have the lock file open (the holder and the children
-    that inherited its fd). /proc/locks is no use inside the LXC, so the open fds are scanned."""
-    holders = []
-    proc = Path('/proc')
-    if not proc.is_dir():
-        return holders
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            descriptors = list((entry / 'fd').iterdir())
-        except OSError:
-            continue
-        for descriptor in descriptors:
-            try:
-                target = os.readlink(descriptor)
-            except OSError:
-                continue
-            if target == lock_file:
-                command = process_command_line(int(entry.name))
-                if command is not None:
-                    holders.append('pid ' + entry.name + ': ' + short_text(command, 120))
-                break
-        if len(holders) >= limit:
-            break
-    return holders
-
-
 def gpu_busy_reason(repo: Path, lock_file: str = GPU_LOCK_FILE) -> str:
     """'' when a GPU job can start, else why not (Italian). Checks the lock, the processes on the GPU
     (jobs that do not use the lock, e.g. a speedlimits training) and the known GPU jobs in /proc."""
+    # Said in words for the page: which job, never command lines or file paths.
     reasons = []
-    held = gpu_lock_held(lock_file)
-    if held is True:
-        holders = gpu_lock_holders(lock_file)
-        if holders:
-            reasons.append('lock ' + lock_file + ' preso da ' + '; '.join(holders))
-        else:
-            reasons.append('lock ' + lock_file + ' preso')
-    elif held is None:
-        reasons.append('non riesco a controllare il lock ' + lock_file)
-    gpu = gpu_info()
-    if gpu is not None and gpu['processes']:
-        names = []
-        for process in gpu['processes']:
-            names.append('pid ' + str(process['pid']) + ' ' + process['name'])
-        reasons.append('processi sulla GPU: ' + ', '.join(names))
     for activity in activities(repo):
-        if activity['uses_gpu']:
-            reasons.append(activity['label'] + ' (pid ' + str(activity['pid']) + ')')
+        if activity['uses_gpu'] and activity['label'] not in reasons:
+            reasons.append(activity['label'])
+    held = gpu_lock_held(lock_file)
+    if held is True and not reasons:
+        reasons.append('un job che ha preso la GPU')
+    elif held is None:
+        reasons.append('non riesco a controllare se la GPU e\' libera')
+    gpu = gpu_info()
+    if gpu is not None and gpu['processes'] and not reasons:
+        reasons.append(str(len(gpu['processes'])) + ' processi sulla GPU')
     if not reasons:
         return ''
     return 'La GPU e\' occupata da un altro job (' + '; '.join(reasons) + '). Riprova quando ha finito.'

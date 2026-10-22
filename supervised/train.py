@@ -136,6 +136,8 @@ def start_run_info(path: Path, args: argparse.Namespace, precision: str, startin
             "dataset": args.dataset,
             "started": time.time(),
             "hf_repo": args.hf_repo,
+            "world_size": int(os.environ.get("WORLD_SIZE", 1)),
+            "gpus": os.environ.get("CUDA_VISIBLE_DEVICES"),
         }
 
     if args.mode == "resume":
@@ -148,6 +150,8 @@ def start_run_info(path: Path, args: argparse.Namespace, precision: str, startin
             "batch_size": args.batch_size,
             "workers": args.workers,
             "precision": precision,
+            "world_size": int(os.environ.get("WORLD_SIZE", 1)),
+            "gpus": os.environ.get("CUDA_VISIBLE_DEVICES"),
         })
         run_info["resumed"] = resumed
 

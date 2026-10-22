@@ -42,6 +42,9 @@ DURATION_MAX = 60.0
 SPEED_TEXT = {0.25: '0.25', 0.5: '0.5', 1.0: '1'}
 WANDB_MODES = ('', 'online', 'offline', 'disabled')
 TRAIN_MODES = ('fresh', 'continue', 'resume')
+TEACHER_NAMES = ('md-v3', '084747c7')
+# 'all', or the indices of the chosen GPUs (tasks/train.py --gpus).
+GPUS_RE = re.compile(r'^(all|[0-9]{1,2}(,[0-9]{1,2}){0,15})$')
 REFERENCE_KINDS = ('stock', 'teacher', 'logged')
 CONFIRM_INSTALL = 'INSTALLA'
 CONFIRM_RESTORE = 'RIPRISTINA'
@@ -63,10 +66,10 @@ class Action:
 ACTIONS = {
     'fetch': Action('Scarica i segmenti dal comma', 'data', 'helpers/fetch_comma_segments.sh'),
     'localize': Action('Localizza i segmenti', 'data', 'helpers/localize_segments.sh'),
-    'train': Action('Training', 'gpu', 'helpers/train_supervised.sh', needs_gpu=True),
-    'train_test': Action('Prova del training (10 step)', 'gpu', 'helpers/train_supervised.sh', needs_gpu=True),
-    'eval': Action('Valutazione sui segmenti hold-out', 'gpu', 'helpers/eval_holdout.sh', needs_gpu=True),
-    'compare': Action('Video di confronto', 'gpu', 'helpers/compare_video.sh', needs_gpu=True),
+    'train': Action('Training', 'gpu', 'tasks/train.py', needs_gpu=True),
+    'train_test': Action('Prova del training (10 step)', 'gpu', 'tasks/train.py', needs_gpu=True),
+    'eval': Action('Valutazione sui segmenti hold-out', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
+    'compare': Action('Video di confronto', 'gpu', 'tasks/evaluation.py', needs_gpu=True),
     'export': Action('Export ONNX', 'cpu', 'helpers/export_onnx.sh'),
     'publish_dry': Action('Pubblicazione di prova (dry run)', 'cpu', 'helpers/publish_model.sh'),
     'publish': Action('Pubblicazione su Hugging Face', 'cpu', 'helpers/publish_model.sh'),
@@ -306,6 +309,22 @@ def model_spec_param(repo: Path, params: dict, key: str, kinds: tuple[str, ...])
     return value
 
 
+def gpus_param(params: dict) -> str:
+    """'all' (the default) or the indices of the chosen GPUs: '0', '0,1'."""
+    value = params.get('gpus')
+    if value is None or value == '':
+        return 'all'
+    if not isinstance(value, str) or not GPUS_RE.fullmatch(value):
+        raise bad('gpus deve essere "all" o gli indici delle GPU (es. 0 o 0,1).')
+    return value
+
+
+def gpus_text(gpus: str) -> str:
+    if gpus == 'all':
+        return 'tutte le GPU'
+    return 'GPU ' + gpus
+
+
 def slug_of(name: str) -> str:
     """The folder name helpers/publish_model.sh uses on Hugging Face for --name:
     lowercase, every character other than a-z 0-9 becomes '_' (tr -c 'a-z0-9' '_')."""
@@ -351,54 +370,58 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         summary = 'segmenti da fare e da raffinare'
 
     elif action_id == 'train':
-        check_keys(params, ('steps', 'batch_size', 'workers', 'mode', 'run', 'wandb'))
+        check_keys(params, ('steps', 'batch_size', 'workers', 'mode', 'run', 'wandb', 'teacher', 'gpus'))
         mode = choice_param(params, 'mode', TRAIN_MODES, 'fresh')
         batch_size = int_param(params, 'batch_size', BATCH_MIN, BATCH_MAX, 8)
         workers = int_param(params, 'workers', WORKERS_MIN, WORKERS_MAX, 6)
         wandb = choice_param(params, 'wandb', WANDB_MODES, '')
-        argv = ['helpers/train_supervised.sh', '--foreground-log']
+        gpus = gpus_param(params)
+        argv = [sys.executable, '-m', 'tasks.train', '--mode', mode]
         if mode == 'resume':
-            # The steps of a resumed run come from its checkpoint (train_supervised.sh reads them).
+            # The steps and the teacher of a resumed run come from its checkpoint.
             if params.get('steps') not in (None, ''):
                 raise bad('Con "riprendi" i passi sono quelli del run interrotto: lascia vuoto il campo.')
+            if params.get('teacher') not in (None, ''):
+                raise bad('Con "riprendi" il teacher e\' quello del run interrotto.')
             run = run_param(repo, params.get('run'), 'resume')
+            argv += ['--run', run]
             clean['run'] = run
             summary = 'riprende ' + run
         else:
             if params.get('run') not in (None, ''):
                 raise bad('Il run serve solo con "riprendi".')
             steps = int_param(params, 'steps', STEPS_MIN, STEPS_MAX)
-            argv.append('--steps=' + str(steps))
+            teacher = choice_param(params, 'teacher', TEACHER_NAMES, 'md-v3')
+            argv += ['--steps', str(steps), '--teacher', teacher]
             clean['steps'] = steps
+            clean['teacher'] = teacher
             if mode == 'continue':
                 summary = str(steps) + ' step dai pesi stable'
             else:
                 summary = str(steps) + ' step da zero'
-        argv.append('--batch-size=' + str(batch_size))
-        argv.append('--workers=' + str(workers))
-        if mode == 'continue':
-            argv.append('--continue')
-        elif mode == 'resume':
-            # The run name: train_supervised.sh finds it in outputs/supervised/.
-            argv.append('--resume=' + clean['run'])
+            summary = summary + ', teacher ' + teacher
+        argv += ['--batch-size', str(batch_size), '--workers', str(workers), '--gpus', gpus]
         if wandb:
-            argv.append('--wandb=' + wandb)
+            argv += ['--wandb', wandb]
             summary = summary + ', wandb ' + wandb
         clean['mode'] = mode
         clean['batch_size'] = batch_size
         clean['workers'] = workers
         clean['wandb'] = wandb
-        summary = summary + ', batch ' + str(batch_size) + ', workers ' + str(workers)
+        clean['gpus'] = gpus
+        summary = summary + ', batch ' + str(batch_size) + ', workers ' + str(workers) + ', ' + gpus_text(gpus)
 
     elif action_id == 'train_test':
-        check_keys(params, ())
-        argv = ['helpers/train_supervised.sh', '--foreground-log', '--test']
-        summary = '10 step per vedere che tutto parte'
+        check_keys(params, ('gpus',))
+        gpus = gpus_param(params)
+        argv = [sys.executable, '-m', 'tasks.train', '--test', '--gpus', gpus]
+        clean['gpus'] = gpus
+        summary = '10 step per vedere che tutto parte, ' + gpus_text(gpus)
 
     elif action_id == 'eval':
         check_keys(params, ('model',))
         model = model_spec_param(repo, params, 'model', ('stock', 'teacher', 'logged', 'run', 'hf'))
-        argv = ['helpers/eval_holdout.sh', '--model=' + model]
+        argv = [sys.executable, '-m', 'tasks.evaluation', 'holdout', '--model=' + model]
         clean['model'] = model
         summary = model
 
@@ -414,7 +437,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             raise bad('speed deve essere 0.25, 0.5 o 1.')
         inset = bool_param(params, 'inset')
         show_gt = bool_param(params, 'show_gt')
-        argv = ['helpers/compare_video.sh', '--segment=' + segment, '--reference=' + reference,
+        argv = [sys.executable, '-m', 'tasks.evaluation', 'compare', '--segment=' + segment, '--reference=' + reference,
                 '--student=' + student, '--start=' + format_number(start),
                 '--duration=' + format_number(duration), '--speed=' + SPEED_TEXT[speed]]
         # evaluation.compare draws the inset by default: both ways explicit, so the checkbox counts.
@@ -480,7 +503,7 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
     elif action_id == 'update':
         check_keys(params, ())
         argv = ['helpers/update.sh']
-        summary = 'git pull, uv sync, riavvio del sito'
+        summary = 'ultima versione del codice, librerie, riavvio del sito'
 
     elif action_id == 'selftest':
         check_keys(params, ())

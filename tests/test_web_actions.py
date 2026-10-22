@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 from web.actions import ACTIONS, build_job, script_missing, slug_of
 from web.common import WebError
 
+PY = sys.executable
 RUN = '2026-10-21_1544'
 RUN_SECONDS = '2026-10-22_101530'
 UNFINISHED = '2026-10-21_0834'
@@ -62,40 +64,54 @@ class ArgvTest(ActionTestCase):
 
     def test_train_fresh(self):
         spec = self.build('train', {'steps': 5000, 'batch_size': 8, 'workers': 6, 'mode': 'fresh', 'wandb': ''})
-        self.assertEqual(spec.argv, ['helpers/train_supervised.sh', '--foreground-log', '--steps=5000',
-                                     '--batch-size=8', '--workers=6'])
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.train', '--mode', 'fresh', '--steps', '5000', '--teacher',
+                                     'md-v3', '--batch-size', '8', '--workers', '6', '--gpus', 'all'])
         self.assertEqual(spec.group, 'gpu')
         self.assertTrue(spec.needs_gpu)
+
+    def test_train_gpus_and_teacher(self):
+        spec = self.build('train', {'steps': 100, 'mode': 'fresh', 'gpus': '0,1', 'teacher': '084747c7'})
+        self.assertEqual(spec.argv[spec.argv.index('--gpus') + 1], '0,1')
+        self.assertEqual(spec.argv[spec.argv.index('--teacher') + 1], '084747c7')
+        self.assertEqual(spec.params['gpus'], '0,1')
+        for bad_gpus in ('tutte', '0;rm', '-1', 'all,0', 1):
+            self.refused('train', {'steps': 100, 'gpus': bad_gpus}, 400)
+        self.refused('train', {'steps': 100, 'teacher': 'nuovo'}, 400)
+        self.refused('train', {'mode': 'resume', 'run': UNFINISHED, 'teacher': 'md-v3'}, 400)
 
     def test_train_continue_with_wandb(self):
         spec = self.build('train', {'steps': '200', 'batch_size': 4, 'workers': 0, 'mode': 'continue',
                                     'wandb': 'offline'})
-        self.assertEqual(spec.argv, ['helpers/train_supervised.sh', '--foreground-log', '--steps=200',
-                                     '--batch-size=4', '--workers=0', '--continue', '--wandb=offline'])
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.train', '--mode', 'continue', '--steps', '200', '--teacher',
+                                     'md-v3', '--batch-size', '4', '--workers', '0', '--gpus', 'all',
+                                     '--wandb', 'offline'])
 
     def test_train_resume(self):
         spec = self.build('train', {'mode': 'resume', 'run': UNFINISHED, 'batch_size': 8, 'workers': 6})
-        self.assertEqual(spec.argv, ['helpers/train_supervised.sh', '--foreground-log', '--batch-size=8',
-                                     '--workers=6', '--resume=' + UNFINISHED])
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.train', '--mode', 'resume', '--run', UNFINISHED,
+                                     '--batch-size', '8', '--workers', '6', '--gpus', 'all'])
 
     def test_train_test(self):
-        self.assertEqual(self.build('train_test', {}).argv,
-                         ['helpers/train_supervised.sh', '--foreground-log', '--test'])
+        self.assertEqual(self.build('train_test', {}).argv, [PY, '-m', 'tasks.train', '--test', '--gpus', 'all'])
+        self.assertEqual(self.build('train_test', {'gpus': '0'}).argv[-1], '0')
 
     def test_eval(self):
         for spec in ('stock', 'teacher', 'logged', 'run:' + RUN, 'run:' + UNFINISHED, 'hf:2026_10_21_1544',
                      'hf:cd210_native'):
-            self.assertEqual(self.build('eval', {'model': spec}).argv, ['helpers/eval_holdout.sh', '--model=' + spec])
+            self.assertEqual(self.build('eval', {'model': spec}).argv,
+                             [PY, '-m', 'tasks.evaluation', 'holdout', '--model=' + spec])
 
     def test_compare(self):
         spec = self.build('compare', {'segment': SEGMENT, 'reference': 'stock', 'student': 'run:' + RUN,
                                       'start': 10, 'duration': 20.5, 'speed': 0.5, 'inset': True, 'show_gt': False})
-        self.assertEqual(spec.argv, ['helpers/compare_video.sh', '--segment=' + SEGMENT, '--reference=stock',
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.evaluation', 'compare', '--segment=' + SEGMENT,
+                                     '--reference=stock',
                                      '--student=run:' + RUN, '--start=10', '--duration=20.5', '--speed=0.5',
                                      '--inset'])
         spec = self.build('compare', {'segment': SEGMENT, 'reference': 'teacher', 'student': 'hf:cd210_native',
                                       'start': '0', 'duration': '60', 'speed': 1, 'inset': False, 'show_gt': True})
-        self.assertEqual(spec.argv, ['helpers/compare_video.sh', '--segment=' + SEGMENT, '--reference=teacher',
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.evaluation', 'compare', '--segment=' + SEGMENT,
+                                     '--reference=teacher',
                                      '--student=hf:cd210_native', '--start=0', '--duration=60', '--speed=1',
                                      '--no-inset', '--show-gt'])
         spec = self.build('compare', {'segment': SEGMENT, 'reference': 'logged', 'student': 'run:' + RUN,
@@ -261,9 +277,9 @@ class ValidationTest(ActionTestCase):
         self.assertEqual(slug_of('cd210-native'), 'cd210_native')
 
     def test_missing_scripts(self):
-        self.assertIn('helpers/eval_holdout.sh', script_missing(self.repo, 'eval'))
-        (self.repo / 'helpers').mkdir()
-        (self.repo / 'helpers' / 'eval_holdout.sh').write_text('#!/bin/sh\n')
+        self.assertIn('tasks/evaluation.py', script_missing(self.repo, 'eval'))
+        (self.repo / 'tasks').mkdir()
+        (self.repo / 'tasks' / 'evaluation.py').write_text('')
         self.assertEqual(script_missing(self.repo, 'eval'), '')
 
 

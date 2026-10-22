@@ -192,3 +192,21 @@ border-radius:10px;background:var(--surface);border:1px solid var(--line);box-sh
 .toast.show{display:block}.toast.error{border-color:var(--bad);color:var(--bad)}
 .terminal.open ~ .toast{bottom:calc(min(60vh,560px) + 16px)}
 body.log-open .page{padding-bottom:calc(min(60vh,560px) + 32px)}
+
+/* Training: the run in detail and the clickable list of runs */
+.run-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.run-head h2{margin:0}
+.run-head .grow{flex:1;min-width:0}
+.run-progress{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.run-progress .sub{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+#run-view .buttons{margin-bottom:14px}
+#run-view h3{margin:0;font-size:15px}
+.run-log{margin-top:12px}
+.run-log summary{cursor:pointer;font-weight:600;padding:6px 0}
+.run-log pre{margin:6px 0 0;max-height:360px;overflow:auto;background:var(--term-bg);color:var(--term-fg);
+border-radius:8px;padding:10px 12px;font-family:var(--font-data);font-size:12px;line-height:1.45;white-space:pre-wrap;
+word-break:break-word}
+tr.clickable{cursor:pointer}
+tr.clickable:hover td{background:var(--surface-2)}
+tr.clickable.selected td{background:var(--rev-soft)}
+@media (max-width:700px){.runs-table .wide{display:none}}

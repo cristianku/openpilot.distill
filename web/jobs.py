@@ -363,7 +363,8 @@ class JobManager:
             stamp = datetime.fromtimestamp(started, UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
             with log_file.open('ab') as log:
                 log.write(('== ' + spec.label + ', avviato dal sito il ' + stamp + '\n').encode('utf-8'))
-                log.write(('== ' + ' '.join(spec.argv) + '\n').encode('utf-8'))
+                if spec.summary:
+                    log.write(('== ' + spec.summary + '\n').encode('utf-8'))
                 log.flush()
                 try:
                     # A new session: the job outlives the site and is stopped as one process group.

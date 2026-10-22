@@ -28,6 +28,8 @@ SUMMARY_KEYS = ('loss', 'gt', 'distill', 'gt/plan', 'grad_norm')
 # data-loader stalls (p95 of a step is ~9 s against a median of 0.7 s).
 ETA_WINDOW = 200
 MAX_FILE_BYTES = 200 * 1024 * 1024
+# End of train.log shown in the detail of a run.
+LOG_TAIL_BYTES = 48 * 1024
 
 
 def _number(text):
@@ -210,7 +212,7 @@ class RunReader:
             finished_time = (folder / 'supercombo.pt').stat().st_mtime
 
         run_config = {}
-        for key in ('mode', 'steps', 'batch_size', 'workers', 'precision', 'teacher', 'hf_repo'):
+        for key in ('mode', 'steps', 'batch_size', 'workers', 'precision', 'teacher', 'hf_repo', 'world_size', 'gpus'):
             value = config.get(key)
             if isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool)):
                 run_config[key] = value
@@ -219,6 +221,23 @@ class RunReader:
                 'has_pt': has_pt, 'has_training_pt': has_training_pt, 'has_onnx': has_onnx,
                 'resumable': has_training_pt and not has_pt and status != 'running',
                 'started': started, 'finished': finished_time, 'config': run_config}
+
+    def detail(self, name: str, running: bool, log_bytes: int = LOG_TAIL_BYTES) -> dict | None:
+        """The summary of a run, plus its resumes and the end of its train.log."""
+        result = self.summary(name, running)
+        if result is None:
+            return None
+        folder = self.base / name
+        resumed = []
+        raw_resumed = _read_run_json(folder).get('resumed')
+        if isinstance(raw_resumed, list):
+            for entry in raw_resumed:
+                if isinstance(entry, dict):
+                    resumed.append({'time': _number(entry.get('time')), 'step': entry.get('step')
+                                    if isinstance(entry.get('step'), int) else None})
+        result['resumed'] = resumed
+        result['log_tail'] = _log_tail(folder / 'train.log', log_bytes)
+        return result
 
     def series(self, name: str, max_points: int = 800) -> dict | None:
         """The chart series of a run, at most max_points per series: each point is the mean of a
@@ -291,6 +310,26 @@ def average_step_time(records: dict) -> float | None:
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _log_tail(path: Path, size: int) -> str:
+    """The last `size` bytes of a log, from the first whole line; a line rewritten with \\r (progress
+    bars) keeps only its last version."""
+    try:
+        with path.open('rb') as handle:
+            handle.seek(0, 2)
+            length = handle.tell()
+            handle.seek(max(0, length - size))
+            data = handle.read()
+    except OSError:
+        return ''
+    text = data.decode('utf-8', 'replace')
+    if length > size and '\n' in text:
+        text = text.split('\n', 1)[1]
+    lines = []
+    for line in text.split('\n'):
+        lines.append(line.rstrip('\r').rsplit('\r', 1)[-1])
+    return '\n'.join(lines)
 
 
 def _read_run_json(folder: Path) -> dict:

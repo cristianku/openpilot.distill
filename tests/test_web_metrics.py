@@ -172,6 +172,22 @@ class RunReaderTest(unittest.TestCase):
         (folder / 'run.json').write_text(json.dumps({'started': 999.0, 'finished': 2000.0}))
         self.assertEqual(reader.summary('2026-10-22_101530', False)['status'], 'finished')
 
+    def test_detail(self):
+        log = 'Teacher md-v3: ok\n  10%\r  50%\r 100%\nstep 1/9: loss=3 gt=1 distill=2 time=0.70s\n'
+        folder = self.run_folder('2026-10-22_101530', log)
+        (folder / 'run.json').write_text(json.dumps({'mode': 'resume', 'gpus': '0', 'world_size': 1,
+                                                     'resumed': [{'time': 5.0, 'step': 500}, 'junk']}))
+        reader = RunReader(self.repo)
+        detail = reader.detail('2026-10-22_101530', False)
+        self.assertEqual(detail['resumed'], [{'time': 5.0, 'step': 500}])
+        self.assertEqual(detail['config']['gpus'], '0')
+        # A progress bar rewritten with \r keeps only its last state.
+        self.assertEqual(detail['log_tail'].splitlines()[:2], ['Teacher md-v3: ok', ' 100%'])
+        # Only the end of a long log, from a whole line.
+        tail = reader.detail('2026-10-22_101530', False, log_bytes=60)['log_tail']
+        self.assertTrue(tail.startswith('step 1/9'))
+        self.assertIsNone(reader.detail('../x', False))
+
     def test_cache_follows_the_file(self):
         folder = self.run_folder('2026-10-21_1544', 'step 1/9: loss=3 gt=1 distill=2 time=0.70s\n')
         reader = RunReader(self.repo)

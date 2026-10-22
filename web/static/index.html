@@ -115,14 +115,49 @@
 
   <!-- TRAINING -->
   <section class="panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
-    <div class="card">
+    <!-- One run, in detail: the training in progress, or the run chosen in the list. -->
+    <div class="card" id="run-view" hidden>
+      <div class="run-head">
+        <button class="btn small" type="button" id="run-back" hidden>&larr; Indietro</button>
+        <h2 class="grow"><span id="run-view-title">Run</span> <span class="mono" id="run-view-name"></span></h2>
+        <span id="run-view-state"></span>
+      </div>
+      <div class="run-progress" id="run-view-progress">
+        <div class="bar run" id="run-view-bar-wrap"><span id="run-view-bar"></span></div>
+        <div class="sub" id="run-view-steps"></div>
+      </div>
+      <div class="buttons" id="run-view-buttons"></div>
+      <div class="grid2">
+        <dl class="kv" id="run-view-settings"></dl>
+        <dl class="kv" id="run-view-last"></dl>
+      </div>
+      <div class="chart-head">
+        <h3>Grafici</h3>
+        <label class="check"><input type="checkbox" id="chart-smooth"> Smussa</label>
+        <label class="check"><input type="checkbox" id="chart-log" checked> Scala logaritmica</label>
+        <span class="note" id="chart-note"></span>
+      </div>
+      <div class="charts" id="charts"></div>
+      <p class="empty" id="charts-empty" hidden>Questo run non ha ancora step registrati.</p>
+      <details class="run-log" id="run-view-log-box">
+        <summary>Log del training</summary>
+        <pre id="run-view-log"></pre>
+      </details>
+    </div>
+
+    <div class="card" id="train-new">
       <h2>Nuovo training</h2>
       <div class="form-grid">
         <label class="field">Passi (step)<input type="number" id="train-steps" min="1" max="200000" step="1" value="5000" inputmode="numeric"></label>
-        <label class="field">Batch<input type="number" id="train-batch" min="1" max="64" step="1" value="8" inputmode="numeric"></label>
+        <label class="field">Batch per GPU<input type="number" id="train-batch" min="1" max="64" step="1" value="8" inputmode="numeric"></label>
         <label class="field">Workers<input type="number" id="train-workers" min="0" max="16" step="1" value="6" inputmode="numeric"></label>
+        <label class="field">GPU<select id="train-gpus"></select></label>
+        <label class="field">Teacher<select id="train-teacher">
+          <option value="md-v3">MD v3 (big model attuale)</option>
+          <option value="084747c7">084747c7 (big model vecchio)</option>
+        </select></label>
         <label class="field">wandb<select id="train-wandb">
-          <option value="">come da terminale</option>
+          <option value="">automatico (online se configurato)</option>
           <option value="online">online (wandb.ai)</option>
           <option value="offline">offline (solo su disco)</option>
           <option value="disabled">disattivato</option>
@@ -141,24 +176,16 @@
         <div class="action"><button class="btn" type="button" id="btn-train-test">Prova 10 step</button><div class="reason" id="reason-train_test"></div></div>
       </div>
     </div>
+
     <div class="card">
       <h2>Run</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Run</th><th>Stato</th><th>Step</th><th class="num">ETA</th><th class="num">loss</th><th class="num">gt</th>
-          <th class="num">distill</th><th class="num">gt/plan</th><th>File</th><th></th></tr></thead>
+      <p class="note">Tocca un run per vederne i dettagli.</p>
+      <div class="table-wrap"><table class="runs-table">
+        <thead><tr><th>Run</th><th>Stato</th><th>Step</th><th class="num">ETA</th><th class="num wide">loss</th><th class="num wide">gt</th>
+          <th class="num wide">distill</th><th class="num wide">gt/plan</th><th class="wide">File</th></tr></thead>
         <tbody id="runs"></tbody>
       </table></div>
-      <p class="empty" id="runs-empty" hidden>Nessun run in outputs/supervised/.</p>
-    </div>
-    <div class="card">
-      <div class="chart-head">
-        <h2>Grafici · <span id="chart-run">–</span></h2>
-        <label class="check"><input type="checkbox" id="chart-smooth"> Smussa</label>
-        <label class="check"><input type="checkbox" id="chart-log" checked> Scala logaritmica</label>
-        <span class="note" id="chart-note"></span>
-      </div>
-      <div class="charts" id="charts"></div>
-      <p class="empty" id="charts-empty" hidden>Questo run non ha ancora step registrati.</p>
+      <p class="empty" id="runs-empty" hidden>Nessun run ancora.</p>
     </div>
   </section>
 
@@ -179,7 +206,7 @@
           <th class="num">Segmenti</th><th>Data</th></tr></thead>
         <tbody id="leaderboard"></tbody>
       </table></div>
-      <p class="empty" id="leaderboard-empty" hidden>Nessuna valutazione ancora (outputs/eval/ è vuota).</p>
+      <p class="empty" id="leaderboard-empty" hidden>Nessuna valutazione ancora.</p>
       <p class="note">avg miss: distanza media in metri tra la traiettoria prevista e quella vera; più basso è meglio.</p>
     </div>
   </section>
@@ -221,7 +248,7 @@
     <div class="card">
       <h2>Video fatti</h2>
       <ul class="list" id="videos"></ul>
-      <p class="empty" id="videos-empty" hidden>Nessun video ancora (outputs/compare/ è vuota).</p>
+      <p class="empty" id="videos-empty" hidden>Nessun video ancora.</p>
     </div>
   </section>
 
@@ -229,7 +256,7 @@
   <section class="panel" id="panel-pubblica" role="tabpanel" aria-labelledby="tab-pubblica" hidden>
     <div class="card">
       <h2>Export ONNX</h2>
-      <p class="lead">Crea driving_supercombo.onnx accanto a supercombo.pt del run (serve il modello originale del comma come riferimento).</p>
+      <p class="lead">Crea il modello ONNX per il comma da un run finito (serve il modello originale del comma come riferimento).</p>
       <div class="form-grid wide"><label class="field">Run<select id="export-run"></select></label></div>
       <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-export">Esporta ONNX</button><div class="reason" id="reason-export"></div></div></div>
     </div>
@@ -287,7 +314,7 @@
   <section class="panel" id="panel-job" role="tabpanel" aria-labelledby="tab-job" hidden>
     <div class="card">
       <h2>Codice</h2>
-      <p class="lead">Versione sul server: <code id="code-version">–</code>. «Aggiorna il codice» fa git pull, uv sync e riavvia il sito; parte solo quando non gira nient'altro.</p>
+      <p class="lead">Versione sul server: <code id="code-version">–</code>. «Aggiorna il codice» scarica l'ultima versione, aggiorna le librerie e riavvia il sito; parte solo quando non gira nient'altro.</p>
       <div class="buttons">
         <div class="action"><button class="btn" type="button" id="btn-update">Aggiorna il codice</button><div class="reason" id="reason-update"></div></div>
         <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Prova del sito</button><div class="reason" id="reason-selftest"></div></div>

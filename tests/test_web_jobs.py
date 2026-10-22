@@ -71,7 +71,9 @@ class LifecycleTest(JobTestCase):
         self.assertEqual(done['exit_code'], 0)
         self.assertIsNotNone(done['finished'])
         text = manager.log(job['id'], 0)['text']
-        self.assertIn('== sh -c echo hello', text)
+        # The header says what the job does, never its command line.
+        self.assertIn('== test\n', text)
+        self.assertNotIn('sh -c', text)
         self.assertIn('hello', text)
         self.assertIn('== finito con codice 0', text)
         record = json.loads(manager.job_file(job['id']).read_text())

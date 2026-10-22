@@ -268,11 +268,29 @@ class App:
             jobs = self.jobs.list_jobs()
         running = self.running_run_names(jobs)
         result = []
+        job_of_run = self.running_jobs_by_run(jobs)
         for name in self.runs.run_names():
             summary = self.runs.summary(name, name in running)
             if summary is not None:
+                summary['job_id'] = job_of_run.get(name)
                 result.append(summary)
         return result
+
+    @staticmethod
+    def running_jobs_by_run(jobs: list[dict]) -> dict:
+        """Run name -> id of the site job that is training it."""
+        result = {}
+        for job in jobs:
+            if job['state'] == 'running' and job.get('run'):
+                result[job['run']] = job['id']
+        return result
+
+    def run_detail(self, name: str) -> dict | None:
+        jobs = self.jobs.list_jobs()
+        detail = self.runs.detail(name, name in self.running_run_names(jobs))
+        if detail is not None:
+            detail['job_id'] = self.running_jobs_by_run(jobs).get(name)
+        return detail
 
     def action_states(self, machine: dict, jobs: list[dict], comma_state: dict, runs: list[dict]) -> dict:
         running = set()
@@ -497,6 +515,15 @@ def make_handler(app: App):
                 return
             if path == '/api/runs':
                 self._json(200, {'runs': app.runs_payload()})
+                return
+            match = re.fullmatch(r'/api/runs/([^/]+)', path)
+            if match:
+                detail = None
+                if RUN_RE.fullmatch(match.group(1)):
+                    detail = app.run_detail(match.group(1))
+                if detail is None:
+                    raise WebError(404, 'unknown_run', 'Run sconosciuto.')
+                self._json(200, detail)
                 return
             match = re.fullmatch(r'/api/runs/([^/]+)/metrics', path)
             if match:
