@@ -878,7 +878,32 @@
     const options = [{value: 'auto', label: 'Auto (' + status.limits.localize_jobs_auto + ')'}];
     for (let jobs = low; jobs <= Math.min(high, cpus); jobs++) options.push({value: String(jobs), label: String(jobs)});
     fillSelect(byId('localize-jobs'), options, 'auto');
+    renderLocalizeStepper();
   }
+
+  // The stepper next to Localize: Auto, then 1, 2, ... ; it moves the hidden select.
+  function renderLocalizeStepper() {
+    const select = byId('localize-jobs');
+    const values = Array.from(select.options).map((option) => option.value);
+    const index = values.indexOf(select.value);
+    const auto = status && status.limits ? status.limits.localize_jobs_auto : null;
+    const jobs = select.value === 'auto' ? auto : Number(select.value);
+    byId('localize-jobs-value').textContent = select.value === 'auto' ? 'Auto \u00b7 ' + auto : String(jobs);
+    byId('localize-jobs-less').disabled = index <= 0;
+    byId('localize-jobs-more').disabled = index < 0 || index >= values.length - 1;
+    byId('localize-jobs-note').textContent = jobs ? jobs + (jobs === 1 ? ' segment' : ' segments') + ' at a time, about '
+      + (jobs === 1 ? 'one core' : jobs + ' of the ' + status.system.cpus + ' cores')
+      + (select.value === 'auto' ? ' (picked from the free cores and memory).' : '.') : '';
+  }
+  function stepLocalizeJobs(direction) {
+    const select = byId('localize-jobs');
+    const values = Array.from(select.options).map((option) => option.value);
+    const index = Math.max(0, Math.min(values.length - 1, values.indexOf(select.value) + direction));
+    select.value = values[index];
+    renderLocalizeStepper();
+  }
+  byId('localize-jobs-less').addEventListener('click', () => stepLocalizeJobs(-1));
+  byId('localize-jobs-more').addEventListener('click', () => stepLocalizeJobs(1));
   function localizeParams() {
     const value = byId('localize-jobs').value;
     return value && value !== 'auto' ? {jobs: Number(value)} : {};

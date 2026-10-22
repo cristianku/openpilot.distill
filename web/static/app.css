@@ -424,3 +424,21 @@ transition:height .6s ease}
 .sub.stats{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:8px;font-size:14px}
 .stat-label{color:var(--muted)}
 .stat-value{font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg)}
+
+/* Preprocessing: the two steps of the download and localize card */
+.step-block{padding:14px 0;border-top:1px solid var(--surface-2)}
+.step-block:first-of-type{border-top:0;padding-top:4px}
+.step-title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.step-number{width:24px;height:24px;border-radius:50%;background:var(--rev);color:#fff;display:grid;place-items:center;
+font-size:13px;font-weight:700;flex:none}
+.step-block .note{margin:6px 0 12px}
+.step-row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.field.compact{flex:1;min-width:180px;margin:0}
+.stepper{display:flex;align-items:center;height:44px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);
+overflow:hidden;align-self:flex-start}
+.stepper-button{appearance:none;border:0;background:none;width:44px;height:100%;font-size:22px;color:var(--rev);cursor:pointer;
+font-weight:500}
+.stepper-button:disabled{color:var(--line);cursor:default}
+.stepper-button:active:not(:disabled){background:var(--rev-soft)}
+.stepper-value{min-width:84px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums;border-left:1px solid var(--line);
+border-right:1px solid var(--line);height:100%;display:grid;place-items:center;padding:0 10px}

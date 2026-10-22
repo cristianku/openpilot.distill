@@ -91,14 +91,27 @@
     </div>
     <div class="card">
       <h2>Download and localize</h2>
-      <p class="lead">Download new drives from the comma (dashcam only, at least 5 minutes, without the first and last two segments), then localize them: a segment that is not localized is left out of training.</p>
-      <div class="form-grid">
-        <label class="field">Since (optional)<input type="date" id="fetch-since"></label>
-        <label class="field">Segments localized at a time<select id="localize-jobs"></select></label>
+      <div class="step-block">
+        <div class="step-title"><span class="step-number">1</span> From the comma</div>
+        <p class="note">New dashcam drives of at least 5 minutes, without their first and last two minutes.</p>
+        <div class="step-row">
+          <label class="field compact">Since (optional)<input type="date" id="fetch-since"></label>
+          <div class="action"><button class="btn primary" type="button" id="btn-fetch">Download from the comma</button><div class="reason" id="reason-fetch"></div></div>
+        </div>
       </div>
-      <div class="buttons">
-        <div class="action"><button class="btn primary" type="button" id="btn-fetch">Download from the comma</button><div class="reason" id="reason-fetch"></div></div>
-        <div class="action"><button class="btn" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
+      <div class="step-block">
+        <div class="step-title"><span class="step-number">2</span> Localize</div>
+        <p class="note">Works out the real path of every new segment; a segment that is not localized is left out of training.</p>
+        <select id="localize-jobs" hidden aria-hidden="true"></select>
+        <div class="step-row">
+          <div class="action"><button class="btn primary" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
+          <div class="stepper" role="group" aria-label="Segments localized at a time">
+            <button type="button" class="stepper-button" id="localize-jobs-less" aria-label="Fewer at a time">&minus;</button>
+            <span class="stepper-value" id="localize-jobs-value" aria-live="polite">Auto</span>
+            <button type="button" class="stepper-button" id="localize-jobs-more" aria-label="More at a time">+</button>
+          </div>
+        </div>
+        <p class="note" id="localize-jobs-note"></p>
       </div>
       <div class="job-live" data-actions="fetch,localize"></div>
     </div>
