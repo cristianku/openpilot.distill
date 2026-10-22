@@ -288,6 +288,15 @@ class DataTest(unittest.TestCase):
         (folder / 'localizer.ionex').write_text('2026/280 FIN\n')
         self.assertEqual(map_of(folder, today), ('final', False))
 
+    def test_proc_stat(self):
+        from web.status import parse_proc_stat
+        text = ('cpu  100 0 50 800 50 0 0 0 0 0\n'
+                'cpu0 60 0 20 400 20 0 0 0 0 0\n'
+                'cpu1 40 0 30 400 30 0 0 0 0 0\n'
+                'intr 12345\n')
+        # busy = total - idle - iowait
+        self.assertEqual(parse_proc_stat(text), [(150, 1000), (80, 500), (70, 500)])
+
     def test_failure_reason_without_date(self):
         path = self.repo / 'x.failed'
         path.write_text('2026-10-20 17:32 RuntimeError: global yaw\n')

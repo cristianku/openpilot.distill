@@ -167,6 +167,49 @@ def _number(text: str):
     return value
 
 
+# The last /proc/stat sample: CPU use is the busy share of the time between two samples.
+_cpu_sample = {'times': None}
+_cpu_lock = threading.Lock()
+
+
+def parse_proc_stat(text: str) -> list[tuple[int, int]]:
+    """(busy, total) jiffies of the whole CPU (first) and of every core, from /proc/stat."""
+    rows = []
+    for line in text.splitlines():
+        if not line.startswith('cpu'):
+            continue
+        fields = line.split()
+        try:
+            numbers = [int(value) for value in fields[1:]]
+        except ValueError:
+            continue
+        if len(numbers) < 4:
+            continue
+        # idle + iowait are not busy; guest time is already inside user and nice.
+        idle = numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
+        total = sum(numbers[:8])
+        rows.append((total - idle, total))
+    return rows
+
+
+def cpu_usage() -> dict | None:
+    """{'total': %, 'cores': [%, ...]} since the previous call; None on the first call or without /proc."""
+    try:
+        current = parse_proc_stat(Path('/proc/stat').read_text())
+    except OSError:
+        return None
+    with _cpu_lock:
+        previous = _cpu_sample['times']
+        _cpu_sample['times'] = current
+    if previous is None or len(previous) != len(current):
+        return None
+    percents = []
+    for (busy, total), (old_busy, old_total) in zip(current, previous, strict=True):
+        elapsed = total - old_total
+        percents.append(round(max(0.0, min(100.0, (busy - old_busy) * 100 / elapsed)), 1) if elapsed > 0 else 0.0)
+    return {'total': percents[0], 'cores': percents[1:]}
+
+
 def memory_info() -> dict | None:
     """RAM from /proc/meminfo (inside the LXC it is the container's own memory)."""
     try:
@@ -240,7 +283,7 @@ def gpu_list() -> list[dict]:
 
 def system_info(repo: Path) -> dict:
     info = {'cpus': os.cpu_count(), 'load': None, 'memory': memory_info(), 'disk': None, 'gpu': gpu_info(),
-            'gpus': gpu_list()}
+            'gpus': gpu_list(), 'cpu': cpu_usage()}
     try:
         load = os.getloadavg()
         info['load'] = [round(load[0], 2), round(load[1], 2), round(load[2], 2)]

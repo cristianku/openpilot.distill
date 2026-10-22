@@ -269,6 +269,55 @@
     if (log.id) renderSheetStatus();
   }
 
+  // The last few minutes of CPU and GPU use, one point per status (every 4 s), kept in the page.
+  const HISTORY_POINTS = 90;
+  const history = {cpu: [], gpu: []};
+  function pushHistory(key, value) {
+    history[key].push(value);
+    if (history[key].length > HISTORY_POINTS) history[key].shift();
+  }
+
+  // An area chart 0-100% of a history, newest on the right.
+  function renderSpark(id, values, color) {
+    const box = byId(id);
+    const SVG = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + HISTORY_POINTS + ' 30');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    if (values.length > 1) {
+      const start = HISTORY_POINTS - values.length;
+      const points = values.map((value, index) => (start + index) + ',' + (30 - Math.max(0, Math.min(100, value)) * 0.3));
+      const area = document.createElementNS(SVG, 'polygon');
+      area.setAttribute('points', start + ',30 ' + points.join(' ') + ' ' + (HISTORY_POINTS - 1) + ',30');
+      area.setAttribute('fill', color);
+      area.setAttribute('fill-opacity', '0.15');
+      svg.appendChild(area);
+      const line = document.createElementNS(SVG, 'polyline');
+      line.setAttribute('points', points.join(' '));
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', color);
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(line);
+    }
+    box.replaceChildren(svg);
+  }
+
+  // One small bar per core, green to orange to red with the load.
+  function renderCores(cores) {
+    const box = byId('cpu-cores');
+    if (box.children.length !== cores.length) {
+      box.replaceChildren();
+      for (let index = 0; index < cores.length; index++) box.appendChild(node('span', 'core'));
+    }
+    cores.forEach((value, index) => {
+      const bar = box.children[index];
+      bar.style.setProperty('--h', Math.max(4, value) + '%');
+      bar.className = 'core' + (value >= 85 ? ' hot' : value >= 50 ? ' warm' : '');
+      bar.title = 'core ' + index + ': ' + Math.round(value) + '%';
+    });
+  }
+
   function renderMachine() {
     const system = status.system;
     const gpu = system.gpu;
@@ -276,6 +325,8 @@
       const util = gpu.utilization === null ? 0 : gpu.utilization;
       byId('gpu-value').textContent = util + '%';
       setBar('gpu-bar', util, util > 85 ? 'warn' : '');
+      pushHistory('gpu', util);
+      renderSpark('gpu-spark', history.gpu, '#34c759');
       let text = gpu.name;
       if (gpu.memory_total_mb) text += ' · ' + (gpu.memory_used_mb / 1024).toFixed(1) + ' / ' + (gpu.memory_total_mb / 1024).toFixed(0) + ' GB';
       if (gpu.temperature !== null) text += ' · ' + gpu.temperature + ' °C';
@@ -288,10 +339,19 @@
       byId('gpu-sub').textContent = 'nvidia-smi not available';
     }
     if (system.cpus) {
-      const load = system.load ? system.load[0] : 0;
-      byId('cpu-value').textContent = system.cpus + (system.cpus === 1 ? ' core' : ' cores');
-      setBar('cpu-bar', load * 100 / system.cpus, load > system.cpus ? 'warn' : '');
-      byId('cpu-sub').textContent = system.load ? 'load ' + system.load.join(' · ') : 'load n/a';
+      const cpu = system.cpu;
+      if (cpu) {
+        byId('cpu-value').textContent = Math.round(cpu.total) + '%';
+        pushHistory('cpu', cpu.total);
+        renderCores(cpu.cores);
+      } else {
+        byId('cpu-value').textContent = '…';
+      }
+      renderSpark('cpu-spark', history.cpu, '#007aff');
+      let sub = system.cpus + (system.cpus === 1 ? ' core' : ' cores');
+      if (cpu) sub += ' · ' + cpu.cores.filter((value) => value >= 50).length + ' busy';
+      if (system.load) sub += ' · load ' + system.load.map((value) => value.toFixed(1)).join(' / ') + ' (1 / 5 / 15 min)';
+      byId('cpu-sub').textContent = sub;
     }
     const memory = system.memory;
     if (memory) {
