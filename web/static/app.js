@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'comma', 'jobs'];
+  const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'comma'];
   const JOB_PILL = {running: 'run', ok: 'ok', failed: 'bad', stopped: 'todo', unknown: 'muted'};
   const RUN_STATE = {running: ['running', 'run'], finished: ['finished', 'ok'], interrupted: ['interrupted', 'todo']};
   const SEGMENT_STATE = {localized: ['localized', 'ok'], failed: ['failed', 'bad'], todo: ['to localize', 'todo']};
@@ -10,7 +10,7 @@
     'gt/plan': 'gt/plan (path)', 'grad_norm': 'grad_norm', 'step_time': 'time per step (s)'};
   // How often (ms) the data of each tab is read again while the tab is open.
   const TAB_PERIOD = {preprocessing: 15000, training: 10000, evaluation: 30000, compare: 30000, publish: 15000,
-    comma: 0, jobs: 0, status: 0};
+    comma: 0, status: 0};
   const STATUS_PERIOD = 4000;
   const SMOOTHING = 0.85;
 
@@ -161,6 +161,8 @@
     }
     // The tab was called Data before: old bookmarks still land on it.
     if (name === 'data') name = 'preprocessing';
+    // The Jobs tab is gone: its job list and the code update are in Status.
+    if (name === 'jobs') name = 'status';
     if (TABS.indexOf(name) < 0) name = 'status';
     currentTab = name;
     for (const tab of TABS) {
@@ -411,6 +413,42 @@
     }
   }
 
+  // Segments at a time of a running localization, changed live: "- 8 +" and what it means in cores.
+  function parallelControl(job) {
+    const parallel = job.parallel;
+    const cpus = (status && status.system.cpus) || parallel.jobs;
+    const [low, high] = [1, Math.min(16, cpus)];
+    const box = node('div', 'parallel');
+    const stepper = node('div', 'stepper');
+    stepper.setAttribute('role', 'group');
+    stepper.setAttribute('aria-label', 'Segments localized at a time');
+    function step(label, aria, value, disabled) {
+      const button = node('button', 'stepper-button', label);
+      button.type = 'button';
+      button.setAttribute('aria-label', aria);
+      button.disabled = disabled;
+      button.addEventListener('click', async () => {
+        try {
+          await post('/api/jobs/' + job.id + '/parallel', {jobs: value});
+          toast(value + ' segments at a time');
+        } catch (error) {
+          toast(error.message, true);
+        }
+        refreshStatus();
+      });
+      return button;
+    }
+    stepper.appendChild(step('\u2212', 'Fewer at a time', parallel.jobs - 1, parallel.jobs <= low));
+    stepper.appendChild(node('span', 'stepper-value', String(parallel.jobs)));
+    stepper.appendChild(step('+', 'More at a time', parallel.jobs + 1, parallel.jobs >= high));
+    box.appendChild(stepper);
+    let text = 'segments at a time \u00b7 about ' + parallel.jobs + ' of ' + cpus + ' cores';
+    if (parallel.running !== undefined && parallel.running !== parallel.jobs) text += ' \u00b7 ' + parallel.running + ' running now';
+    if (parallel.auto) text += ' \u00b7 auto was ' + parallel.auto;
+    box.appendChild(node('span', 'sub', text));
+    return box;
+  }
+
   function jobItem(job, withButtons) {
     const item = node('li', 'item');
     item.appendChild(pill(job.state_label, JOB_PILL[job.state] || 'muted'));
@@ -447,6 +485,7 @@
         item.appendChild(stop);
       }
     }
+    if (job.state === 'running' && job.parallel && job.parallel.jobs) item.appendChild(parallelControl(job));
     if (job.progress) {
       const progress = node('div', 'progress');
       progress.appendChild(barNode(job.progress.percent, 'run'));
@@ -619,11 +658,15 @@
     }
   }
 
+  // Status, "Recent jobs": the finished ones (the running ones are under "Running").
+  const RECENT_JOBS = 15;
   function renderJobs() {
     const list = byId('jobs');
+    const finished = status.jobs.filter((job) => job.state !== 'running').slice(0, RECENT_JOBS);
+    if (same('recent-jobs', finished)) return;
     list.replaceChildren();
-    byId('jobs-empty').hidden = status.jobs.length > 0;
-    for (const job of status.jobs) list.appendChild(jobItem(job, true));
+    byId('jobs-empty').hidden = finished.length > 0;
+    for (const job of finished) list.appendChild(jobItem(job, true));
   }
 
   // -- action buttons --------------------------------------------------------------------------
@@ -805,7 +848,6 @@
   }
 
   function renderData() {
-    renderLocalizeJobs();
     const segments = data.segments;
     if (segments) renderRoutes(segments.routes);
     if (!segments || same('data', segments)) return;
@@ -869,45 +911,9 @@
   });
   byId('btn-localize').addEventListener('click', () => runAction('localize', localizeParams()));
 
-  // How many segments the localization runs at the same time: Auto (the server's choice from its
-  // cores and free memory) or a number. One localization uses about one core.
-  function renderLocalizeJobs() {
-    if (!status || !status.limits || !status.limits.localize_jobs) return;
-    const [low, high] = status.limits.localize_jobs;
-    const cpus = status.system.cpus || high;
-    const options = [{value: 'auto', label: 'Auto (' + status.limits.localize_jobs_auto + ')'}];
-    for (let jobs = low; jobs <= Math.min(high, cpus); jobs++) options.push({value: String(jobs), label: String(jobs)});
-    fillSelect(byId('localize-jobs'), options, 'auto');
-    renderLocalizeStepper();
-  }
-
-  // The stepper next to Localize: Auto, then 1, 2, ... ; it moves the hidden select.
-  function renderLocalizeStepper() {
-    const select = byId('localize-jobs');
-    const values = Array.from(select.options).map((option) => option.value);
-    const index = values.indexOf(select.value);
-    const auto = status && status.limits ? status.limits.localize_jobs_auto : null;
-    const jobs = select.value === 'auto' ? auto : Number(select.value);
-    byId('localize-jobs-value').textContent = select.value === 'auto' ? 'Auto \u00b7 ' + auto : String(jobs);
-    byId('localize-jobs-less').disabled = index <= 0;
-    byId('localize-jobs-more').disabled = index < 0 || index >= values.length - 1;
-    byId('localize-jobs-note').textContent = jobs ? jobs + (jobs === 1 ? ' segment' : ' segments') + ' at a time, about '
-      + (jobs === 1 ? 'one core' : jobs + ' of the ' + status.system.cpus + ' cores')
-      + (select.value === 'auto' ? ' (picked from the free cores and memory).' : '.') : '';
-  }
-  function stepLocalizeJobs(direction) {
-    const select = byId('localize-jobs');
-    const values = Array.from(select.options).map((option) => option.value);
-    const index = Math.max(0, Math.min(values.length - 1, values.indexOf(select.value) + direction));
-    select.value = values[index];
-    renderLocalizeStepper();
-  }
-  byId('localize-jobs-less').addEventListener('click', () => stepLocalizeJobs(-1));
-  byId('localize-jobs-more').addEventListener('click', () => stepLocalizeJobs(1));
-  function localizeParams() {
-    const value = byId('localize-jobs').value;
-    return value && value !== 'auto' ? {jobs: Number(value)} : {};
-  }
+  // The localization starts with the server's choice of segments at a time (cores, free memory);
+  // the Status tab changes it while it runs.
+  function localizeParams() { return {}; }
 
   // -- Training --------------------------------------------------------------------------------
   const MODE_TEXT = {fresh: 'from scratch', continue: 'from the stable weights', resume: 'resumed'};

@@ -22,6 +22,12 @@ memory): one localizer.run uses about one core. Each one gets at most 2 numeric 
 not fight over the cores. The job log gets one line per segment when it ends; the full output of a
 segment is in its localizer.log.
 
+Started from the web site, the number can change while the job runs: the site writes {"jobs": N} in
+the file named by DISTILL_JOB_CONTROL, read again at least once a second. More starts new segments at
+once; fewer lets the running ones finish and starts no new one until below the new number. The job
+never writes that file: it reports {"jobs", "auto", "running"} in the state file next to it
+(<job>.state.json), so a value the site writes is never overwritten.
+
 Ionosphere map: the localizer writes the one it used in localizer.ionex ("2026/293 P1D"). P1D
 (prediction) is the only one for a drive of today, RAP comes out about one day later, FIN about two
 weeks later (details in localizer/ionex.py). Every run without arguments redoes the segments for
@@ -42,7 +48,8 @@ import shutil
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 from tasks.common import REPO, TaskError, load_env, run_main, say
@@ -74,6 +81,57 @@ THREADS_PER_JOB = '2'
 THREAD_VARIABLES = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
 # --jobs N or --jobs=N, read by parse_args into this (None = default_jobs()).
 jobs_option = {'value': None}
+# Upper bound of segments at a time, also for a value from the control file.
+JOBS_LIMIT = 16
+# How often the control file is read while segments run (seconds).
+CONTROL_PERIOD = 1.0
+
+
+def state_path_of(control: Path) -> Path:
+    """<job>.state.json next to <job>.control.json (what the job reports to the site)."""
+    name = control.name
+    if name.endswith('.control.json'):
+        return control.with_name(name[:-len('.control.json')] + '.state.json')
+    return control.with_name(name + '.state')
+
+
+class Control:
+    """The control file of a job started from the web site (DISTILL_JOB_CONTROL), only read here; without
+    it the number of segments at a time stays the one the job started with."""
+
+    def __init__(self, jobs: int, auto: int):
+        path = os.environ.get('DISTILL_JOB_CONTROL')
+        self.path = Path(path) if path else None
+        self.jobs = jobs
+        self.auto = auto
+        self.write(0)
+
+    def read(self) -> int:
+        """The wanted number of segments at a time (the last valid one when the file is unreadable)."""
+        if self.path is None:
+            return self.jobs
+        try:
+            value = json.loads(self.path.read_text(encoding='utf-8')).get('jobs')
+        except (OSError, ValueError, AttributeError):
+            return self.jobs
+        if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= JOBS_LIMIT:
+            if value != self.jobs:
+                say('Segments at a time: ' + str(self.jobs) + ' -> ' + str(value) + '.')
+            self.jobs = value
+        return self.jobs
+
+    def write(self, running: int) -> None:
+        """Tells the site, in the state file, the number in use, the default and how many run now."""
+        if self.path is None:
+            return
+        state = state_path_of(self.path)
+        temporary = state.with_name(state.name + '.tmp')
+        try:
+            temporary.write_text(json.dumps({'jobs': self.jobs, 'auto': self.auto, 'running': running}),
+                                 encoding='utf-8')
+            os.replace(temporary, state)
+        except OSError:
+            pass
 
 
 def default_jobs() -> int:
@@ -261,10 +319,12 @@ def discard(name: str) -> None:
 
 
 def localize(names: list[str], jobs: int | None = None) -> int:
-    """Localizes the segments, `jobs` at a time; the outcome of each one (localizer.failed, moving an
-    unusable one to data_scartati/) is handled here, one at a time, as they end."""
+    """Localizes the segments, `jobs` at a time (changed live through the control file); the outcome of
+    each one (localizer.failed, moving an unusable one to data_scartati/) is handled here, one at a
+    time, as they end."""
+    auto = default_jobs()
     if jobs is None:
-        jobs = jobs_option['value'] or default_jobs()
+        jobs = jobs_option['value'] or auto
     ok = []
     failed = []
     discarded = []
@@ -281,44 +341,58 @@ def localize(names: list[str], jobs: int | None = None) -> int:
             say('PROGRESS ' + str(done) + '/' + str(len(names)))
     if runnable:
         say('Localizing ' + str(len(runnable)) + ' segments, ' + str(min(jobs, len(runnable))) + ' at a time.')
+    control = Control(jobs, auto)
 
     def timed(name: str) -> tuple[int, float]:
         # The time of the localization itself, not of the wait in the queue.
         start = time.monotonic()
         return run_localizer(name, DATA_DIR / name / LOG_FILE), time.monotonic() - start
 
-    with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        futures = {pool.submit(timed, name): name for name in runnable}
-        for future in as_completed(futures):
-            name = futures[future]
-            folder = DATA_DIR / name
-            took = ''
-            try:
-                code, seconds = future.result()
-                took = str(round(seconds)) + ' s'
-            except OSError as exc:
-                say('failed  ' + name + ': ' + str(exc))
-                code = None
-            if code == 0:
-                (folder / FAILED_FILE).unlink(missing_ok=True)
-                ok.append(name)
-                say('ok      ' + name + ' (' + took + ')')
-            elif code is None:
-                failed.append(name)
+    def finished():
+        """Starts segments up to the wanted number, then yields each one that ends, as it ends."""
+        waiting = list(runnable)
+        active = {}
+        with ThreadPoolExecutor(max_workers=JOBS_LIMIT) as pool:
+            while waiting or active:
+                wanted = control.read()
+                while waiting and len(active) < wanted:
+                    name = waiting.pop(0)
+                    active[pool.submit(timed, name)] = name
+                control.write(len(active))
+                done, _ = wait(active, timeout=CONTROL_PERIOD, return_when=FIRST_COMPLETED)
+                for future in done:
+                    yield future, active.pop(future)
+        control.write(0)
+
+    for future, name in finished():
+        folder = DATA_DIR / name
+        took = ''
+        try:
+            code, seconds = future.result()
+            took = str(round(seconds)) + ' s'
+        except OSError as exc:
+            say('failed  ' + name + ': ' + str(exc))
+            code = None
+        if code == 0:
+            (folder / FAILED_FILE).unlink(missing_ok=True)
+            ok.append(name)
+            say('ok      ' + name + ' (' + took + ')')
+        elif code is None:
+            failed.append(name)
+        else:
+            write_failed(folder)
+            reason = tail_lines((folder / LOG_FILE).read_bytes(), 1).decode('utf-8', 'replace').strip()
+            # Unusable because of its data: out of data/. A segment that already has outputs
+            # (failed refine) is never moved: its old outputs are still good.
+            if code == UNUSABLE_SEGMENT_EXIT_CODE and not (folder / 'localizer.safetensors').is_file():
+                discard(name)
+                say(name + ': unusable data, moved to data_scartati/ (' + reason + ')')
+                discarded.append(name)
             else:
-                write_failed(folder)
-                reason = tail_lines((folder / LOG_FILE).read_bytes(), 1).decode('utf-8', 'replace').strip()
-                # Unusable because of its data: out of data/. A segment that already has outputs
-                # (failed refine) is never moved: its old outputs are still good.
-                if code == UNUSABLE_SEGMENT_EXIT_CODE and not (folder / 'localizer.safetensors').is_file():
-                    discard(name)
-                    say(name + ': unusable data, moved to data_scartati/ (' + reason + ')')
-                    discarded.append(name)
-                else:
-                    say('failed  ' + name + ' (' + took + '): ' + reason)
-                    failed.append(name)
-            done = done + 1
-            say('PROGRESS ' + str(done) + '/' + str(len(names)))
+                say('failed  ' + name + ' (' + took + '): ' + reason)
+                failed.append(name)
+        done = done + 1
+        say('PROGRESS ' + str(done) + '/' + str(len(names)))
 
     # In the order they were asked for, whatever order they ended in.
     order = {name: index for index, name in enumerate(names)}

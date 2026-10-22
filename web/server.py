@@ -636,8 +636,9 @@ def make_handler(app: App):
         def _post(self, path):
             run = re.fullmatch(r'/api/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/jobs/([^/]+)/stop', path)
+            parallel = re.fullmatch(r'/api/jobs/([^/]+)/parallel', path)
             check = path == '/api/comma/check'
-            if not run and not stop and not check:
+            if not run and not stop and not parallel and not check:
                 self._problem(404, 'not_found', 'Invalid address.', True)
                 return
             # Same origin and JSON only: no other site and no HTML form can start a job.
@@ -658,6 +659,14 @@ def make_handler(app: App):
                     raise WebError(404, 'unknown_job', 'Unknown job.')
                 job = app.jobs.stop(job_id)
                 print('Job stopped from the site: ' + describe(job), flush=True)
+                self._json(200, {'ok': True, 'job': job})
+            elif parallel:
+                job_id = parallel.group(1)
+                if not JOB_ID_RE.fullmatch(job_id):
+                    raise WebError(404, 'unknown_job', 'Unknown job.')
+                if not isinstance(body, dict) or set(body) != {'jobs'}:
+                    raise WebError(400, 'invalid_param', 'Send {"jobs": N}.')
+                job = app.jobs.set_parallel(job_id, body['jobs'])
                 self._json(200, {'ok': True, 'job': job})
             else:
                 self._json(200, {'ok': True, 'comma': app.comma.probe_now()})

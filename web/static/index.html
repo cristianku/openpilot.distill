@@ -16,14 +16,13 @@
     <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">connecting…</span></span>
   </div>
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button type="button" role="tab" id="tab-status" data-tab="status" aria-controls="panel-status" aria-selected="true">Status</button>
+    <button type="button" role="tab" id="tab-status" data-tab="status" aria-controls="panel-status" aria-selected="true">Status<span class="count" id="running-count" hidden></span></button>
     <button type="button" role="tab" id="tab-preprocessing" data-tab="preprocessing" aria-controls="panel-preprocessing" aria-selected="false">Preprocessing</button>
     <button type="button" role="tab" id="tab-training" data-tab="training" aria-controls="panel-training" aria-selected="false">Training</button>
     <button type="button" role="tab" id="tab-evaluation" data-tab="evaluation" aria-controls="panel-evaluation" aria-selected="false">Evaluation</button>
     <button type="button" role="tab" id="tab-compare" data-tab="compare" aria-controls="panel-compare" aria-selected="false">Comparison</button>
     <button type="button" role="tab" id="tab-publish" data-tab="publish" aria-controls="panel-publish" aria-selected="false">Publish</button>
     <button type="button" role="tab" id="tab-comma" data-tab="comma" aria-controls="panel-comma" aria-selected="false">Comma</button>
-    <button type="button" role="tab" id="tab-jobs" data-tab="jobs" aria-controls="panel-jobs" aria-selected="false">Jobs<span class="count" id="running-count" hidden></span></button>
   </nav>
 </header>
 
@@ -75,6 +74,20 @@
       <p class="empty" id="gpu-procs-empty">No processes on the GPU.</p>
       <p class="note">Inside the LXC container nvidia-smi often cannot see process names: known jobs are listed under “Running”.</p>
     </div>
+    <div class="card">
+      <h2>Recent jobs</h2>
+      <ul class="list" id="jobs"></ul>
+      <p class="empty" id="jobs-empty" hidden>No jobs yet: the buttons in the other sections start them in the background.</p>
+    </div>
+    <div class="card">
+      <h2>Site</h2>
+      <p class="lead">Code version on the server: <code id="code-version">–</code>. Updating pulls the latest version, updates the libraries and restarts the site; it starts only when nothing else is running.</p>
+      <div class="buttons">
+        <div class="action"><button class="btn" type="button" id="btn-update">Update the code</button><div class="reason" id="reason-update"></div></div>
+        <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Site self-test</button><div class="reason" id="reason-selftest"></div></div>
+      </div>
+      <div class="job-live" data-actions="update,selftest"></div>
+    </div>
   </section>
 
   <!-- DATA -->
@@ -102,16 +115,10 @@
       <div class="step-block">
         <div class="step-title"><span class="step-number">2</span> Localize</div>
         <p class="note">Works out the real path of every new segment; a segment that is not localized is left out of training.</p>
-        <select id="localize-jobs" hidden aria-hidden="true"></select>
         <div class="step-row">
           <div class="action"><button class="btn primary" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
-          <div class="stepper" role="group" aria-label="Segments localized at a time">
-            <button type="button" class="stepper-button" id="localize-jobs-less" aria-label="Fewer at a time">&minus;</button>
-            <span class="stepper-value" id="localize-jobs-value" aria-live="polite">Auto</span>
-            <button type="button" class="stepper-button" id="localize-jobs-more" aria-label="More at a time">+</button>
-          </div>
         </div>
-        <p class="note" id="localize-jobs-note"></p>
+        <p class="note">While it runs, Status lets you give it more or fewer CPU cores.</p>
       </div>
       <div class="job-live" data-actions="fetch,localize"></div>
     </div>
@@ -339,23 +346,6 @@
     </div>
   </section>
 
-  <!-- JOBS -->
-  <section class="panel" id="panel-jobs" role="tabpanel" aria-labelledby="tab-jobs" hidden>
-    <div class="card">
-      <h2>Code</h2>
-      <p class="lead">Version on the server: <code id="code-version">–</code>. “Update the code” pulls the latest version, updates the libraries and restarts the site; it starts only when nothing else is running.</p>
-      <div class="buttons">
-        <div class="action"><button class="btn" type="button" id="btn-update">Update the code</button><div class="reason" id="reason-update"></div></div>
-        <div class="action" id="selftest-box" hidden><button class="btn" type="button" id="btn-selftest">Site self-test</button><div class="reason" id="reason-selftest"></div></div>
-      </div>
-      <div class="job-live" data-actions="update,selftest"></div>
-    </div>
-    <div class="card">
-      <h2>Jobs</h2>
-      <ul class="list" id="jobs"></ul>
-      <p class="empty" id="jobs-empty" hidden>No jobs yet: the buttons in the other sections start them in the background.</p>
-    </div>
-  </section>
 </main>
 
 <div class="sheet-backdrop" id="sheet-backdrop"></div>

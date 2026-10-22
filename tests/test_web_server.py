@@ -316,6 +316,53 @@ class PostTest(ServerTestCase):
         response, body = self.post('/api/run/selftest', {})
         self.assertEqual(response.status, 404)
 
+    def test_change_segments_at_a_time_of_a_running_localization(self):
+        # A fake localization: reports its state, then waits for the site to ask for 5 at a time.
+        write_task(self.repo, 'localize.py', '''
+import json, os, time
+from pathlib import Path
+control = Path(os.environ['DISTILL_JOB_CONTROL'])
+state = control.with_name(control.name.replace('.control.json', '.state.json'))
+state.write_text(json.dumps({'jobs': 8, 'auto': 8, 'running': 8}))
+print('PROGRESS 1/10', flush=True)
+for _ in range(200):
+    try:
+        wanted = json.loads(control.read_text())['jobs']
+    except (OSError, ValueError, KeyError):
+        wanted = None
+    if wanted == 5:
+        print('now 5 at a time', flush=True)
+        break
+    time.sleep(0.05)
+''')
+        response, body = self.post('/api/run/localize', {})
+        self.assertEqual(response.status, 200, body)
+        job_id = json.loads(body)['job']['id']
+        deadline = time.monotonic() + 10
+        parallel = None
+        while time.monotonic() < deadline and parallel is None:
+            response, body = self.request('GET', '/api/jobs/' + job_id)
+            parallel = json.loads(body).get('parallel')
+            time.sleep(0.05)
+        self.assertEqual(parallel, {'jobs': 8, 'auto': 8, 'running': 8})
+        for bad in ({'jobs': 0}, {'jobs': 17}, {'jobs': '5'}, {'jobs': True}, {'jobs': 5, 'x': 1}, {}):
+            response, body = self.post('/api/jobs/' + job_id + '/parallel', bad)
+            self.assertEqual(response.status, 400, bad)
+        response, body = self.post('/api/jobs/' + job_id + '/parallel', {'jobs': 5})
+        self.assertEqual(response.status, 200, body)
+        text = ''
+        while time.monotonic() < deadline and 'finished with code' not in text:
+            response, body = self.request('GET', '/api/jobs/' + job_id + '/log?offset=0')
+            text = json.loads(body)['text']
+            time.sleep(0.05)
+        self.assertIn('segments at a time set to 5 from the site', text)
+        self.assertIn('now 5 at a time', text)
+        # Finished: no more changes.
+        response, body = self.post('/api/jobs/' + job_id + '/parallel', {'jobs': 6})
+        self.assertEqual(response.status, 409)
+        response, body = self.post('/api/jobs/nonsense/parallel', {'jobs': 6})
+        self.assertEqual(response.status, 404)
+
     def test_start_a_job_and_read_its_log(self):
         write_task(self.repo, 'localize.py', 'print("localizzo", len(sys.argv) - 1)\nprint("PROGRESS 1/1")')
         response, body = self.post('/api/run/localize', {})

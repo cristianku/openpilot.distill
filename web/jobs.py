@@ -14,6 +14,7 @@ site never holds it).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -49,6 +50,27 @@ STATE_LABELS = {'running': 'running', 'ok': 'done', 'failed': 'failed', 'stopped
                 'unknown': 'ended (unknown result)'}
 # Environment variables of the site that the jobs must not see.
 PRIVATE_ENVIRONMENT = ('DISTILL_WEB_TOKEN',)
+
+
+# Segments at a time a running localization can be set to (tasks/localize.py reads it live).
+PARALLEL_MIN = 1
+PARALLEL_MAX = 16
+
+
+def read_control(path: Path) -> dict | None:
+    """A control or state file of a job: {'jobs': N, 'auto': A, 'running': R}, only the whole numbers in it."""
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    result = {}
+    for key in ('jobs', 'auto', 'running'):
+        value = data.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 64:
+            result[key] = value
+    return result or None
 
 
 def job_id_for(action: str, moment: float) -> str:
@@ -168,6 +190,15 @@ class JobManager:
     def log_file(self, job_id: str) -> Path:
         return self.jobs_dir / (job_id + '.log')
 
+    def control_file(self, job_id: str) -> Path:
+        """Settings the site gives a running job (tasks/localize.py: segments at a time). The job gets
+        its path in DISTILL_JOB_CONTROL and only reads it."""
+        return self.jobs_dir / (job_id + '.control.json')
+
+    def state_file(self, job_id: str) -> Path:
+        """What a running job reports back (tasks/localize.py: segments at a time, default, running)."""
+        return self.jobs_dir / (job_id + '.state.json')
+
     def _job_ids(self) -> list[str]:
         ids = []
         if not self.jobs_dir.is_dir():
@@ -242,6 +273,8 @@ class JobManager:
                 'progress': None, 'run': None, 'video': None}
         if state == 'running':
             view['progress'] = parse_progress(read_tail(log, LOG_CHUNK_BYTES))
+            if job.get('action') == 'localize':
+                view['parallel'] = read_control(self.state_file(job_id))
         if job.get('action') in ('train', 'train_test'):
             view['run'] = self._run_dir_of(job_id, log)
         if job.get('action') == 'compare' and state != 'running':
@@ -373,6 +406,7 @@ class JobManager:
                 environment.pop(name, None)
             # Live logs: python children print at once instead of every 8 KiB.
             environment['PYTHONUNBUFFERED'] = '1'
+            environment['DISTILL_JOB_CONTROL'] = str(self.control_file(job_id).resolve())
             stamp = datetime.fromtimestamp(started, UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
             with log_file.open('ab') as log:
                 log.write(('== ' + spec.label + ', started from the site on ' + stamp + '\n').encode('utf-8'))
@@ -405,6 +439,23 @@ class JobManager:
             if process.poll() is not None:
                 return
             time.sleep(0.02)
+
+    def set_parallel(self, job_id: str, jobs) -> dict:
+        """How many segments a running localization runs at a time, changed while it runs: written to
+        its control file, which tasks/localize.py reads before starting each segment."""
+        if isinstance(jobs, bool) or not isinstance(jobs, int) or not PARALLEL_MIN <= jobs <= PARALLEL_MAX:
+            raise WebError(400, 'invalid_param',
+                           'jobs must be a whole number from ' + str(PARALLEL_MIN) + ' to ' + str(PARALLEL_MAX) + '.')
+        view = self.get(job_id)
+        if view['state'] != 'running' or view['action'] != 'localize':
+            raise WebError(409, 'not_running', 'Only a running localization can change how many segments it runs.')
+        control = self.control_file(job_id)
+        with self._lock:
+            temporary = control.with_name(control.name + '.tmp')
+            temporary.write_text(json.dumps({'jobs': jobs}), encoding='utf-8')
+            os.replace(temporary, control)
+        self._append_log(job_id, '\n== segments at a time set to ' + str(jobs) + ' from the site\n')
+        return self.get(job_id)
 
     def stop(self, job_id: str) -> dict:
         view = self.get(job_id)

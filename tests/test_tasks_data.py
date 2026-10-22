@@ -448,6 +448,44 @@ class LocalizeTest(unittest.TestCase):
         self.assertEqual(max(peak), 2)
         self.assertEqual(self.output[-1], 'OK: a1 a2 a3 a4')
 
+    def test_segments_at_a_time_change_while_running(self):
+        import json
+        import threading
+        import time as clock
+        for index in range(8):
+            self.segment('b' + str(index))
+        control = self.data.parent / 'job.control.json'
+        running = []
+        peak_after = []
+        lock = threading.Lock()
+        started = []
+
+        def run(name, log_path):
+            with lock:
+                running.append(name)
+                started.append(name)
+                if len(started) > 2:
+                    peak_after.append(len(running))
+                # After the first two, the site asks for 4 at a time.
+                if len(started) == 2:
+                    control.write_text(json.dumps({'jobs': 4}))
+            clock.sleep(0.3)
+            log_path.write_bytes(b'done\n')
+            with lock:
+                running.remove(name)
+            return 0
+        with mock.patch.dict(localize.os.environ, {'DISTILL_JOB_CONTROL': str(control)}), \
+                mock.patch.object(localize, 'CONTROL_PERIOD', 0.05), \
+                mock.patch.object(localize, 'run_localizer', side_effect=run):
+            names = ['b' + str(index) for index in range(8)]
+            self.assertEqual(localize.localize(names, jobs=2), 0)
+        self.assertEqual(max(peak_after), 4)
+        self.assertIn('Segments at a time: 2 -> 4.', self.output)
+        state = json.loads((self.data.parent / 'job.state.json').read_text())
+        self.assertEqual(state, {'jobs': 4, 'auto': localize.default_jobs(), 'running': 0})
+        # The job never writes the site's file.
+        self.assertEqual(json.loads(control.read_text()), {'jobs': 4})
+
     def test_jobs_option(self):
         self.assertEqual(localize.parse_args(['--jobs', '3', 'a1'])[0], ['a1'])
         self.assertEqual(localize.jobs_option['value'], 3)
