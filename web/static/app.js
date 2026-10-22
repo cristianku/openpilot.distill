@@ -429,8 +429,8 @@
       button.disabled = disabled;
       button.addEventListener('click', async () => {
         try {
-          await post('/api/jobs/' + job.id + '/parallel', {jobs: value});
-          toast(value + ' segments at a time');
+          const answer = await post('/api/jobs/' + job.id + '/parallel', {jobs: value});
+          toast(answer.job.parallel ? answer.job.parallel.jobs + ' segments at a time' : 'Changed');
         } catch (error) {
           toast(error.message, true);
         }
@@ -500,11 +500,15 @@
     const count = byId('running-count');
     count.hidden = running.length === 0;
     count.textContent = String(running.length);
-    // The duration text changes every second: rebuilt at every status.
+    // Rebuilt when a job, its progress or its settings change (and once a minute for the "for N min"
+    // text), not at every status: a rebuild under the finger would lose a click on its buttons.
     const list = byId('running-jobs');
-    list.replaceChildren();
+    const minute = Math.floor(Date.now() / 60000);
+    if (!same('running-jobs', [running.map((job) => [job.id, job.progress, job.parallel, job.stoppable]), minute])) {
+      list.replaceChildren();
+      for (const job of running) list.appendChild(jobItem(job, true));
+    }
     byId('running-empty').hidden = running.length > 0;
-    for (const job of running) list.appendChild(jobItem(job, true));
 
     if (same('activities', status.activities)) return;
     const activities = byId('activities');

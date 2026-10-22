@@ -103,6 +103,7 @@ class Control:
         path = os.environ.get('DISTILL_JOB_CONTROL')
         self.path = Path(path) if path else None
         self.jobs = jobs
+        self.requested = jobs
         self.auto = auto
         self.write(0)
 
@@ -115,9 +116,17 @@ class Control:
         except (OSError, ValueError, AttributeError):
             return self.jobs
         if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= JOBS_LIMIT:
-            if value != self.jobs:
-                say('Segments at a time: ' + str(self.jobs) + ' -> ' + str(value) + '.')
-            self.jobs = value
+            if value != self.requested:
+                self.requested = value
+                # More than the free memory allows (MEMORY_PER_JOB_GB each): capped, and said once.
+                allowed = memory_jobs()
+                if allowed is not None and value > allowed:
+                    say('Segments at a time: ' + str(value) + ' asked, ' + str(allowed)
+                        + ' allowed by the free memory.')
+                    value = allowed
+                if value != self.jobs:
+                    say('Segments at a time: ' + str(self.jobs) + ' -> ' + str(value) + '.')
+                self.jobs = value
         return self.jobs
 
     def write(self, running: int) -> None:
@@ -134,16 +143,21 @@ class Control:
             pass
 
 
-def default_jobs() -> int:
-    jobs = min(MAX_JOBS, max(1, (os.cpu_count() or 1) // 2))
+def memory_jobs() -> int | None:
+    """How many segments the free memory allows (MEMORY_PER_JOB_GB each), None when unknown."""
     try:
         for line in Path('/proc/meminfo').read_text().splitlines():
             if line.startswith('MemAvailable:'):
-                available_gb = int(line.split()[1]) / 1024 / 1024
-                jobs = min(jobs, max(1, int(available_gb / MEMORY_PER_JOB_GB)))
+                return max(1, int(int(line.split()[1]) / 1024 / 1024 / MEMORY_PER_JOB_GB))
     except (OSError, ValueError, IndexError):
         pass
-    return jobs
+    return None
+
+
+def default_jobs() -> int:
+    jobs = min(MAX_JOBS, max(1, (os.cpu_count() or 1) // 2))
+    allowed = memory_jobs()
+    return jobs if allowed is None else min(jobs, allowed)
 
 
 def parse_args(arguments: list[str]) -> tuple[list[str], bool, bool]:
@@ -160,8 +174,8 @@ def parse_args(arguments: list[str]) -> tuple[list[str], bool, bool]:
             return names, status_only, True
         if argument == '--jobs' or argument.startswith('--jobs='):
             value = argument.split('=', 1)[1] if '=' in argument else (arguments.pop(0) if arguments else '')
-            if not value.isdigit() or not 1 <= int(value) <= 64:
-                raise TaskError('--jobs wants a number from 1 to 64')
+            if not value.isdigit() or not 1 <= int(value) <= JOBS_LIMIT:
+                raise TaskError('--jobs wants a number from 1 to ' + str(JOBS_LIMIT))
             jobs_option['value'] = int(value)
             continue
         if argument == '--status':

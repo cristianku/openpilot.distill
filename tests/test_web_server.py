@@ -350,6 +350,10 @@ for _ in range(200):
             self.assertEqual(response.status, 400, bad)
         response, body = self.post('/api/jobs/' + job_id + '/parallel', {'jobs': 5})
         self.assertEqual(response.status, 200, body)
+        # The answer already shows the new number, before the job has taken it.
+        self.assertEqual(json.loads(body)['job']['parallel']['jobs'], 5)
+        response, body = self.request('GET', '/api/jobs/' + job_id + '/parallel')
+        self.assertEqual(response.status, 405)
         text = ''
         while time.monotonic() < deadline and 'finished with code' not in text:
             response, body = self.request('GET', '/api/jobs/' + job_id + '/log?offset=0')

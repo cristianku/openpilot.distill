@@ -274,7 +274,7 @@ class JobManager:
         if state == 'running':
             view['progress'] = parse_progress(read_tail(log, LOG_CHUNK_BYTES))
             if job.get('action') == 'localize':
-                view['parallel'] = read_control(self.state_file(job_id))
+                view['parallel'] = self._parallel(job_id)
         if job.get('action') in ('train', 'train_test'):
             view['run'] = self._run_dir_of(job_id, log)
         if job.get('action') == 'compare' and state != 'running':
@@ -440,6 +440,18 @@ class JobManager:
                 return
             time.sleep(0.02)
 
+    def _parallel(self, job_id: str) -> dict | None:
+        """Segments at a time of a running localization: what the job reports (state file), with the
+        number the site asked for last (control file) as 'jobs' until the job has taken it, so the page
+        never shows an old value right after a change."""
+        state = read_control(self.state_file(job_id))
+        if state is None:
+            return None
+        requested = read_control(self.control_file(job_id))
+        if requested and 'jobs' in requested:
+            state['jobs'] = requested['jobs']
+        return state
+
     def set_parallel(self, job_id: str, jobs) -> dict:
         """How many segments a running localization runs at a time, changed while it runs: written to
         its control file, which tasks/localize.py reads before starting each segment."""
@@ -449,12 +461,18 @@ class JobManager:
         view = self.get(job_id)
         if view['state'] != 'running' or view['action'] != 'localize':
             raise WebError(409, 'not_running', 'Only a running localization can change how many segments it runs.')
+        if read_control(self.state_file(job_id)) is None:
+            raise WebError(409, 'not_supported', 'This localization cannot change it while it runs (started before '
+                           'the site could do it): stop it and start it again.')
         control = self.control_file(job_id)
         with self._lock:
             temporary = control.with_name(control.name + '.tmp')
             temporary.write_text(json.dumps({'jobs': jobs}), encoding='utf-8')
             os.replace(temporary, control)
-        self._append_log(job_id, '\n== segments at a time set to ' + str(jobs) + ' from the site\n')
+            # The job may have ended in the meantime: then nothing reads the value any more.
+            if self.get(job_id)['state'] != 'running':
+                raise WebError(409, 'not_running', 'The localization has just finished.')
+            self._append_log(job_id, '\n== segments at a time set to ' + str(jobs) + ' from the site\n')
         return self.get(job_id)
 
     def stop(self, job_id: str) -> dict:

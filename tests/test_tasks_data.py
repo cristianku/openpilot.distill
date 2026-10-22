@@ -486,6 +486,18 @@ class LocalizeTest(unittest.TestCase):
         # The job never writes the site's file.
         self.assertEqual(json.loads(control.read_text()), {'jobs': 4})
 
+    def test_live_value_capped_by_free_memory(self):
+        import json
+        control = self.data.parent / 'job.control.json'
+        control.write_text(json.dumps({'jobs': 12}))
+        with mock.patch.dict(localize.os.environ, {'DISTILL_JOB_CONTROL': str(control)}), \
+                mock.patch.object(localize, 'memory_jobs', return_value=3):
+            live = localize.Control(2, 2)
+            self.assertEqual(live.read(), 3)
+            self.assertEqual(live.read(), 3)
+        self.assertIn('Segments at a time: 12 asked, 3 allowed by the free memory.', self.output)
+        self.assertEqual(self.output.count('Segments at a time: 2 -> 3.'), 1)
+
     def test_jobs_option(self):
         self.assertEqual(localize.parse_args(['--jobs', '3', 'a1'])[0], ['a1'])
         self.assertEqual(localize.jobs_option['value'], 3)
@@ -493,7 +505,7 @@ class LocalizeTest(unittest.TestCase):
         self.assertEqual(localize.jobs_option['value'], 5)
         localize.parse_args([])
         self.assertIsNone(localize.jobs_option['value'])
-        for bad in (['--jobs'], ['--jobs', '0'], ['--jobs=x'], ['--jobs', '99']):
+        for bad in (['--jobs'], ['--jobs', '0'], ['--jobs=x'], ['--jobs', '17'], ['--jobs', '99']):
             with self.assertRaises(TaskError):
                 localize.parse_args(bad)
         self.assertTrue(1 <= localize.default_jobs() <= localize.MAX_JOBS)

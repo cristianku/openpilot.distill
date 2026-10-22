@@ -584,7 +584,7 @@ def make_handler(app: App):
                 self._send(200, 'image/jpeg', thumbnail.read_bytes(),
                            extra=[('Cache-Control', 'private, max-age=86400')])
                 return
-            if path.startswith('/api/run/') or re.fullmatch(r'/api/jobs/[^/]+/stop', path):
+            if path.startswith('/api/run/') or re.fullmatch(r'/api/jobs/[^/]+/(stop|parallel)', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Page not found.', path.startswith('/api/'))
