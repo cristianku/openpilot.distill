@@ -3,6 +3,20 @@ import Combine
 import Security
 
 enum ServerAddress {
+    // Accept the shareable URL printed by helpers/web.sh, but never persist its
+    // query string. The token moves directly into the secure credential field.
+    static func extractLoginLink(_ input: String) -> (url: String, token: String)? {
+        guard var parts = URLComponents(string: input.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = parts.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              parts.user == nil, parts.password == nil, parts.fragment == nil,
+              parts.path.isEmpty || parts.path == "/",
+              let items = parts.queryItems, items.count == 1,
+              items[0].name == "token", let token = items[0].value, !token.isEmpty else { return nil }
+        parts.queryItems = nil
+        parts.path = ""
+        guard let clean = parts.url?.absoluteString, parse(clean, allowHTTP: true) != nil else { return nil }
+        return (clean, token)
+    }
     static func parse(_ input: String, allowHTTP: Bool) -> URL? {
         guard var value = URLComponents(string: input.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = value.scheme?.lowercased(), (scheme == "https" || (scheme == "http" && allowHTTP)),

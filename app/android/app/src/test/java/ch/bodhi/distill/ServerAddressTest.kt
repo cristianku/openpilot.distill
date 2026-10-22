@@ -12,5 +12,9 @@ class ServerAddressTest {
         assertNull(ServerAddress.parse("https://example.com/?token=secret", false))
         assertNull(ServerAddress.parse("https://user:password@example.com", false))
         assertNull(ServerAddress.parse("javascript:alert(1)", true))
+        assertEquals("http://192.168.1.10:8766" to "abc123",
+            ServerAddress.extractLoginLink("http://192.168.1.10:8766/?token=abc123"))
+        assertNull(ServerAddress.extractLoginLink("https://example.com/?token=abc&evil=1"))
+        assertNull(ServerAddress.extractLoginLink("https://example.com/elsewhere?token=abc"))
     }
 }

@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.net.URI
+import java.net.URLDecoder
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -16,6 +17,22 @@ data class Connection(val url: String = "", val token: String = "", val allowHtt
 }
 
 object ServerAddress {
+    // A pasted browser login URL is split before it can enter normal preferences.
+    fun extractLoginLink(input: String): Pair<String, String>? = try {
+        val uri = URI(input.trim())
+        val query = uri.rawQuery?.split("&") ?: return null
+        if (query.size != 1) return null
+        val fields = query.single().split("=", limit = 2)
+        if (fields.size != 2 || URLDecoder.decode(fields[0], "UTF-8") != "token") return null
+        val token = URLDecoder.decode(fields[1], "UTF-8")
+        if (token.isEmpty()) return null
+        val clean = URI(uri.scheme, uri.rawAuthority, uri.path, null, null)
+        val base = parse(clean.toString(), allowHttp = true) ?: return null
+        base to token
+    } catch (_: Exception) {
+        null
+    }
+
     fun parse(input: String, allowHttp: Boolean): String? = try {
         val uri = URI(input.trim())
         val scheme = uri.scheme?.lowercase()

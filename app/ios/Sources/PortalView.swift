@@ -9,6 +9,7 @@ struct PortalView: View {
     var body: some View {
         NavigationStack {
             DistillWebView(url: url, token: token)
+                .id(url.absoluteString + "|" + token)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle("Website")
                 .navigationBarTitleDisplayMode(.inline)

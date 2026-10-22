@@ -133,12 +133,20 @@ private fun ConnectionForm(initial: Connection, isEditing: Boolean,
             Text(if (isEditing) "Settings" else "Connect to Distill",
                 style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
-            Text("Connect to your own local training server. No cloud account needed.",
+            Text("Paste the complete URL (with ?token=), or enter the server address and token separately.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             OutlinedTextField(
-                value = url, onValueChange = { url = it }, modifier = Modifier.fillMaxWidth(),
+                value = url, onValueChange = { newText ->
+                    val login = ServerAddress.extractLoginLink(newText)
+                    if (login != null) {
+                        url = login.first
+                        token = login.second
+                    } else {
+                        url = newText
+                    }
+                }, modifier = Modifier.fillMaxWidth(),
                 label = { Text("Server URL") },
                 placeholder = { Text("https://server.example:8766") },
                 singleLine = true,

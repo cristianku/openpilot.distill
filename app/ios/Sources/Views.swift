@@ -34,13 +34,19 @@ struct ConnectionView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .accessibilityLabel("Server address")
+                        .onChange(of: settings.urlText) { _, newValue in
+                            if let link = ServerAddress.extractLoginLink(newValue) {
+                                settings.token = link.token
+                                settings.urlText = link.url
+                            }
+                        }
                     SecureField("Access token", text: $settings.token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
                     Text("Your server")
                 } footer: {
-                    Text("Use the address and token from your own distill-web server. No cloud account needed.")
+                    Text("Paste the complete URL from distill-web (including ?token=), or enter the base URL and token separately. No cloud account needed.")
                 }
 
                 Section {
