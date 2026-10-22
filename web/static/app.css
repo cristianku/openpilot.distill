@@ -395,3 +395,17 @@ aspect-ratio:384/242;align-self:center}
 .gps-bar.route{height:6px;margin:6px 0 0;width:100%;max-width:220px}
 @media (max-width:420px){.route-picture{width:108px}}
 @media (prefers-reduced-motion:reduce){.route-card{animation:none}}
+
+/* Data numbers: tappable tiles that open an explanation */
+button.tile{appearance:none;position:relative;text-align:left;font:inherit;color:var(--fg);cursor:pointer;
+transition:transform .15s ease,box-shadow .2s}
+button.tile:active{transform:scale(.97)}
+button.tile:hover{box-shadow:0 4px 14px rgba(0,0,0,.08)}
+.tile-more{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:22px;color:var(--muted);line-height:1}
+.info-text{font-size:15px;line-height:1.5;margin:0 0 14px}
+.info-list{list-style:none;margin:0 0 14px;padding:0;border-radius:14px;background:var(--surface-2);overflow:hidden}
+.info-list li{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.info-list li:last-child{border-bottom:0}
+.info-list li span{color:var(--muted)}
+.info-actions{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
+.info-actions .btn{min-height:44px;border-radius:12px}

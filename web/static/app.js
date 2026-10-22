@@ -723,12 +723,16 @@
     const counts = segments.counts;
     const tiles = byId('data-tiles');
     tiles.replaceChildren();
-    const items = [[counts.total, 'segments in data/'], [counts.localized, 'localized'], [counts.failed, 'failed'],
-      [counts.todo, 'to localize'], [counts.heldout_localized, 'hold-out ready'], [counts.discarded, 'discarded']];
-    for (const [value, label] of items) {
-      const tile = node('div', 'tile');
+    const items = [[counts.total, 'segments', 'total'], [counts.localized, 'localized', 'localized'],
+      [counts.failed, 'failed', 'failed'], [counts.todo, 'to localize', 'todo'],
+      [counts.heldout_localized, 'hold-out ready', 'heldout'], [counts.discarded, 'discarded', 'discarded']];
+    for (const [value, label, key] of items) {
+      const tile = node('button', 'tile');
+      tile.type = 'button';
       tile.appendChild(node('div', 'big', String(value)));
       tile.appendChild(node('div', 'what', label));
+      tile.appendChild(node('span', 'tile-more', '\u203a'));
+      tile.addEventListener('click', () => openDataInfo(key));
       tiles.appendChild(tile);
     }
     renderGps(counts);
@@ -2017,11 +2021,144 @@
     clearTimeout(log.timer);
     log.id = null;
     byId('terminal').classList.remove('open');
+    byId('info-sheet').classList.remove('open');
     byId('sheet-backdrop').classList.remove('open');
     document.body.classList.remove('sheet-open');
   }
   byId('term-close').addEventListener('click', closeSheet);
+  byId('info-close').addEventListener('click', closeSheet);
   byId('sheet-backdrop').addEventListener('click', closeSheet);
+
+  // -- explanations of the Data numbers, in a sheet ---------------------------------------------
+  function openInfo(title, sub, build) {
+    byId('info-title').textContent = title;
+    byId('info-sub').textContent = sub;
+    const body = byId('info-body');
+    body.replaceChildren();
+    build(body);
+    body.scrollTop = 0;
+    byId('info-sheet').classList.add('open');
+    byId('sheet-backdrop').classList.add('open');
+    document.body.classList.add('sheet-open');
+  }
+
+  function infoText(body, text) { body.appendChild(node('p', 'info-text', text)); }
+
+  // The drives (outings) of a list of segment names, newest first: "Wed 21 Oct · 12:00 – 12:33".
+  function infoDrives(body, names, title) {
+    const drives = (data.drives ? data.drives.drives : []).filter((drive) => names.has(drive.segment));
+    const routes = new Map();
+    for (const drive of drives) {
+      if (!routes.has(drive.route)) routes.set(drive.route, []);
+      routes.get(drive.route).push(drive);
+    }
+    const rows = Array.from(routes.values()).map((list) => list.sort((a, b) => (a.start || 0) - (b.start || 0)));
+    rows.sort((a, b) => (b[0].start || 0) - (a[0].start || 0));
+    if (!rows.length) return;
+    body.appendChild(node('h3', 'sheet-section', title));
+    const list = node('ul', 'info-list');
+    for (const route of rows) {
+      const item = node('li');
+      const first = route[0];
+      item.appendChild(node('strong', '', first.start ? fmtDate(first.start) : 'Drive ' + first.route.slice(0, 8)));
+      const times = route.filter((drive) => drive.start).map((drive) => fmtClock(drive.start));
+      item.appendChild(node('span', '', (times.length ? times.join(', ') : route.length + ' segments')));
+      list.appendChild(item);
+    }
+    body.appendChild(list);
+  }
+
+  function infoLocalizeButton(body) {
+    const button = node('button', 'btn primary', 'Localize now');
+    button.type = 'button';
+    button.addEventListener('click', () => { closeSheet(); runAction('localize', {}, 'Start the localization now?'); });
+    const reason = actionReason('localize');
+    button.disabled = reason !== '';
+    const box = node('div', 'info-actions');
+    box.appendChild(button);
+    if (reason) box.appendChild(node('div', 'reason', reason));
+    body.appendChild(box);
+  }
+
+  function openDataInfo(key) {
+    const segments = data.segments;
+    if (!segments) return;
+    const counts = segments.counts;
+    const rows = segments.segments;
+    const names = (filter) => new Set(rows.filter(filter).map((row) => row.name));
+    if (key === 'total') {
+      openInfo('Segments', counts.total + ' in your data', (body) => {
+        infoText(body, 'A segment is one minute of a drive: the road videos and the car\'s logs, downloaded from '
+          + 'the comma. Only dashcam drives of at least 5 minutes are taken, without the first and last two minutes.');
+        infoDrives(body, names(() => true), 'Your drives');
+      });
+    } else if (key === 'localized') {
+      openInfo('Localized', counts.localized + ' of ' + counts.total + ' segments', (body) => {
+        infoText(body, 'The localizer works out where the car really was, frame by frame: position, speed and '
+          + 'heading, from the GPS and the motion sensors. That path is what the model learns to predict, so only '
+          + 'localized segments are used for training and evaluation.');
+        body.appendChild(node('h3', 'sheet-section', 'GPS accuracy'));
+        body.appendChild(gpsBar(counts.map || {}, 'gps-bar'));
+        const legend = node('ul', 'gps-legend');
+        for (const quality of GPS_ORDER) {
+          if (!(counts.map || {})[quality]) continue;
+          const item = node('li');
+          item.appendChild(node('span', 'gps-dot gps-' + quality));
+          item.appendChild(node('strong', '', String(counts.map[quality])));
+          item.appendChild(node('span', '', GPS_LABEL[quality]));
+          legend.appendChild(item);
+        }
+        body.appendChild(legend);
+        if (counts.refinable) {
+          infoText(body, counts.refinable + ' segments can probably get a more accurate map now.');
+          infoLocalizeButton(body);
+        }
+      });
+    } else if (key === 'failed') {
+      openInfo('Failed', counts.failed ? counts.failed + ' segments could not be localized' : 'Nothing failed', (body) => {
+        infoText(body, 'A segment fails when the localizer cannot work out the path, for example without a GPS '
+          + 'fix. It is left out of training; the localization tries it again next time.');
+        const failed = rows.filter((row) => row.state === 'failed');
+        if (failed.length) {
+          const list = node('ul', 'info-list');
+          for (const row of failed) {
+            const item = node('li');
+            item.appendChild(node('strong', '', 'Minute ' + (row.number !== null ? row.number : '?') + ' of drive '
+              + row.route.slice(0, 8)));
+            item.appendChild(node('span', '', row.reason || 'reason not recorded'));
+            list.appendChild(item);
+          }
+          body.appendChild(list);
+        }
+      });
+    } else if (key === 'todo') {
+      openInfo('To localize', counts.todo + ' segments waiting', (body) => {
+        infoText(body, 'These segments are downloaded but not localized yet, so training cannot use them. The '
+          + 'localization takes a few seconds per segment.');
+        if (counts.todo || counts.refinable) infoLocalizeButton(body);
+      });
+    } else if (key === 'heldout') {
+      openInfo('Hold-out', counts.heldout_localized + ' segments ready', (body) => {
+        infoText(body, 'About one segment in ten is never shown to the model during training. Those drives are '
+          + 'the fair test: Evaluation and the comparison videos use them to show how the model does on roads it '
+          + 'has not learned by heart.');
+        infoDrives(body, names((row) => row.heldout && row.state === 'localized'), 'Hold-out drives');
+      });
+    } else if (key === 'discarded') {
+      openInfo('Discarded', counts.discarded + ' segments set aside', (body) => {
+        infoText(body, 'Segments the localizer can never use are moved aside, so they do not stop the training. '
+          + 'Why:');
+        const list = node('ul', 'info-list');
+        for (const reason of segments.discarded_reasons) {
+          const item = node('li');
+          item.appendChild(node('strong', '', String(reason.count)));
+          item.appendChild(node('span', '', reason.reason));
+          list.appendChild(item);
+        }
+        body.appendChild(list);
+      });
+    }
+  }
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && log.id) closeSheet();
   });
