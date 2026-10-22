@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct DistillStatus: Decodable {
     struct SystemInfo: Decodable {

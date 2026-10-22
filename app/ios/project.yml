@@ -17,7 +17,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ch.bodhi.distill
-        GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: Distill
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Connect to your own Distill training server on the local network."
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
