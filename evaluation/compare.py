@@ -90,11 +90,15 @@ def clip_frames(frame_count: int, start_s: float, duration_s: float) -> tuple[in
 
 
 def start_encoder(path: Path, width: int, height: int, speed: float) -> subprocess.Popen:
-    """x264 encoder reading raw BGR frames on stdin. Slow motion = lower input frame rate."""
+    """x264 encoder reading raw BGR frames on stdin. Slow motion = lower input frame rate.
+
+    Stdin is "pipe:0", not "-": under uv run the ffmpeg of the venv (comma-deps-ffmpeg) comes first
+    in PATH, and that build refuses "-" as input ("Protocol not found").
+    """
     command = [
         "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{width}x{height}",
-        "-framerate", f"{CAMERA_FPS * speed:g}", "-i", "-",
+        "-framerate", f"{CAMERA_FPS * speed:g}", "-i", "pipe:0",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart", "-r", str(CAMERA_FPS),
         "-f", "mp4", str(path),
