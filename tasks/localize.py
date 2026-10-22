@@ -282,18 +282,20 @@ def localize(names: list[str], jobs: int | None = None) -> int:
     if runnable:
         say('Localizing ' + str(len(runnable)) + ' segments, ' + str(min(jobs, len(runnable))) + ' at a time.')
 
+    def timed(name: str) -> tuple[int, float]:
+        # The time of the localization itself, not of the wait in the queue.
+        start = time.monotonic()
+        return run_localizer(name, DATA_DIR / name / LOG_FILE), time.monotonic() - start
+
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        started = {}
-        futures = {}
-        for name in runnable:
-            started[name] = time.monotonic()
-            futures[pool.submit(run_localizer, name, DATA_DIR / name / LOG_FILE)] = name
+        futures = {pool.submit(timed, name): name for name in runnable}
         for future in as_completed(futures):
             name = futures[future]
             folder = DATA_DIR / name
-            took = str(round(time.monotonic() - started[name])) + ' s'
+            took = ''
             try:
-                code = future.result()
+                code, seconds = future.result()
+                took = str(round(seconds)) + ' s'
             except OSError as exc:
                 say('failed  ' + name + ': ' + str(exc))
                 code = None
