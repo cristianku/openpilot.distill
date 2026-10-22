@@ -61,6 +61,12 @@ class ArgvTest(ActionTestCase):
 
     def test_localize(self):
         self.assertEqual(self.build('localize', {}).argv, [PY, '-m', 'tasks.localize'])
+        self.assertEqual(self.build('localize', {'jobs': 'auto'}).argv, [PY, '-m', 'tasks.localize'])
+        spec = self.build('localize', {'jobs': 4})
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.localize', '--jobs', '4'])
+        self.assertEqual(spec.params, {'jobs': 4})
+        for bad in (0, 17, 'many', '4;rm', True):
+            self.refused('localize', {'jobs': bad}, 400)
 
     def test_train_fresh(self):
         spec = self.build('train', {'steps': 5000, 'batch_size': 8, 'workers': 6, 'mode': 'fresh', 'wandb': ''})

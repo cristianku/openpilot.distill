@@ -730,7 +730,7 @@
       const button = node('button', 'btn primary small', 'Localize now');
       button.type = 'button';
       button.id = 'btn-localize-gps';
-      button.addEventListener('click', () => runAction('localize', {},
+      button.addEventListener('click', () => runAction('localize', localizeParams(),
         'Localize ' + parts.join(' and ') + '? It runs in the background; you can follow it below.'));
       callout.appendChild(button);
     }
@@ -805,6 +805,7 @@
   }
 
   function renderData() {
+    renderLocalizeJobs();
     const segments = data.segments;
     if (segments) renderRoutes(segments.routes);
     if (!segments || same('data', segments)) return;
@@ -866,7 +867,22 @@
     const params = since ? {since: since} : {};
     runAction('fetch', params);
   });
-  byId('btn-localize').addEventListener('click', () => runAction('localize', {}));
+  byId('btn-localize').addEventListener('click', () => runAction('localize', localizeParams()));
+
+  // How many segments the localization runs at the same time: Auto (the server's choice from its
+  // cores and free memory) or a number. One localization uses about one core.
+  function renderLocalizeJobs() {
+    if (!status || !status.limits || !status.limits.localize_jobs) return;
+    const [low, high] = status.limits.localize_jobs;
+    const cpus = status.system.cpus || high;
+    const options = [{value: 'auto', label: 'Auto (' + status.limits.localize_jobs_auto + ')'}];
+    for (let jobs = low; jobs <= Math.min(high, cpus); jobs++) options.push({value: String(jobs), label: String(jobs)});
+    fillSelect(byId('localize-jobs'), options, 'auto');
+  }
+  function localizeParams() {
+    const value = byId('localize-jobs').value;
+    return value && value !== 'auto' ? {jobs: Number(value)} : {};
+  }
 
   // -- Training --------------------------------------------------------------------------------
   const MODE_TEXT = {fresh: 'from scratch', continue: 'from the stable weights', resume: 'resumed'};
@@ -2159,7 +2175,7 @@
   function infoLocalizeButton(body) {
     const button = node('button', 'btn primary', 'Localize now');
     button.type = 'button';
-    button.addEventListener('click', () => { closeSheet(); runAction('localize', {}, 'Start the localization now?'); });
+    button.addEventListener('click', () => { closeSheet(); runAction('localize', localizeParams(), 'Start the localization now?'); });
     const reason = actionReason('localize');
     button.disabled = reason !== '';
     const box = node('div', 'info-actions');

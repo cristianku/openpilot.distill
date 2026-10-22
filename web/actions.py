@@ -33,6 +33,8 @@ BATCH_MIN = 1
 BATCH_MAX = 64
 WORKERS_MIN = 0
 WORKERS_MAX = 16
+LOCALIZE_JOBS_MIN = 1
+LOCALIZE_JOBS_MAX = 16
 # A segment is 60 s long: the clip must start inside it and cannot be longer.
 START_MIN = 0.0
 START_MAX = 59.0
@@ -365,9 +367,15 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
             summary = 'drives since ' + since
 
     elif action_id == 'localize':
-        check_keys(params, ())
+        check_keys(params, ('jobs',))
         argv = [sys.executable, '-m', 'tasks.localize']
         summary = 'segments to do and to refine'
+        # Segments localized at the same time: absent or 'auto' = tasks.localize picks (cores, memory).
+        if params.get('jobs') not in (None, '', 'auto'):
+            jobs = int_param(params, 'jobs', LOCALIZE_JOBS_MIN, LOCALIZE_JOBS_MAX)
+            argv += ['--jobs', str(jobs)]
+            clean['jobs'] = jobs
+            summary = summary + ', ' + str(jobs) + ' at a time'
 
     elif action_id == 'train':
         check_keys(params, ('steps', 'batch_size', 'workers', 'mode', 'run', 'wandb', 'teacher', 'gpus'))

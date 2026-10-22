@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from web import actions as actions_module
 from web.actions import ACTIONS, TEST_ACTIONS, build_job, script_missing, slug_of
 from web.comma import CommaMonitor
+from tasks.localize import default_jobs as localize_default_jobs
 from web.drives import DriveIndex
 from web.common import CODE_ROOT, RUN_RE, WebError, comma_host, hf_repo, short_text
 from web.hf import HfCatalog
@@ -351,7 +352,9 @@ class App:
                            'batch_size': [actions_module.BATCH_MIN, actions_module.BATCH_MAX],
                            'workers': [actions_module.WORKERS_MIN, actions_module.WORKERS_MAX],
                            'start': [actions_module.START_MIN, actions_module.START_MAX],
-                           'duration': [actions_module.DURATION_MIN, actions_module.DURATION_MAX]}}
+                           'duration': [actions_module.DURATION_MIN, actions_module.DURATION_MAX],
+                           'localize_jobs': [actions_module.LOCALIZE_JOBS_MIN, actions_module.LOCALIZE_JOBS_MAX],
+                           'localize_jobs_auto': localize_default_jobs()}}
 
     def hf_payload(self) -> dict:
         snapshot = dict(self.hf.snapshot())
