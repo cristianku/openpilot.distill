@@ -860,13 +860,36 @@ class AndroidDownloadTest(ServerTestCase):
         android = json.loads(body)['android']
         self.assertEqual(android, {'file': 'distill-android-0.3.120.apk', 'size': 6, 'version': '0.3.120',
                                    'version_code': 1120, 'commit': 'abc1234', 'signed_with': 'release',
-                                   'sha256': 'f' * 64, 'built': 1.5e9})
+                                   'sha256': 'f' * 64, 'built': 1.5e9, 'bundle': None})
         response, body = self.request('GET', '/download/android')
         self.assertEqual(response.status, 200)
         self.assertEqual(body, b'PK apk')
         self.assertEqual(response.getheader('Content-Type'), 'application/vnd.android.package-archive')
         self.assertEqual(response.getheader('Content-Disposition'),
                          'attachment; filename="distill-android-0.3.120.apk"')
+
+    def test_the_bundle_for_google_play(self):
+        response, body = self.request('GET', '/download/android.aab')
+        self.assertEqual(response.status, 404)
+        folder = self.build({'file': 'distill-android-0.3.120.apk', 'bundle': 'distill-android-0.3.120.aab'})
+        (folder / 'distill-android-0.3.120.aab').write_bytes(b'PK aab')
+        response, body = self.request('GET', '/api/settings')
+        self.assertEqual(json.loads(body)['android']['bundle'], {'file': 'distill-android-0.3.120.aab', 'size': 6})
+        response, body = self.request('GET', '/download/android.aab')
+        self.assertEqual((response.status, body), (200, b'PK aab'))
+        self.assertEqual(response.getheader('Content-Disposition'),
+                         'attachment; filename="distill-android-0.3.120.aab"')
+        response, body = self.request('GET', '/download/android.aab', auth=False)
+        self.assertEqual(response.status, 401)
+        # Never a -dev bundle, a link or a file outside outputs/android.
+        secret = self.repo / 'secret.aab'
+        secret.write_bytes(b'secret')
+        os.symlink(secret, folder / 'distill-android-0.3.121.aab')
+        (folder / 'distill-android-0.3.122-dev.aab').write_bytes(b'dev')
+        for name in ('distill-android-0.3.121.aab', 'distill-android-0.3.122-dev.aab', '../secret.aab'):
+            (folder / 'latest.json').write_text(json.dumps({'file': 'distill-android-0.3.120.apk', 'bundle': name}))
+            response, body = self.request('GET', '/download/android.aab')
+            self.assertEqual(response.status, 404, name)
 
     def test_only_a_plain_apk_inside_outputs_android(self):
         secret = self.repo / 'secret.apk'

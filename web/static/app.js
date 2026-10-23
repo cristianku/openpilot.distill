@@ -2764,6 +2764,8 @@
   function renderAndroid(build) {
     const link = byId('android-download');
     link.hidden = !build;
+    // The .aab of helpers/build_android.sh --bundle, for an upload by hand in Play Console.
+    byId('android-bundle').hidden = !(build && build.bundle);
     byId('android-note').hidden = !build;
     if (!build) {
       byId('android-sub').textContent = 'No app built on this server yet.';

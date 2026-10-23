@@ -691,12 +691,15 @@ def video_path(repo: Path, name: str) -> Path | None:
 
 
 ANDROID_APK_RE = re.compile(r'distill-android-[0-9]+\.[0-9]+\.[0-9]+(-dev)?\.apk')
+# The bundle for Google Play (build_android.sh --bundle): a committed version only, never a -dev one.
+ANDROID_AAB_RE = re.compile(r'distill-android-[0-9]+\.[0-9]+\.[0-9]+\.aab')
 
 
 def android_build(repo: Path) -> dict | None:
     """The last Android app built on this server (helpers/build_android.sh): what Settings shows and
-    /download/android sends. None without a build, or when outputs/android/latest.json does not name a
-    plain APK inside outputs/android (no links)."""
+    /download/android sends (and /download/android.aab, the bundle for Google Play when there is one). None
+    without a build, or when outputs/android/latest.json does not name a plain APK inside outputs/android
+    (no links)."""
     folder = repo / 'outputs' / 'android'
     try:
         info = json.loads((folder / 'latest.json').read_text())
@@ -713,6 +716,12 @@ def android_build(repo: Path) -> dict | None:
                       ('sha256', str), ('built', (int, float))):
         value = info.get(key)
         result[key] = value if isinstance(value, kind) and not isinstance(value, bool) else None
+    result['bundle'] = None
+    bundle = info.get('bundle')
+    if isinstance(bundle, str) and ANDROID_AAB_RE.fullmatch(bundle):
+        bundle_path = folder / bundle
+        if not bundle_path.is_symlink() and bundle_path.is_file() and inside(folder, bundle_path):
+            result['bundle'] = {'file': bundle, 'size': bundle_path.stat().st_size, 'path': bundle_path}
     return result
 
 

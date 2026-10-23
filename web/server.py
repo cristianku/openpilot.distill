@@ -396,6 +396,8 @@ class App:
         android = android_build(self.repo)
         if android is not None:
             android = {key: value for key, value in android.items() if key != 'path'}
+            if android['bundle'] is not None:
+                android['bundle'] = {key: value for key, value in android['bundle'].items() if key != 'path'}
         return {'accounts': self.accounts.payload(self.hf.repo), 'site': site_payload(self.repo), 'android': android}
 
     def connect_account(self, kind: str, body) -> dict:
@@ -712,6 +714,16 @@ def make_handler(app: App):
                     return
                 self._send(200, 'application/vnd.android.package-archive', build['path'].read_bytes(),
                            extra=[('Content-Disposition', 'attachment; filename="' + build['file'] + '"'),
+                                  ('Cache-Control', 'no-store')])
+                return
+            if path == '/download/android.aab':
+                build = android_build(app.repo)
+                bundle = build['bundle'] if build is not None else None
+                if bundle is None:
+                    self._problem(404, 'not_found', 'No bundle for Google Play has been built on this server.', False)
+                    return
+                self._send(200, 'application/octet-stream', bundle['path'].read_bytes(),
+                           extra=[('Content-Disposition', 'attachment; filename="' + bundle['file'] + '"'),
                                   ('Cache-Control', 'no-store')])
                 return
             if path == '/api/drives':
