@@ -2,6 +2,7 @@
 
 Usage: python -m evaluation.holdout --model <spec> [--segments heldout|all|<seg>,<seg>,...]
          [--rate 5|20] [--horizon 10] [--device cuda|cpu] [--force] [--out file.json]
+         [--pin file.json] [--progress-part <i>/<n>] [--check-cache]
 
 heldout = the segments supervised/dataset.py keeps out of training (Comma1MDataset(val=True), the
 same code, not a copy of the rule). On each segment the model runs from the first frame; the frames
@@ -10,8 +11,15 @@ segment, at 5 Hz (frames 0, 4, 8, ...) or 20 Hz. Same frames for every model.
 
 Output: outputs/eval/<model key>.json (heldout, --rate 5, --horizon 10), otherwise
 outputs/eval/<model key>__<segments>_r<rate>_h<horizon>.json. When that file already holds the
-result for the same model file (sha256), segments, settings and code version it is not recomputed
-(--force recomputes). Lines for the web site on stdout:
+result for the same model file (sha256), segments, settings, code version and drives (the hash of
+each segment's frame_info and localizer files: a segment localized again is another drive) it is not
+recomputed (--force recomputes).
+
+Several models in one job (tasks.evaluation): --pin makes them all use the same drives (the first
+run writes them to the file, the next ones read them; a segment localized during the job is left out
+of the next models too), --check-cache only says whether the result is kept (exit 0) or must be
+computed (exit 10), --progress-part <i>/<n> makes this run the i-th of the n parts of the job that
+compute. Lines for the web site on stdout:
   PROGRESS <done>/<total>      frames processed over all segments
   OUTPUT_JSON=<absolute path>  at the end
 """
@@ -43,6 +51,8 @@ from .specs import parse_model_spec, resolve_model, validate_segment_name
 
 ROOT = Path(__file__).resolve().parents[1]
 PROGRESS_EVERY_FRAMES = 100
+# Exit code of --check-cache when the result is not kept.
+EXIT_TO_COMPUTE = 10
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,7 +64,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--force", action="store_true", help="computes again even when the result already exists")
     parser.add_argument("--out", type=Path, help="json to write (default outputs/eval/<model>.json)")
+    parser.add_argument("--pin", type=Path, help="several models in one job: the same drives for all (written by the first)")
+    parser.add_argument("--progress-part", default="0/1", help="<i>/<n>: this run is part i of n of the job's progress")
+    parser.add_argument("--check-cache", action="store_true",
+                        help=f"exit 0 when the result is kept, {EXIT_TO_COMPUTE} when it must be computed; nothing runs")
     return parser.parse_args()
+
+
+def progress_part(text: str) -> tuple[int, int]:
+    try:
+        part, parts = (int(value) for value in text.split("/"))
+    except ValueError:
+        raise SystemExit("ERROR: --progress-part is <i>/<n>, e.g. 0/2") from None
+    if parts < 1 or not 0 <= part < parts:
+        raise SystemExit("ERROR: --progress-part is <i>/<n> with 0 <= i < n")
+    return part, parts
 
 
 def _exit_on_sigterm(signal_number, frame) -> None:
@@ -76,8 +100,9 @@ def all_segments() -> list[str]:
     return names
 
 
-def select_segments(selection: str) -> tuple[list[str], str]:
-    """(segment names, tag for the output file name)."""
+def select_segments(selection: str, check_exists: bool = True) -> tuple[list[str], str]:
+    """(segment names, tag for the output file name). check_exists=False: a listed segment that left
+    data/ is skipped later instead of refused (the next model of a job, on pinned drives)."""
     if selection == "heldout":
         return heldout_segments(), "heldout"
     if selection == "all":
@@ -91,7 +116,7 @@ def select_segments(selection: str) -> tuple[list[str], str]:
             validate_segment_name(name)
         except ValueError as error:
             raise SystemExit(f"ERROR: {error}") from None
-        if not (ROOT / "data" / name).is_dir():
+        if check_exists and not (ROOT / "data" / name).is_dir():
             raise SystemExit(f"ERROR: segment {name} not found in data/")
         if name not in names:
             names.append(name)
@@ -120,7 +145,44 @@ def decode_end(frames: np.ndarray) -> int:
     return ((int(frames[-1]) // BLOCK_FRAMES) + 1) * BLOCK_FRAMES
 
 
-def cached_result(path: Path, sha256: str, segments: list[str], settings: dict) -> dict | None:
+def drive_fingerprints(segments: list[str]) -> dict[str, str | None]:
+    """What the ground truth of each segment comes from: the hash of its frame_info and localizer files,
+    None while one is missing (not localized yet). A segment localized again is another drive."""
+    drives = {}
+    for name in segments:
+        digest = hashlib.sha256()
+        try:
+            for file_name in ("frame_info.safetensors", "localizer.safetensors"):
+                digest.update((ROOT / "data" / name / file_name).read_bytes())
+        except OSError:
+            drives[name] = None
+            continue
+        drives[name] = digest.hexdigest()[:16]
+    return drives
+
+
+def pinned_drives(pin: Path, segments: list[str], drives: dict) -> tuple[list[str], dict, list[str]]:
+    """Several models in one job: the first run writes its drives to `pin`, the next ones take the same
+    segments, so a download that ends between two models does not give them different drives.
+    Returns (segments, drives, changed): `changed` are the pinned segments a localization rewrote since.
+    One that was not localized for the first model gets the pinned None, so it is left out here too;
+    one localized again is measured as it is now (its ground truth moved by centimetres)."""
+    if not pin.exists():
+        pin.write_text(json.dumps({"segments": segments, "drives": drives}), encoding="utf-8")
+        return segments, drives, []
+    saved = json.loads(pin.read_text(encoding="utf-8"))
+    pinned = saved["drives"]
+    current = drive_fingerprints(saved["segments"])
+    changed = [name for name in saved["segments"] if current.get(name) != pinned.get(name)]
+    if changed:
+        print("WARNING: a localization changed these drives during the job: " + ", ".join(changed), flush=True)
+    for name in changed:
+        if pinned.get(name) is None:
+            current[name] = None
+    return saved["segments"], current, changed
+
+
+def cached_result(path: Path, sha256: str, segments: list[str], settings: dict, drives: dict) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -134,6 +196,8 @@ def cached_result(path: Path, sha256: str, segments: list[str], settings: dict) 
     if saved.get("segments") != segments:
         return None
     if saved.get("settings") != settings:
+        return None
+    if saved.get("drives") != drives:
         return None
     return saved
 
@@ -176,17 +240,20 @@ def evaluate_segment(runner, segment: Segment, frames: np.ndarray, horizon_s: fl
 
 
 class Progress:
-    """PROGRESS <done>/<total> lines, every PROGRESS_EVERY_FRAMES frames and at the end."""
+    """PROGRESS <done>/<total> lines, every PROGRESS_EVERY_FRAMES frames and at the end. As part `part`
+    of `parts` (several models in one job, same frames each) the line covers the whole job."""
 
-    def __init__(self, total: int) -> None:
+    def __init__(self, total: int, part: int = 0, parts: int = 1) -> None:
         self.total = total
+        self.part = part
+        self.parts = parts
         self.done = 0
         self.printed = 0
 
     def __call__(self, frames: int) -> None:
         self.done += frames
         if self.done - self.printed >= PROGRESS_EVERY_FRAMES or self.done >= self.total:
-            print(f"PROGRESS {self.done}/{self.total}", flush=True)
+            print(f"PROGRESS {self.part * self.total + self.done}/{self.parts * self.total}", flush=True)
             self.printed = self.done
 
 
@@ -198,10 +265,16 @@ def main() -> None:
         raise SystemExit(f"ERROR: {error}") from None
     if args.horizon <= 0 or args.horizon > 10.0:
         raise SystemExit("ERROR: --horizon between 0 and 10 seconds (the plan reaches 10 s)")
+    part, parts = progress_part(args.progress_part)
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     started = time.time()
 
-    segments, selection_tag = select_segments(args.segments)
+    pinned = args.pin is not None and args.pin.exists()
+    segments, selection_tag = select_segments(args.segments, check_exists=not pinned)
+    drives = drive_fingerprints(segments)
+    changed = []
+    if args.pin is not None:
+        segments, drives, changed = pinned_drives(args.pin, segments, drives)
     settings = {"rate_hz": args.rate, "horizon_s": args.horizon, "warmup_frames": EVAL_WARMUP_FRAMES}
     if args.out is not None:
         output_path = args.out.resolve()
@@ -213,19 +286,26 @@ def main() -> None:
     model = resolve_model(spec, ROOT)
     print(f"model: {spec.label} = {model.path} (sha256 {model.sha256[:16]})", flush=True)
     print(f"segments ({selection_tag}): {len(segments)}", flush=True)
+    saved = None
     if not args.force:
-        saved = cached_result(output_path, model.sha256, segments, settings)
-        if saved is not None:
-            saved_miss = saved["overall"]["avg_miss_m"]
-            print(f"result already computed: avg miss {saved_miss} m (--force to compute it again)", flush=True)
-            print(f"OUTPUT_JSON={output_path}", flush=True)
-            return
+        saved = cached_result(output_path, model.sha256, segments, settings, drives)
+    if args.check_cache:
+        raise SystemExit(0 if saved is not None else EXIT_TO_COMPUTE)
+    if saved is not None:
+        saved_miss = saved["overall"]["avg_miss_m"]
+        print(f"result already computed: avg miss {saved_miss} m (--force to compute it again)", flush=True)
+        print(f"OUTPUT_JSON={output_path}", flush=True)
+        return
 
     # Frames to evaluate and to decode, before loading the model: PROGRESS needs the total.
     plan = []
     skipped = []
     total_frames = 0
     for name in segments:
+        if name in changed and drives[name] is None:
+            print(f"segment {name} skipped: localized during the job, after the first model", flush=True)
+            skipped.append({"segment": name, "error": "localized during the job"})
+            continue
         try:
             segment = load_segment(ROOT, name)
         except (ValueError, OSError) as error:
@@ -250,7 +330,7 @@ def main() -> None:
     decoder_name = "ffmpeg"
     if use_nvdec:
         decoder_name = "nvdec"
-    progress = Progress(total_frames)
+    progress = Progress(total_frames, part, parts)
 
     per_segment = []
     all_misses = []
@@ -308,6 +388,8 @@ def main() -> None:
         },
         "selection": selection_tag,
         "segments": segments,
+        "drives": drives,
+        "drives_changed": changed,
         "settings": settings,
         "inputs": {
             "action_t": list(ACTION_T),

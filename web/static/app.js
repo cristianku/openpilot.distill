@@ -1000,6 +1000,9 @@
   for (const radio of document.querySelectorAll('input[name="prep-job"]')) {
     radio.addEventListener('change', () => { prepChosen = true; renderPrepJob(); updateButtons(); });
   }
+  // A tap on the card already chosen, or work in its block, is a choice too.
+  for (const label of byId('prep-step').querySelectorAll('.choice')) label.addEventListener('click', () => { prepChosen = true; });
+  byId('prep-fetch').addEventListener('focusin', () => { prepChosen = true; });
   byId('fetch-since-on').addEventListener('change', () => {
     renderPrepJob();
     if (byId('fetch-since-on').checked) byId('fetch-since').focus();
@@ -1810,7 +1813,9 @@
 
   function fmtDay(unix) {
     if (!unix) return '';
-    return new Date(unix * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    // '23\u00a0Oct, 18:10': a narrow column breaks after the comma, not inside the date.
+    return new Date(unix * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})
+      .replace(/^(\d+) /, '$1\u00a0');
   }
 
   function evalResultOf(spec) {
@@ -1825,28 +1830,34 @@
       const run = (data.runs || []).find((item) => item.name === name);
       if (!run) return {title: 'Model ' + name, detail: '', badge: ''};
       const details = [];
-      if (run.config && run.config.teacher) details.push('teacher ' + teacherName(run.config.teacher));
-      if (run.steps_total) details.push(run.steps_total.toLocaleString('en-GB') + ' steps');
-      if (run.last && run.last.loss !== null && run.last.loss !== undefined) details.push('loss ' + fmt(run.last.loss));
+      if (run.config && run.config.teacher) details.push('teacher\u00a0' + teacherName(run.config.teacher));
+      if (run.steps_total) details.push(run.steps_total.toLocaleString('en-GB') + '\u00a0steps');
+      if (run.last && run.last.loss !== null && run.last.loss !== undefined) details.push('loss\u00a0' + fmt(run.last.loss));
       if (!run.has_pt) details.push('not finished');
       const latest = runsWith((item) => item.has_pt)[0];
-      return {title: 'Your model · ' + (fmtDay(run.started) || name), detail: details.join(' · '),
-        badge: latest && latest.name === name ? 'Latest' : ''};
+      return {title: 'Your model · ' + (fmtDay(run.started) || name), short: fmtDay(run.started) || name,
+        detail: details.join(' · '), badge: latest && latest.name === name ? 'Latest' : ''};
     }
-    if (spec.startsWith('hf:')) return {title: 'Published · ' + spec.slice(3), detail: 'Downloaded from Hugging Face', badge: ''};
+    if (spec.startsWith('hf:')) {
+      return {title: 'Published · ' + spec.slice(3), short: spec.slice(3), detail: 'Downloaded from Hugging Face', badge: ''};
+    }
     return {title: spec, detail: '', badge: ''};
   }
 
   // A long group shows its first rows (and the chosen one) until "Show more"; which groups are open.
   const PICKER_ROWS = 4;
   const pickerMore = {};
+  // Pickers that show only their first group(s); the others wait behind one button (Evaluation: two
+  // lists side by side, or one under the other on a phone, must stay short).
+  const PICKER_MAIN = {'eval-model': 1, 'eval-against': 1};
   // What an empty picker says.
   const PICKER_EMPTY = {'publish-run': 'No finished training yet: start one in Training.'};
 
   function pickerRowContent(row, spec, checked) {
     const info = modelInfo(spec);
     const text = node('div', 'picker-text');
-    const title = node('div', 'picker-title', info.title);
+    // Under its group heading a row needs no 'Your model ·' or 'Published ·' in front.
+    const title = node('div', 'picker-title', info.short || info.title);
     if (info.badge) title.appendChild(node('span', 'picker-badge', info.badge));
     text.appendChild(title);
     if (info.detail) text.appendChild(node('div', 'picker-detail', info.detail));
@@ -1854,7 +1865,7 @@
     const result = evalResultOf(spec);
     const score = node('div', 'picker-score');
     if (result && result.avg_miss_m !== null) {
-      score.appendChild(node('strong', '', result.avg_miss_m.toFixed(2) + ' m'));
+      score.appendChild(node('strong', '', result.avg_miss_m.toFixed(2) + '\u00a0m'));
       score.appendChild(node('small', '', 'avg miss'));
     } else {
       score.appendChild(node('small', '', 'not evaluated'));
@@ -1883,7 +1894,15 @@
       if (!groups.length || groups[groups.length - 1].name !== option.group) groups.push({name: option.group, options: []});
       groups[groups.length - 1].options.push(option);
     }
-    for (const group of groups) {
+    const main = PICKER_MAIN[selectId] || groups.length;
+    const restKey = selectId + '|rest';
+    // The groups after the main ones that do not hold the choice, and how many rows they show when open.
+    const rest = groups.filter((group, groupIndex) => groupIndex >= main
+      && !group.options.some((option) => option.value === select.value));
+    const restRows = rest.reduce((sum, group) => sum + (group.options.length > PICKER_ROWS + 1
+      && !pickerMore[selectId + '|' + group.name] ? PICKER_ROWS : group.options.length), 0);
+    groups.forEach((group) => {
+      if (!pickerMore[restKey] && rest.indexOf(group) >= 0) return;
       if (group.name) box.appendChild(node('div', 'picker-group', group.name));
       const list = node('div', 'picker-list');
       const key = selectId + '|' + group.name;
@@ -1921,6 +1940,25 @@
         list.appendChild(more);
       }
       box.appendChild(list);
+    });
+    if (rest.length) {
+      const other = node('button', 'picker-more picker-other', pickerMore[restKey] ? 'Hide the other models'
+        : 'Show ' + restRows + (restRows === 1 ? ' other model' : ' other models'));
+      other.type = 'button';
+      other.setAttribute('aria-expanded', String(!!pickerMore[restKey]));
+      other.dataset.key = 'more|' + restKey;
+      other.addEventListener('click', () => {
+        const hiding = pickerMore[restKey];
+        pickerMore[restKey] = !hiding;
+        renderPicker(selectId);
+        // Hiding a long list can leave the button above the screen (one column under the other on a phone).
+        const again = box.querySelector('.picker-other');
+        const bar = document.querySelector('.topbar');
+        if (hiding && again && again.getBoundingClientRect().top < (bar ? bar.getBoundingClientRect().bottom : 0)) {
+          again.scrollIntoView({block: 'center'});
+        }
+      });
+      box.appendChild(other);
     }
     const target = focused ? Array.from(box.querySelectorAll('button')).find((item) => item.dataset.key === focused) : null;
     if (target) target.focus({preventScroll: true});
@@ -1930,17 +1968,30 @@
   }
   // The model on the left leaves the list on the right: renderEval fills it again.
   byId('eval-model').addEventListener('change', () => { renderEval(); updateButtons(); });
+  // The model on the left at the last render: if the left takes the right's model, this one goes right.
+  let evalShownModel = null;
 
   // -- Evaluation -------------------------------------------------------------------------------
   // Two columns: the model to test (yours first) and the one to compare it with (the references first).
   function renderEval() {
+    // A status poll can land before /api/runs: no defaults until your models are known.
+    if (data.runs === null) {
+      renderResults(data.evalResults || []);
+      return;
+    }
     const runs = runModelOptions();
     const published = hfModelOptions();
     const references = ['stock', 'teacher', 'logged'].map((value) => ({value: value, label: value, group: 'Reference models'}));
     fillSelect(byId('eval-model'), runs.concat(published, references), runs.length ? runs[0].value : 'stock');
     const model = byId('eval-model').value;
     const others = references.concat(runs, published).filter((option) => option.value !== model);
-    fillSelect(byId('eval-against'), others, model === 'stock' ? 'teacher' : 'stock');
+    let preferred = model === 'stock' ? 'teacher' : 'stock';
+    if (evalShownModel && evalShownModel !== model && others.some((option) => option.value === evalShownModel)) {
+      preferred = evalShownModel;
+    }
+    // fillSelect takes `preferred` only when the right's model left its list: that is, the swap.
+    fillSelect(byId('eval-against'), others, preferred);
+    evalShownModel = model;
     renderPicker('eval-model');
     renderPicker('eval-against');
     if (evalWizard.step === 2) renderEvalSummary();
@@ -1960,7 +2011,7 @@
     kvRow(list, 'Test drives', counts ? counts.heldout_localized + ' hold-out segments, never seen in training' : '–');
     const last = [spec, against].map((value) => {
       const result = value ? evalResultOf(value) : null;
-      return result && result.avg_miss_m !== null ? result.avg_miss_m.toFixed(2) + ' m' : 'not evaluated';
+      return result && result.avg_miss_m !== null ? result.avg_miss_m.toFixed(2) + '\u00a0m' : 'not evaluated';
     });
     if (last[0] !== 'not evaluated' || last[1] !== 'not evaluated') kvRow(list, 'Last time', last.join(' vs '));
     kvRow(list, 'Hardware', 'the GPU, a few minutes per model; a result already computed on these drives is reused');
@@ -1973,7 +2024,7 @@
     // The default evaluation only (hold-out, 5 Hz): the others are not comparable with it.
     const results = all.filter((result) => (!result.selection || result.selection === 'heldout')
       && (!result.rate_hz || result.rate_hz === 5) && result.avg_miss_m !== null);
-    if (same('leaderboard', results)) return;
+    if (same('leaderboard', [results, results.map((result) => modelInfo(result.model).title)])) return;
     const box = byId('leaderboard');
     box.replaceChildren();
     byId('leaderboard-empty').hidden = results.length > 0;
@@ -1999,7 +2050,7 @@
       const notes = [];
       if (index === 0) notes.push('best');
       else notes.push((result.avg_miss_m / best).toFixed(1) + '\u00d7 the error of the best');
-      if (result.lateral_miss_m !== null) notes.push('sideways ' + result.lateral_miss_m.toFixed(2) + ' m');
+      if (result.lateral_miss_m !== null) notes.push('sideways ' + result.lateral_miss_m.toFixed(2) + '\u00a0m');
       if (result.segments !== null) notes.push(result.segments + ' drives');
       notes.push(fmtDay(typeof result.date === 'string' ? Date.parse(result.date) / 1000 : result.date));
       row.appendChild(node('div', 'rank-notes', notes.join(' \u00b7 ')));
@@ -2062,7 +2113,7 @@
     });
     const axis = node('div', 'dot-axis');
     for (let tick = 0; tick <= scale; tick += scale / 5) {
-      const label = node('span', '', tick + ' m');
+      const label = node('span', '', tick + '\u00a0m');
       label.style.left = (tick * 100 / scale) + '%';
       axis.appendChild(label);
     }
@@ -2231,8 +2282,8 @@
         + (video.reference.label || video.reference.model || '?');
       text.appendChild(node('div', 'what', video.has_json ? who : video.name));
       let sub = (video.segment || video.name) + ' · ' + fmtTime(video.modified) + ' · ' + fmtBytes(video.size);
-      if (video.student.avg_miss_m !== null) sub += ' · student ' + video.student.avg_miss_m.toFixed(2) + ' m';
-      if (video.reference.avg_miss_m !== null) sub += ' · reference ' + video.reference.avg_miss_m.toFixed(2) + ' m';
+      if (video.student.avg_miss_m !== null) sub += ' · student ' + video.student.avg_miss_m.toFixed(2) + '\u00a0m';
+      if (video.reference.avg_miss_m !== null) sub += ' · reference ' + video.reference.avg_miss_m.toFixed(2) + '\u00a0m';
       text.appendChild(node('div', 'sub', sub));
       item.appendChild(text);
       const play = node('button', 'btn small', 'Watch');
@@ -2257,9 +2308,9 @@
       const element = node('div', 'box');
       const name = side.label || side.model;
       element.appendChild(node('div', 'who', who + (name ? ': ' + name : '')));
-      element.appendChild(node('div', 'num', side.avg_miss_m === null ? '–' : side.avg_miss_m.toFixed(2) + ' m'));
+      element.appendChild(node('div', 'num', side.avg_miss_m === null ? '–' : side.avg_miss_m.toFixed(2) + '\u00a0m'));
       let note = 'avg miss on this stretch';
-      if (side.lateral_miss_m !== null) note += ' · lateral ' + side.lateral_miss_m.toFixed(2) + ' m';
+      if (side.lateral_miss_m !== null) note += ' · lateral ' + side.lateral_miss_m.toFixed(2) + '\u00a0m';
       element.appendChild(node('div', 'who', note));
       return element;
     }

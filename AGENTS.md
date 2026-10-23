@@ -25,3 +25,4 @@ Use `uv sync` with Python `>=3.12.3,<3.13` (see `pyproject.toml`) from the repos
 - Inspect current code and documentation before making claims about commands, model formats or supported devices.
 - Never start GPU-heavy jobs, download private logs, publish weights, update a comma device, change unrelated repositories or push release branches without the relevant explicit authorization.
 - Never commit W&B/Hugging Face credentials or private vehicle recordings; keep secret material outside tracked files.
+- Never GitHub Actions: never create, restore or re-enable `.github/workflows/`. Build, test and publish only on the server that holds the live clone.

@@ -318,7 +318,7 @@ border-bottom:1px solid var(--line);background:none;color:var(--fg);font:inherit
 .picker-row:last-child{border-bottom:0}
 .picker-row[aria-checked="true"]{background:var(--accent-soft)}
 .picker-text{flex:1;min-width:0}
-.picker-title{font-weight:600;font-size:15px}
+.picker-title{font-weight:600;font-size:15px;overflow-wrap:anywhere}
 .picker-detail{color:var(--muted);font-size:13px;margin-top:2px}
 .picker-badge{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:6px;background:var(--accent);color:#fff;
 font-size:11px;font-weight:700;vertical-align:2px}
@@ -350,13 +350,14 @@ display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .picker-more{appearance:none;display:block;width:100%;min-height:44px;padding:10px 14px;border:0;
 background:none;color:var(--accent);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
 .picker-more:hover{background:var(--surface)}
+.picker-other{margin-top:12px;border-radius:14px;background:var(--surface-2)}
 @keyframes picker-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 
 /* Evaluation: the model to test and the one to compare it with, side by side (stacked on a phone) */
 .wizard.wide{max-width:1000px}
 .versus{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:0 16px;align-items:start}
 .versus-side{min-width:0}
-.versus .field-label{margin:0 4px 10px;font-size:17px;font-weight:700}
+.wizard .versus .field-label{margin:0 4px 10px;font-size:17px;font-weight:700}
 .versus-mark{display:flex;flex-direction:column;align-items:center;gap:10px;align-self:stretch;padding-top:6px;color:var(--muted);
 font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
 .versus-mark::before,.versus-mark::after{content:"";flex:1;width:1px;background:var(--line)}
@@ -391,7 +392,7 @@ animation-delay:calc(var(--i) * 25ms)}
 box-shadow:0 0 0 2px var(--surface)}
 .dot-span{position:absolute;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
 .dot-axis{position:relative;height:20px;margin-left:106px;font-size:11px;color:var(--muted)}
-.dot-axis span{position:absolute;transform:translateX(-50%)}
+.dot-axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 @media (prefers-reduced-motion:reduce){.rank-row,.rank-fill,.dot-row{animation:none}}
 
 /* drive picker: outings with a strip of segment cards */
@@ -633,6 +634,8 @@ border:1px solid var(--line);transition:border-color .15s,box-shadow .15s,transf
 display:grid;place-items:center;box-shadow:0 4px 14px var(--accent-soft);opacity:0;transform:scale(.6);transition:opacity .15s,transform .15s}
 .choice-check svg{width:18px;height:18px}
 .choice.on .choice-check{opacity:1;transform:none}
+/* narrow cards: the art keeps clear of the check badge */
+@media (max-width:767px){.choice-grid:not(.three) .choice:not(.wide) .choice-art{box-sizing:border-box;padding-right:30px}}
 @media (max-width:420px){.choice{min-height:0}.choice.wide{min-height:0}.choice-text strong{font-size:18px}.choice-art{max-height:110px}}
 .dial{position:relative;width:min(320px,100%);margin:0 auto;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;
 border-radius:24px}

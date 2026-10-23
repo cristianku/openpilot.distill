@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import io
 import os
+import signal
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import tasks.evaluation as evaluation_task
 import tasks.train as train_task
 from tasks.common import Gpu, TaskError, say, select_gpus
 from tasks.evaluation import model_runs, uses_gpu
@@ -151,6 +153,61 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(model_runs(['--model=run:a', '--model=stock', '--device=cpu']),
                          [['--model=run:a', '--device=cpu'], ['--model=stock', '--device=cpu']])
 
+    def run_job(self, arguments, kept=(), on_wait=None):
+        """tasks.evaluation main() with a stand-in for each process: (exit code, arguments of each model run,
+        arguments of each --check-cache probe). Models in `kept` have their result kept from before."""
+        runs = []
+        probes = []
+
+        class Child:
+            def __init__(self, argv, **options):
+                self.arguments = argv[3:]
+                self.probe = '--check-cache' in self.arguments
+                (probes if self.probe else runs).append(self.arguments)
+                self.returncode = (0 if self.arguments[0] in kept else 10) if self.probe else 0
+
+            def terminate(self):
+                self.returncode = -15
+
+            def wait(self):
+                if on_wait and not self.probe:
+                    on_wait(len(runs))
+                return self.returncode
+
+        previous = signal.getsignal(signal.SIGTERM)
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        with mock.patch.object(sys, 'argv', ['tasks.evaluation', 'holdout', *arguments]), \
+                mock.patch.object(evaluation_task, 'load_env'), \
+                mock.patch.object(evaluation_task.subprocess, 'Popen', Child):
+            code = evaluation_task.main()
+        return code, runs, probes
+
+    def test_two_models_share_drives_and_progress(self):
+        code, runs, probes = self.run_job(['--model=run:a', '--model=stock', '--device=cpu'])
+        self.assertEqual(code, 0)
+        self.assertEqual([run[0] for run in runs], ['--model=run:a', '--model=stock'])
+        pins = {argument for run in runs + probes for argument in run if argument.startswith('--pin=')}
+        self.assertEqual(len(pins), 1)
+        self.assertEqual(len(probes), 2)
+        self.assertEqual([run[-1] for run in runs], ['--progress-part=0/2', '--progress-part=1/2'])
+        # One model: the arguments go through as they are, no probe.
+        self.assertEqual(self.run_job(['--model=stock', '--device=cpu'])[1:], ([['--model=stock', '--device=cpu']], []))
+
+    def test_kept_result_leaves_the_progress_bar_to_the_other(self):
+        code, runs, probes = self.run_job(['--model=run:a', '--model=stock', '--device=cpu'], kept=('--model=stock',))
+        self.assertEqual(code, 0)
+        self.assertEqual(len(runs), 2)
+        self.assertFalse([argument for run in runs for argument in run if argument.startswith('--progress-part')])
+
+    def test_stop_between_two_models_starts_no_other(self):
+        # The site's stop lands just as the first model ends with 0.
+        def stop(count):
+            if count == 1:
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        code, runs, probes = self.run_job(['--model=run:a', '--model=stock', '--device=cpu'], on_wait=stop)
+        self.assertEqual(code, 143)
+        self.assertEqual(len(runs), 1)
 
 
 class RunLogTest(unittest.TestCase):

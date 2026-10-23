@@ -110,7 +110,7 @@ def _download(url: str, partial: Path, size: int) -> None:
 
 def ensure_teacher(name: str, repo: Path = REPO) -> Path:
     """The teacher file, downloaded and checked when its size is not the one of its source."""
-    # Imported here: the checks of this module run in the CI without the project dependencies.
+    # Imported here: the checks of this module run without the project dependencies.
     import requests
 
     if name not in TEACHERS:
