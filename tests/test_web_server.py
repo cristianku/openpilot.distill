@@ -1,5 +1,6 @@
-"""distill-web: the HTTP server (token, cookie, redirect, same-origin POST, body limits, CSP, Range
-for the videos, the publish and install pre-checks). Standard library only, no network."""
+"""distill-web: the HTTP server (administrator sign-in and first-run setup, session cookie, same-origin
+POST, body limits, CSP, Range for the videos, the publish and install pre-checks). Standard library
+only, no network."""
 from __future__ import annotations
 
 import http.client
@@ -14,12 +15,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import web.auth
 import web.settings
+from web.auth import AdminAuth
 from web.jobs import JobManager
 from web.server import App, create_server, parse_range
 from web.settings import Accounts, Rejected
 
 TOKEN = 'TestToken_1234567890abcdef'
+ADMIN = 'admin'
+PASSWORD = 'correct horse battery'
 RUN = '2026-10-21_1544'
 HF_TOKEN = 'hf_' + 'A' * 34
 WANDB_KEY = 'b' * 40
@@ -104,8 +109,17 @@ def write_task(repo: Path, name: str, body: str) -> None:
     path.write_text('import sys\n' + body + '\n')
 
 
+def fast_scrypt(test: unittest.TestCase) -> None:
+    """A cheap scrypt cost for the tests (the real one takes ~0.1 s per check)."""
+    patcher = mock.patch.object(web.auth, 'SCRYPT_N', 2 ** 10)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class ServerTestCase(unittest.TestCase):
-    require_token = True
+    local_only = False
+    # False: the administrator does not exist yet (first visit).
+    with_admin = True
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -122,15 +136,16 @@ class ServerTestCase(unittest.TestCase):
         self.hf = FakeHf()
         jobs = JobManager(self.repo, gpu_check=lambda: '', external_groups=set)
         self.accounts = Accounts(check_hf=fake_hf_check, check_wandb=fake_wandb_check)
-        app = App(self.repo, token=TOKEN, require_token=self.require_token, comma=self.comma, hf=self.hf, jobs=jobs,
-                  accounts=self.accounts)
-        token = TOKEN
-        if not self.require_token:
-            token = None
-        self.server, self.app = create_server(self.repo, host='127.0.0.1', port=0, token=token,
-                                              require_token=self.require_token, app=app)
+        fast_scrypt(self)
+        self.auth = AdminAuth(self.repo / 'outputs' / 'web' / 'auth', TOKEN)
+        self.session = None
+        if self.with_admin:
+            self.session = self.auth.setup(TOKEN, ADMIN, PASSWORD, 'test')
+        app = App(self.repo, comma=self.comma, hf=self.hf, jobs=jobs, accounts=self.accounts, auth=self.auth)
+        self.server, self.app = create_server(self.repo, host='127.0.0.1', port=0, setup_code=TOKEN,
+                                              local_only=self.local_only, app=app)
         self.port = self.server.server_port
-        self.cookie = 'distill_web_' + str(self.port) + '=' + TOKEN
+        self.cookie = 'distill_web_' + str(self.port) + '=' + str(self.session)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -181,72 +196,220 @@ class ServerTestCase(unittest.TestCase):
         return b''.join(chunks)
 
 
-class TokenTest(ServerTestCase):
-    def test_pages_and_api_need_the_token(self):
+class SignInTest(ServerTestCase):
+    def cookie_of(self, response):
+        header = response.getheader('Set-Cookie')
+        self.assertIsNotNone(header)
+        return header.split(';')[0]
+
+    def test_without_a_session_only_the_sign_in_page(self):
         response, body = self.request('GET', '/', auth=False)
-        self.assertEqual(response.status, 403)
-        self.assertIn('text/html', response.getheader('Content-Type'))
-        self.assertIn('Access denied', body.decode())
-        response, body = self.request('GET', '/api/status', auth=False)
-        self.assertEqual(response.status, 403)
-        self.assertEqual(json.loads(body)['error'], 'token_required')
+        self.assertEqual(response.status, 200)
+        self.assertIn('/static/login.js', body.decode())
+        self.assertNotIn('/static/app.js', body.decode())
+        self.assertIn("script-src 'nonce-", response.getheader('Content-Security-Policy'))
+        for name in ('login.js', 'app.css', 'favicon.svg'):
+            response, body = self.request('GET', '/static/' + name, auth=False)
+            self.assertEqual(response.status, 200, name)
         response, body = self.request('GET', '/static/app.js', auth=False)
-        self.assertEqual(response.status, 403)
+        self.assertEqual(response.status, 401)
+        for path in ('/api/status', '/api/settings', '/api/jobs', '/video/clip.mp4', '/thumb/' + '0' * 20 + '.jpg'):
+            response, body = self.request('GET', path, auth=False)
+            self.assertEqual(response.status, 401, path)
+        response, body = self.request('GET', '/api/status', auth=False)
+        self.assertEqual(json.loads(body)['error'], 'login_required')
+        response, body = self.post('/api/run/selftest', {})
+        self.assertNotEqual(response.status, 401)
+        response, body = self.request('POST', '/api/run/selftest', b'{}', {'Content-Type': 'application/json'},
+                                      auth=False)
+        self.assertEqual(response.status, 401)
+        response, body = self.request('GET', '/api/auth/state', auth=False)
+        self.assertEqual(json.loads(body), {'configured': True, 'signed_in': False})
 
-    def test_token_in_the_query_becomes_a_cookie(self):
-        response, body = self.request('GET', '/?token=' + TOKEN, auth=False)
-        self.assertEqual(response.status, 303)
-        self.assertEqual(response.getheader('Location'), '/')
-        self.assertEqual(response.getheader('Set-Cookie'),
-                         'distill_web_' + str(self.port) + '=' + TOKEN + '; Path=/; HttpOnly; SameSite=Strict')
-        self.assertEqual(response.getheader('Referrer-Policy'), 'no-referrer')
-        response, body = self.request('GET', '/api/status?token=' + TOKEN, auth=False)
-        self.assertEqual(response.getheader('Location'), '/api/status')
-
-    def test_redirect_target_stays_on_this_site(self):
-        for path in ('/a\\b?token=' + TOKEN, '/%2F%2Fevil?token=' + TOKEN, '/x y?token=' + TOKEN,
-                     '/%5C%5Cevil?token=' + TOKEN):
-            response, body = self.request('GET', path.replace(' ', '%20'), auth=False)
-            self.assertEqual(response.status, 303, path)
-            self.assertEqual(response.getheader('Location'), '/', path)
-        # http.server itself turns a leading "//" into "/": the target is a path of this site.
-        response, body = self.request('GET', '//evil.example/?token=' + TOKEN, auth=False)
-        self.assertEqual(response.status, 303)
-        location = response.getheader('Location')
-        self.assertTrue(location.startswith('/') and not location.startswith('//'), location)
-
-    def test_wrong_token(self):
-        response, body = self.request('GET', '/?token=wrong', auth=False)
-        self.assertEqual(response.status, 403)
-        self.assertIsNone(response.getheader('Set-Cookie'))
-        response, body = self.request('GET', '/?token=' + TOKEN + 'x', auth=False)
-        self.assertEqual(response.status, 403)
-        response, body = self.request('GET', '/?token=', auth=False)
-        self.assertEqual(response.status, 403)
-
-    def test_token_in_the_query_of_a_post_is_refused(self):
-        response, body = self.request('POST', '/api/run/localize?token=' + TOKEN, b'{}',
+    def test_sign_in_sets_a_strict_cookie(self):
+        response, body = self.request('POST', '/api/auth/login',
+                                      json.dumps({'user': ADMIN, 'password': PASSWORD}).encode(),
                                       {'Content-Type': 'application/json'}, auth=False)
-        self.assertEqual(response.status, 403)
-        self.assertEqual(json.loads(body)['error'], 'invalid_token')
+        self.assertEqual(response.status, 200)
+        header = response.getheader('Set-Cookie')
+        self.assertIn('; HttpOnly', header)
+        self.assertIn('; SameSite=Strict', header)
+        self.assertIn('; Path=/', header)
+        self.assertNotIn('Secure', header)
+        self.assertNotIn(PASSWORD.encode(), body)
+        cookie = self.cookie_of(response)
+        response, body = self.request('GET', '/api/status', headers={'Cookie': cookie}, auth=False)
+        self.assertEqual(response.status, 200)
+        response, body = self.request('GET', '/api/auth/state', headers={'Cookie': cookie}, auth=False)
+        state = json.loads(body)
+        self.assertEqual((state['signed_in'], state['user'], state['sessions']), (True, ADMIN, 2))
+        # The server keeps only a hash of the session.
+        stored = (self.repo / 'outputs' / 'web' / 'auth' / 'sessions.json').read_text()
+        self.assertNotIn(cookie.split('=', 1)[1], stored)
+        admin = (self.repo / 'outputs' / 'web' / 'auth' / 'admin.json').read_text()
+        self.assertNotIn(PASSWORD, admin)
+        self.assertEqual(os.stat(self.repo / 'outputs' / 'web' / 'auth' / 'admin.json').st_mode & 0o777, 0o600)
 
-    def test_cookie_among_other_cookies(self):
-        headers = {'Cookie': 'nnslr_review_8765=zzz; other; =x; distill_web_' + str(self.port) + '=' + TOKEN}
+    def test_secure_cookie_behind_https(self):
+        response, body = self.request('POST', '/api/auth/login',
+                                      json.dumps({'user': ADMIN, 'password': PASSWORD}).encode(),
+                                      {'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https'}, auth=False)
+        self.assertEqual(response.status, 200)
+        self.assertIn('; Secure', response.getheader('Set-Cookie'))
+
+    def test_wrong_name_or_password_and_lockout(self):
+        for user, password in ((ADMIN, 'wrong password 1'), ('nobody', PASSWORD), (ADMIN, ''), (ADMIN, None)):
+            response, body = self.request('POST', '/api/auth/login',
+                                          json.dumps({'user': user, 'password': password}).encode(),
+                                          {'Content-Type': 'application/json'}, auth=False)
+            self.assertEqual(response.status, 401, (user, password))
+            self.assertEqual(json.loads(body)['message'], web.auth.WRONG_LOGIN)
+            self.assertIsNone(response.getheader('Set-Cookie'))
+        response, body = self.request('POST', '/api/auth/login',
+                                      json.dumps({'user': ADMIN, 'password': 'wrong again'}).encode(),
+                                      {'Content-Type': 'application/json'}, auth=False)
+        self.assertEqual(response.status, 401)
+        # Five wrong answers: even the right password is refused for a while.
+        response, body = self.request('POST', '/api/auth/login',
+                                      json.dumps({'user': ADMIN, 'password': PASSWORD}).encode(),
+                                      {'Content-Type': 'application/json'}, auth=False)
+        self.assertEqual(response.status, 429)
+        self.assertIsNone(response.getheader('Set-Cookie'))
+        # A browser already signed in keeps working.
+        response, body = self.request('GET', '/api/status')
+        self.assertEqual(response.status, 200)
+
+    def test_sign_in_from_another_origin_is_refused(self):
+        response, body = self.request('POST', '/api/auth/login',
+                                      json.dumps({'user': ADMIN, 'password': PASSWORD}).encode(),
+                                      {'Content-Type': 'application/json', 'Origin': 'http://evil.example'},
+                                      auth=False)
+        self.assertEqual(response.status, 403)
+        response, body = self.request('POST', '/api/auth/login', b'user=admin&password=x',
+                                      {'Content-Type': 'application/x-www-form-urlencoded'}, auth=False)
+        self.assertEqual(response.status, 415)
+
+    def test_bad_or_foreign_cookies(self):
+        headers = {'Cookie': 'nnslr_review_8765=zzz; other; =x; ' + self.cookie}
         response, body = self.request('GET', '/api/status', headers=headers, auth=False)
         self.assertEqual(response.status, 200)
         # The cookie of another port is not ours.
-        headers = {'Cookie': 'distill_web_1=' + TOKEN}
+        headers = {'Cookie': 'distill_web_1=' + self.session}
         response, body = self.request('GET', '/api/status', headers=headers, auth=False)
-        self.assertEqual(response.status, 403)
-        headers = {'Cookie': 'distill_web_' + str(self.port) + '=' + TOKEN[:-1]}
-        response, body = self.request('GET', '/api/status', headers=headers, auth=False)
-        self.assertEqual(response.status, 403)
-
-    def test_header_token(self):
+        self.assertEqual(response.status, 401)
+        for value in (self.session[:-1], TOKEN, '', 'x' * 500):
+            headers = {'Cookie': 'distill_web_' + str(self.port) + '=' + value}
+            response, body = self.request('GET', '/api/status', headers=headers, auth=False)
+            self.assertEqual(response.status, 401, value)
+        # The old access-token header opens nothing.
         response, body = self.request('GET', '/api/status', headers={'X-Distill-Token': TOKEN}, auth=False)
+        self.assertEqual(response.status, 401)
+
+    def test_old_token_links_open_nothing(self):
+        response, body = self.request('GET', '/?token=' + TOKEN, auth=False)
+        self.assertEqual(response.status, 303)
+        self.assertEqual(response.getheader('Location'), '/')
+        self.assertIsNone(response.getheader('Set-Cookie'))
+        response, body = self.request('GET', '/api/status?token=' + TOKEN, auth=False)
+        self.assertEqual(response.getheader('Location'), '/api/status')
+        for path in ('/a\\b?token=x', '/%2F%2Fevil?token=x', '/x%20y?token=x', '/%5C%5Cevil?token=x'):
+            response, body = self.request('GET', path, auth=False)
+            self.assertEqual(response.status, 303, path)
+            self.assertEqual(response.getheader('Location'), '/', path)
+        # http.server itself turns a leading "//" into "/": the target is a path of this site.
+        response, body = self.request('GET', '//evil.example/?token=x', auth=False)
+        location = response.getheader('Location')
+        self.assertTrue(location.startswith('/') and not location.startswith('//'), location)
+
+    def test_sign_out(self):
+        response, body = self.post('/api/auth/logout', {})
         self.assertEqual(response.status, 200)
-        response, body = self.request('GET', '/api/status', headers={'X-Distill-Token': 'nope'}, auth=False)
+        self.assertIn('Max-Age=0', response.getheader('Set-Cookie'))
+        response, body = self.request('GET', '/api/status')
+        self.assertEqual(response.status, 401)
+        response, body = self.request('GET', '/api/auth/logout')
+        self.assertEqual(response.status, 401)
+
+    def test_sign_out_everywhere(self):
+        other = self.auth.login(ADMIN, PASSWORD, 'test')
+        response, body = self.post('/api/auth/logout-all', {})
+        self.assertEqual(response.status, 200)
+        for value in (self.session, other):
+            headers = {'Cookie': 'distill_web_' + str(self.port) + '=' + value}
+            response, body = self.request('GET', '/api/status', headers=headers, auth=False)
+            self.assertEqual(response.status, 401)
+
+    def test_change_password(self):
+        other = self.auth.login(ADMIN, PASSWORD, 'test')
+        response, body = self.post('/api/auth/password', {'current': 'not it', 'password': 'a brand new pass'})
         self.assertEqual(response.status, 403)
+        response, body = self.post('/api/auth/password', {'current': PASSWORD, 'password': 'short'})
+        self.assertEqual(response.status, 400)
+        response, body = self.post('/api/auth/password', {'current': PASSWORD, 'password': 'a brand new pass'})
+        self.assertEqual(response.status, 200)
+        fresh = self.cookie_of(response)
+        # Every other browser, and the old cookie of this one, are signed out.
+        for value in (self.session, other):
+            headers = {'Cookie': 'distill_web_' + str(self.port) + '=' + value}
+            response, body = self.request('GET', '/api/status', headers=headers, auth=False)
+            self.assertEqual(response.status, 401)
+        response, body = self.request('GET', '/api/status', headers={'Cookie': fresh}, auth=False)
+        self.assertEqual(response.status, 200)
+        with self.assertRaises(web.settings.WebError):
+            self.auth.login(ADMIN, PASSWORD, 'test2')
+        self.assertTrue(self.auth.login(ADMIN, 'a brand new pass', 'test2'))
+
+    def test_sessions_survive_a_restart(self):
+        again = AdminAuth(self.repo / 'outputs' / 'web' / 'auth', None)
+        self.assertTrue(again.session_valid(self.session))
+        self.assertTrue(again.configured())
+
+
+class FirstVisitTest(ServerTestCase):
+    with_admin = False
+
+    def setup_call(self, path, payload, headers=None):
+        all_headers = {'Content-Type': 'application/json'}
+        all_headers.update(headers or {})
+        return self.request('POST', path, json.dumps(payload).encode(), all_headers, auth=False)
+
+    def test_state_and_nothing_open(self):
+        response, body = self.request('GET', '/api/auth/state', auth=False)
+        self.assertEqual(json.loads(body), {'configured': False, 'signed_in': False})
+        response, body = self.request('GET', '/api/status', auth=False)
+        self.assertEqual(response.status, 401)
+        response, body = self.setup_call('/api/auth/login', {'user': ADMIN, 'password': PASSWORD})
+        self.assertEqual(response.status, 409)
+
+    def test_setup_needs_the_code(self):
+        response, body = self.setup_call('/api/auth/setup/check', {'code': 'wrong'})
+        self.assertEqual(response.status, 403)
+        response, body = self.setup_call('/api/auth/setup', {'code': 'wrong', 'user': ADMIN, 'password': PASSWORD})
+        self.assertEqual(response.status, 403)
+        self.assertFalse(self.auth.configured())
+        response, body = self.setup_call('/api/auth/setup/check', {'code': TOKEN})
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(response.getheader('Set-Cookie'))
+        for user, password in (('bad name', PASSWORD), ('', PASSWORD), (ADMIN, 'short'), (ADMIN, 'a' * 20),
+                               ('longpassword', 'LongPassword')):
+            response, body = self.setup_call('/api/auth/setup', {'code': TOKEN, 'user': user, 'password': password})
+            self.assertEqual(response.status, 400, (user, password))
+        response, body = self.setup_call('/api/auth/setup', {'code': TOKEN, 'user': ADMIN, 'password': PASSWORD})
+        self.assertEqual(response.status, 200)
+        cookie = response.getheader('Set-Cookie').split(';')[0]
+        response, body = self.request('GET', '/api/status', headers={'Cookie': cookie}, auth=False)
+        self.assertEqual(response.status, 200)
+        # Once created, the code opens nothing and cannot create it again.
+        response, body = self.setup_call('/api/auth/setup', {'code': TOKEN, 'user': 'other', 'password': PASSWORD})
+        self.assertEqual(response.status, 409)
+        self.assertEqual(self.auth.username(), ADMIN)
+
+    def test_setup_code_attempts_are_limited(self):
+        for _ in range(web.auth.FAILS_PER_ADDRESS):
+            response, body = self.setup_call('/api/auth/setup/check', {'code': 'wrong'})
+            self.assertEqual(response.status, 403)
+        response, body = self.setup_call('/api/auth/setup/check', {'code': TOKEN})
+        self.assertEqual(response.status, 429)
 
 
 class PageTest(ServerTestCase):
@@ -590,7 +753,7 @@ class VideoTest(ServerTestCase):
             self.assertEqual(response.status, 404, path)
             self.assertNotEqual(body, b'secret')
         response, body = self.request('GET', '/video/clip_1.mp4', auth=False)
-        self.assertEqual(response.status, 403)
+        self.assertEqual(response.status, 401)
 
 
 class RangeParseTest(unittest.TestCase):
@@ -612,20 +775,18 @@ class RangeParseTest(unittest.TestCase):
 
 
 class LoopbackTest(ServerTestCase):
-    require_token = False
+    local_only = True
 
-    def test_no_token_but_loopback_host_only(self):
+    def test_sign_in_and_loopback_host_only(self):
         response, body = self.request('GET', '/api/status', auth=False)
+        self.assertEqual(response.status, 401)
+        response, body = self.request('GET', '/api/status')
         self.assertEqual(response.status, 200)
-        response, body = self.request('GET', '/api/status', headers={'Host': 'localhost:' + str(self.port)},
-                                      auth=False)
+        response, body = self.request('GET', '/api/status', headers={'Host': 'localhost:' + str(self.port)})
         self.assertEqual(response.status, 200)
-        response, body = self.request('GET', '/api/status', headers={'Host': 'evil.example'}, auth=False)
+        response, body = self.request('GET', '/api/status', headers={'Host': 'evil.example'})
         self.assertEqual(response.status, 403)
         self.assertEqual(json.loads(body)['error'], 'host_not_allowed')
-        response, body = self.request('GET', '/?token=anything', auth=False)
-        self.assertEqual(response.status, 303)
-        self.assertIsNone(response.getheader('Set-Cookie'))
 
 
 if __name__ == '__main__':

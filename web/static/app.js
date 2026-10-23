@@ -98,6 +98,11 @@
 
   async function api(path, options) {
     const response = await fetch(path, Object.assign({credentials: 'same-origin', cache: 'no-store'}, options || {}));
+    // Signed out (session ended, or another browser changed the password): the server shows the sign-in page.
+    if (response.status === 401) {
+      location.replace('/');
+      throw new Error('Signed out.');
+    }
     let body = null;
     try { body = await response.json(); } catch (error) { body = {message: 'Invalid response (HTTP ' + response.status + ').'}; }
     if (!response.ok) throw new Error(body.message || ('HTTP ' + response.status));
@@ -216,7 +221,7 @@
     if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
     if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos', 'drives'];
     if (tab === 'publish') return ['runs', 'hf', 'evalResults'];
-    if (tab === 'settings') return ['settings'];
+    if (tab === 'settings') return ['settings', 'auth'];
     return [];
   }
 
@@ -229,6 +234,7 @@
       else if (what === 'drives') data.drives = await api('/api/drives');
       else if (what === 'hf') data.hf = await api('/api/hf');
       else if (what === 'settings') data.settings = await api('/api/settings');
+      else if (what === 'auth') data.auth = await api('/api/auth/state');
       loadedAt[what] = Date.now();
     } catch (error) {
       toast(error.message, true);
@@ -260,7 +266,7 @@
     else if (currentTab === 'evaluation') renderEval();
     else if (currentTab === 'compare') renderCompare();
     else if (currentTab === 'publish') renderPublish();
-    else if (currentTab === 'settings') renderSettings();
+    else if (currentTab === 'settings') { renderSettings(); renderAdmin(); }
     updateButtons();
   }
 
@@ -2271,12 +2277,12 @@
     let text = '';
     let warn = false;
     if (location.protocol === 'https:') {
-      text = 'This page uses HTTPS: a token travels encrypted from your browser to the server.';
+      text = 'This page uses HTTPS: passwords and tokens travel encrypted from your browser to the server.';
     } else if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
-      text = 'This page talks to the server on this computer (or through an ssh tunnel): a token does not cross the '
-        + 'network in clear.';
+      text = 'This page talks to the server on this computer (or through an ssh tunnel): passwords and tokens do not '
+        + 'cross the network in clear.';
     } else {
-      text = 'Honest note: this site talks plain HTTP on the local network, so a token you paste here travels '
+      text = 'Honest note: this site talks plain HTTP on the local network, so a password or token you type here travels '
         + 'unencrypted on your LAN. Fine at home; put the site behind HTTPS before exposing it anywhere else.';
       warn = true;
     }
@@ -2447,6 +2453,52 @@
       siteError = error.message;
       updateSiteButton();
       toast(error.message, true);
+    }
+  });
+
+  // -- administrator -----------------------------------------------------------------------------
+  function renderAdmin() {
+    const state = data.auth;
+    if (!state) return;
+    let text = 'Signed in as ' + state.user + '.';
+    if (state.sessions > 1) text += ' Signed in on ' + state.sessions + ' browsers.';
+    byId('admin-sub').textContent = text;
+  }
+
+  async function signOut(everywhere) {
+    if (everywhere && !confirm('Sign out on every browser, this one included?')) return;
+    try {
+      await post(everywhere ? '/api/auth/logout-all' : '/api/auth/logout', {});
+    } catch (error) {
+      // Already signed out: the sign-in page follows anyway.
+    }
+    location.replace('/');
+  }
+  byId('btn-signout').addEventListener('click', () => signOut(false));
+  byId('btn-topbar-signout').addEventListener('click', () => signOut(false));
+  byId('btn-signout-all').addEventListener('click', () => signOut(true));
+
+  byId('admin-password-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const reason = byId('admin-reason');
+    const current = byId('admin-current').value;
+    const fresh = byId('admin-new').value;
+    reason.textContent = '';
+    if (!current) { reason.textContent = 'Write the current password.'; return; }
+    if (fresh.length < 12) { reason.textContent = 'The new password needs at least 12 characters.'; return; }
+    if (fresh !== byId('admin-repeat').value) { reason.textContent = 'The two new passwords are different.'; return; }
+    const button = byId('btn-admin-password');
+    button.disabled = true;
+    try {
+      const answer = await post('/api/auth/password', {current: current, password: fresh});
+      for (const id of ['admin-current', 'admin-new', 'admin-repeat']) byId(id).value = '';
+      data.auth = answer.state;
+      renderAdmin();
+      toast('Password changed: every other browser is signed out.');
+    } catch (error) {
+      reason.textContent = error.message;
+    } finally {
+      button.disabled = false;
     }
   });
 

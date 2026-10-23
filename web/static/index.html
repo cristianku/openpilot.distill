@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>Distill · Control</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
@@ -14,6 +14,7 @@
     <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 18 9 2M13 18 11 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></span>
     <h1>Distill</h1>
     <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">connecting…</span></span>
+    <button class="icon-btn topbar-signout" type="button" id="btn-topbar-signout" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3m4-9.5L15.5 10 12 13.5M15.5 10H8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
   </div>
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button type="button" role="tab" id="tab-status" data-tab="status" aria-controls="panel-status" aria-selected="true">Status<span class="count" id="running-count" hidden></span></button>
@@ -374,6 +375,26 @@
 
   <!-- SETTINGS -->
   <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <div class="card" id="admin-card">
+      <h2>Administrator</h2>
+      <div class="account-row">
+        <span class="account-badge admin" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 2.5 4 5v4.5c0 3.7 2.6 6.9 6 8 3.4-1.1 6-4.3 6-8V5l-6-2.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></svg></span>
+        <div class="grow"><div class="account-title">This site</div><div class="account-sub" id="admin-sub">Checking…</div></div>
+      </div>
+      <form class="admin-form" id="admin-password-form" novalidate>
+        <input type="text" name="username" autocomplete="username" hidden>
+        <div class="form-grid wide">
+          <label class="field">Current password<input type="password" id="admin-current" autocomplete="current-password" maxlength="256"></label>
+          <label class="field">New password<input type="password" id="admin-new" autocomplete="new-password" maxlength="256" minlength="12"></label>
+          <label class="field">Repeat the new password<input type="password" id="admin-repeat" autocomplete="new-password" maxlength="256"></label>
+        </div>
+        <div class="buttons">
+          <div class="action"><button class="btn primary" type="submit" id="btn-admin-password">Change password</button><div class="reason" id="admin-reason" aria-live="polite"></div></div>
+          <button class="btn" type="button" id="btn-signout">Sign out</button>
+          <button class="btn danger" type="button" id="btn-signout-all">Sign out everywhere</button>
+        </div>
+      </form>
+    </div>
     <div class="card">
       <h2>Accounts</h2>
       <p class="lead">The services this server uses on your behalf. A token is checked with the service before it is saved, it stays on the server and never comes back to this page: only the account name does.</p>

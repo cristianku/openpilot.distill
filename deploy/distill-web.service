@@ -19,7 +19,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=__DISTILL_REPO__
-# DISTILL_WEB_TOKEN comes from this file, mode 600.
+# DISTILL_WEB_TOKEN (the setup code of the first visit) comes from this file, mode 600.
 EnvironmentFile=__DISTILL_ENV_FILE__
 # uv lives in /root/.local/bin: without it every helper the site starts fails on "uv run".
 Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin

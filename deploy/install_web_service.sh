@@ -7,8 +7,9 @@
 #   deploy/install_web_service.sh --dry-run        show what would be done, change nothing
 #   sudo deploy/install_web_service.sh --uninstall stop and remove the service (token file kept)
 #
-# The token is printed only at the end of an install, in the addresses to open.
-# It is also kept in the .env of this clone (DISTILL_WEB_TOKEN=..., permissions 600, ignored by
+# The token is the setup code of the site: the first visit asks for it to create the administrator
+# (name and password), after that it opens nothing. It is printed at the end of an install while
+# the administrator does not exist yet. It is also kept in the .env of this clone (DISTILL_WEB_TOKEN=..., permissions 600, ignored by
 # git), the one place to look it up, shared with helpers/web.sh: the first install takes the token
 # already there, otherwise it creates one and writes it in both files.
 # DISTILL_WEB_ENV_FILE, DISTILL_WEB_UNIT_FILE and DISTILL_WEB_REPO_ENV override the three paths
@@ -207,7 +208,7 @@ install_service() {
     say "[dry run] would write $UNIT_FILE with this content:"
     render_unit
     say "[dry run] then: systemctl daemon-reload; systemctl enable --now $SERVICE_NAME.service"
-    say "[dry run] at the end would print the addresses to open (http://<IP>:$PORT/?token=...)."
+    say "[dry run] at the end would print the addresses to open (http://<IP>:$PORT/) and, before the first visit, the setup code."
     return 0
   fi
 
@@ -268,13 +269,17 @@ install_service() {
   fi
 
   say ""
-  say "Open in the browser (the address contains the token: do not share it):"
+  say "Open in the browser:"
   local address
   while IFS= read -r address; do
-    say "  http://$address:$PORT/?token=$token"
+    say "  http://$address:$PORT/"
   done < <(lan_ips)
-  say "After the first visit the token stays in a cookie and disappears from the address bar."
-  say "To read the token again: grep DISTILL_WEB_TOKEN $REPO_ENV   (or helpers/web.sh prints the link again)"
+  if [ -f "$REPO/outputs/web/auth/admin.json" ]; then
+    say "Sign in as the administrator of the site."
+  else
+    say "First visit: create the administrator (name and password) with this setup code: $token"
+    say "(it is needed only once; it stays in $REPO_ENV)"
+  fi
 }
 
 if [ "$MODE" = "uninstall" ]; then

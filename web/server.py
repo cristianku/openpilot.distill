@@ -2,14 +2,16 @@
 
     python -m web.server [--host 127.0.0.1] [--port 8766]
 
-On 127.0.0.1 (the default) it needs no token: only this machine reaches it (ssh -L for the PC).
-On any other address every request needs the access token DISTILL_WEB_TOKEN (repo .env, or
-/etc/distill-web.env for the systemd service): open http://<ip>:8766/?token=<token> once, the
-server answers with a redirect to the same page without the token and an HttpOnly SameSite=Strict
-cookie (distill_web_<port>). Scripts can send the header X-Distill-Token instead.
+Every page and API call needs the administrator signed in (web/auth.py): without a session the
+site shows only the sign-in page, its script and stylesheet. The first visit creates the
+administrator with the setup code: DISTILL_WEB_TOKEN (repo .env, or /etc/distill-web.env for the
+systemd service) or, when that is not set, a code the server prints at start. On 127.0.0.1 (the
+default) only this machine reaches it (ssh -L for the PC) and the Host header must be a loopback
+name, against DNS rebinding. The session cookie (distill_web_<port>) is HttpOnly, SameSite=Strict,
+and Secure when the page came over https (a reverse proxy).
 POSTs are accepted only from the same origin, as JSON (an HTML form cannot send it), with a
 Content-Length and a small body. Pages carry a strict Content-Security-Policy with a nonce.
-The server never prints the token from the environment, and never logs request URLs.
+The server never prints the setup code from the environment, and never logs request URLs.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from web import actions as actions_module
 from web.actions import ACTIONS, TEST_ACTIONS, build_job, script_missing, slug_of
+from web.auth import SESSION_MAX_SECONDS, AdminAuth
 from web.comma import CommaMonitor
 from tasks.localize import default_jobs as localize_default_jobs
 from web.drives import DriveIndex
@@ -41,9 +44,9 @@ from web.settings import Accounts, clean_site_changes, site_payload, update_env_
 from web.status import (Cache, activities, compare_videos, eval_results, gpu_busy_reason, segments, system_info,
                         video_path)
 
+# The setup code of the first visit (creates the administrator); it opens nothing else.
 TOKEN_ENV = 'DISTILL_WEB_TOKEN'
 TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{16,}$')
-TOKEN_HEADER = 'X-Distill-Token'
 DEFAULT_PORT = 8766
 MAX_BODY_BYTES = 64 * 1024
 # A connection that sends nothing for this many seconds is closed, and at most MAX_CONNECTIONS
@@ -56,11 +59,17 @@ STATIC_DIR = Path(__file__).resolve().parent / 'static'
 STATIC_FILES = {
     'app.js': 'text/javascript; charset=utf-8',
     'app.css': 'text/css; charset=utf-8',
+    'login.js': 'text/javascript; charset=utf-8',
     'favicon.svg': 'image/svg+xml',
 }
+# What a browser that is not signed in can load: the sign-in page and its files.
+PUBLIC_STATIC = ('app.css', 'login.js', 'favicon.svg')
+# POST /api/auth/... that work without a session.
+PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
+AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 BUNDLE_REASON = ('a model is chosen in the Models menu of the comma: set it back to Default on the comma screen '
                  '(Settings > Models) and check again')
-TOKEN_MESSAGE = 'Access denied: open the site link that contains the token.'
+LOGIN_MESSAGE = 'Sign in first.'
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 # POST /api/settings/...: (account or 'site', what to do).
 SETTINGS_ROUTES = {
@@ -90,7 +99,7 @@ def is_loopback(host: str) -> bool:
 
 
 def access_token() -> str:
-    """DISTILL_WEB_TOKEN when set (must look like a token), otherwise a new random one."""
+    """The setup code: DISTILL_WEB_TOKEN when set (must look like a token), otherwise a new random one."""
     configured = os.environ.get(TOKEN_ENV, '')
     if configured:
         if not TOKEN_RE.fullmatch(configured):
@@ -203,13 +212,17 @@ def code_version(repo: Path) -> str:
 class App:
     """State shared by the request threads."""
 
-    def __init__(self, repo: Path, *, token: str | None, require_token: bool, test_actions: bool = False,
-                 jobs: JobManager | None = None, comma: CommaMonitor | None = None, hf: HfCatalog | None = None,
-                 accounts: Accounts | None = None):
+    def __init__(self, repo: Path, *, setup_code: str | None = None, local_only: bool = True,
+                 test_actions: bool = False, jobs: JobManager | None = None, comma: CommaMonitor | None = None,
+                 hf: HfCatalog | None = None, accounts: Accounts | None = None, auth: AdminAuth | None = None):
         self.repo = repo
-        self.token = token
-        self.require_token = require_token
+        self.local_only = local_only
         self.test_actions = test_actions
+        if auth is None:
+            auth = AdminAuth(repo / 'outputs' / 'web' / 'auth', setup_code)
+        elif setup_code is not None:
+            auth.setup_code = setup_code
+        self.auth = auth
         self.cookie_name = 'distill_web'
         if jobs is None:
             jobs = JobManager(repo, gpu_check=self._gpu_check, external_groups=self._external_groups)
@@ -229,15 +242,9 @@ class App:
         self._machine = Cache(3.0)
 
     # -- access ------------------------------------------------------------------------------------
-    def token_matches(self, supplied) -> bool:
-        if self.token is None or not isinstance(supplied, str):
-            return False
-        return secrets.compare_digest(supplied.encode('utf-8'), self.token.encode('utf-8'))
-
     def host_allowed(self, host_header) -> bool:
-        # With a token the cookie protects every request. Without one (loopback only) the Host
-        # header must be a loopback name, against DNS rebinding.
-        if self.require_token:
+        # On a loopback address the Host header must be a loopback name, against DNS rebinding.
+        if not self.local_only:
             return True
         if not isinstance(host_header, str) or not host_header:
             return False
@@ -489,7 +496,7 @@ def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'distill-web'
         sys_version = ''
-        # Socket timeout: a client that stops sending is disconnected, even before the token check.
+        # Socket timeout: a client that stops sending is disconnected, even before the sign-in check.
         timeout = REQUEST_TIMEOUT_SECONDS
         head_only = False
 
@@ -506,7 +513,7 @@ def make_handler(app: App):
             self._dispatch('POST')
 
         def log_message(self, *args):
-            # Request lines carry ?token= on the first visit: nothing is logged per request.
+            # Request lines can carry an old ?token= link: nothing is logged per request.
             pass
 
         def _dispatch(self, method):
@@ -533,54 +540,89 @@ def make_handler(app: App):
                 return
             query = parse_qs(parts.query, keep_blank_values=True)
             if 'token' in query:
-                self._accept_token(method, path, query['token'][0], api)
+                # An old link with ?token=: the token no longer opens the site; drop it from the address.
+                self._redirect(self._clean_target(path), None)
                 return
-            if not self._authorized():
-                self._problem(403, 'token_required', TOKEN_MESSAGE, api)
+            if self._session() is None:
+                self._public(method, path, api)
                 return
             if method == 'POST':
                 self._post(path)
             else:
                 self._get(path, query)
 
-        def _authorized(self):
-            if not app.require_token:
-                return True
-            if app.token_matches(self.headers.get(TOKEN_HEADER)):
-                return True
+        @staticmethod
+        def _clean_target(path):
+            # Our own paths only, never "//host" or a backslash.
+            if not re.fullmatch(r'/[A-Za-z0-9._/-]*', path) or path.startswith('//'):
+                return '/'
+            return path
+
+        def _cookie_value(self):
             # Plain "name=value; name=value" split: the browser also sends the cookies of other web
             # apps on this host (any port, e.g. the speedlimits site), and a value a stricter parser
             # would not like must not hide ours.
             for raw in self.headers.get_all('Cookie', []):
                 for part in raw.split(';'):
                     name, separator, value = part.strip().partition('=')
-                    if not separator:
-                        continue
-                    if name.strip() == app.cookie_name and app.token_matches(value.strip()):
-                        return True
-            return False
+                    if separator and name.strip() == app.cookie_name:
+                        yield value.strip()
 
-        def _accept_token(self, method, path, supplied, api):
-            # Clean target: our own paths only, never "//host" or a backslash.
-            target = path
-            if not re.fullmatch(r'/[A-Za-z0-9._/-]*', target) or target.startswith('//'):
-                target = '/'
-            if not app.require_token:
-                self._redirect(target, None)
+        def _session(self):
+            """The session token of this request when it is signed in, otherwise None."""
+            for value in self._cookie_value():
+                if app.auth.session_valid(value):
+                    return value
+            return None
+
+        def _session_cookie(self, token):
+            parts = [app.cookie_name + '=' + token, 'Path=/', 'HttpOnly', 'SameSite=Strict',
+                     'Max-Age=' + str(SESSION_MAX_SECONDS)]
+            origin = (self.headers.get('Origin') or '').strip().lower()
+            proto = (self.headers.get('X-Forwarded-Proto') or '').strip().lower()
+            if origin.startswith('https://') or proto == 'https':
+                parts.append('Secure')
+            return '; '.join(parts)
+
+        def _expired_cookie(self):
+            return app.cookie_name + '=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'
+
+        def _public(self, method, path, api):
+            """A request without a session: the sign-in page, its files and the sign-in calls only."""
+            if method == 'GET' and path in ('/', '/index.html'):
+                self._page('login.html')
                 return
-            if method != 'GET' or not app.token_matches(supplied):
-                self._problem(403, 'invalid_token', 'Invalid token: use the address printed by helpers/web.sh.',
-                              api)
+            match = re.fullmatch(r'/static/([a-z]+\.[a-z]+)', path)
+            if method == 'GET' and match and match.group(1) in PUBLIC_STATIC:
+                self._static(match.group(1))
                 return
-            cookie = app.cookie_name + '=' + app.token + '; Path=/; HttpOnly; SameSite=Strict'
-            self._redirect(target, cookie)
+            if method == 'GET' and path == '/api/auth/state':
+                self._json(200, self._auth_state(False))
+                return
+            if method == 'POST' and path in PUBLIC_AUTH_ROUTES:
+                self._post(path)
+                return
+            self._problem(401, 'login_required', LOGIN_MESSAGE, api)
+
+        def _auth_state(self, signed_in):
+            state = {'configured': app.auth.configured(), 'signed_in': signed_in}
+            if signed_in:
+                state['user'] = app.auth.username()
+                state['sessions'] = app.auth.sessions_count()
+            return state
+
+        def _page(self, name):
+            nonce = secrets.token_urlsafe(18)
+            page = (STATIC_DIR / name).read_text(encoding='utf-8').replace('__DISTILL_NONCE__', nonce)
+            self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), page_csp(nonce))
+
+        def _static(self, name):
+            self._send(200, STATIC_FILES[name], (STATIC_DIR / name).read_bytes())
 
         # -- GET -----------------------------------------------------------------------------------
         def _get(self, path, query):
             if path == '/' or path == '/index.html':
-                nonce = secrets.token_urlsafe(18)
-                page = (STATIC_DIR / 'index.html').read_text(encoding='utf-8').replace('__DISTILL_NONCE__', nonce)
-                self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), page_csp(nonce))
+                self._page('index.html')
                 return
             match = re.fullmatch(r'/static/([a-z]+\.[a-z]+)', path)
             if match:
@@ -588,7 +630,10 @@ def make_handler(app: App):
                 if name not in STATIC_FILES:
                     self._problem(404, 'not_found', 'File not found.', False)
                     return
-                self._send(200, STATIC_FILES[name], (STATIC_DIR / name).read_bytes())
+                self._static(name)
+                return
+            if path == '/api/auth/state':
+                self._json(200, self._auth_state(True))
                 return
             if path == '/api/status':
                 self._json(200, app.status_payload())
@@ -665,7 +710,7 @@ def make_handler(app: App):
                 self._send(200, 'image/jpeg', thumbnail.read_bytes(),
                            extra=[('Cache-Control', 'private, max-age=86400')])
                 return
-            if path.startswith(('/api/run/', '/api/settings/')) or re.fullmatch(r'/api/jobs/[^/]+/(stop|parallel)',
+            if path.startswith(('/api/run/', '/api/settings/')) or path in AUTH_ROUTES or re.fullmatch(r'/api/jobs/[^/]+/(stop|parallel)',
                                                                                   path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
@@ -721,7 +766,8 @@ def make_handler(app: App):
             parallel = re.fullmatch(r'/api/jobs/([^/]+)/parallel', path)
             check = path == '/api/comma/check'
             settings = SETTINGS_ROUTES.get(path)
-            if not run and not stop and not parallel and not check and settings is None:
+            auth = path in AUTH_ROUTES
+            if not run and not stop and not parallel and not check and settings is None and not auth:
                 self._problem(404, 'not_found', 'Invalid address.', True)
                 return
             # Same origin and JSON only: no other site and no HTML form can start a job.
@@ -733,7 +779,9 @@ def make_handler(app: App):
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
             body = self._read_json()
-            if run:
+            if auth:
+                self._auth_post(path, body)
+            elif run:
                 job = app.run_action(run.group(1), body)
                 self._json(200, {'ok': True, 'job': job})
             elif stop:
@@ -762,6 +810,27 @@ def make_handler(app: App):
                     self._json(200, {'ok': True, 'account': app.disconnect_account(kind, body)})
             else:
                 self._json(200, {'ok': True, 'comma': app.comma.probe_now()})
+
+        def _auth_post(self, path, body):
+            address = self.client_address[0]
+            if path == '/api/auth/setup/check':
+                app.auth.check_setup_code(body.get('code'), address)
+                self._json(200, {'ok': True})
+            elif path == '/api/auth/setup':
+                token = app.auth.setup(body.get('code'), body.get('user'), body.get('password'), address)
+                self._json(200, {'ok': True}, [('Set-Cookie', self._session_cookie(token))])
+            elif path == '/api/auth/login':
+                token = app.auth.login(body.get('user'), body.get('password'), address)
+                print('Site: administrator signed in', flush=True)
+                self._json(200, {'ok': True}, [('Set-Cookie', self._session_cookie(token))])
+            elif path == '/api/auth/password':
+                current = self._session()
+                token = app.auth.change_password(current, body.get('current'), body.get('password'), address)
+                self._json(200, {'ok': True, 'state': self._auth_state(True)},
+                           [('Set-Cookie', self._session_cookie(token))])
+            else:
+                app.auth.logout(self._session(), everywhere=path == '/api/auth/logout-all')
+                self._json(200, {'ok': True}, [('Set-Cookie', self._expired_cookie())])
 
         def _same_origin(self):
             fetch_site = self.headers.get('Sec-Fetch-Site')
@@ -827,9 +896,9 @@ def make_handler(app: App):
             if not self.head_only:
                 self.wfile.write(body)
 
-        def _json(self, status, payload):
+        def _json(self, status, payload, extra=None):
             body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
-            self._send(status, 'application/json; charset=utf-8', body)
+            self._send(status, 'application/json; charset=utf-8', body, extra=extra)
 
         def _problem(self, status, reason, message, api):
             if api:
@@ -877,18 +946,19 @@ class WebServerIPv6(WebServer):
     address_family = socket.AF_INET6
 
 
-def create_server(repo: Path, *, host: str = '127.0.0.1', port: int = DEFAULT_PORT, token: str | None = None,
-                  require_token: bool | None = None, test_actions: bool = False, app: App | None = None):
-    """Binds the server (not started). The token is required whenever the address is not loopback."""
-    if require_token is None:
-        require_token = not is_loopback(host)
-    if require_token and token is None:
-        token = access_token()
+def create_server(repo: Path, *, host: str = '127.0.0.1', port: int = DEFAULT_PORT, setup_code: str | None = None,
+                  local_only: bool | None = None, test_actions: bool = False, app: App | None = None):
+    """Binds the server (not started). Without a setup code a random one is made (printed by main).
+    local_only (default: the address is loopback) turns on the loopback Host check."""
+    if local_only is None:
+        local_only = is_loopback(host)
+    if setup_code is None:
+        setup_code = access_token()
     if app is None:
-        app = App(repo, token=token, require_token=require_token, test_actions=test_actions)
+        app = App(repo, setup_code=setup_code, local_only=local_only, test_actions=test_actions)
     else:
-        app.token = token
-        app.require_token = require_token
+        app.local_only = local_only
+        app.auth.setup_code = setup_code
     if ':' in host:
         server = WebServerIPv6((host, port), make_handler(app))
     else:
@@ -915,8 +985,7 @@ def base_urls(host: str, port: int) -> list[str]:
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='python -m web.server', description='distill-web, the control site')
-    parser.add_argument('--host', default='127.0.0.1', help='address (default 127.0.0.1; 0.0.0.0 = local network, '
-                        'with token)')
+    parser.add_argument('--host', default='127.0.0.1', help='address (default 127.0.0.1; 0.0.0.0 = local network)')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='port (default 8766)')
     parser.add_argument('--test-actions', action='store_true',
                         help='adds the "selftest" action (a fake job, to test the site)')
@@ -933,24 +1002,20 @@ def main(arguments: list[str] | None = None) -> int:
     app.comma.start()
     with server:
         port = server.server_port
-        suffix = ''
-        if app.require_token:
-            if token_from_env:
-                suffix = '?token=<' + TOKEN_ENV + '>'
-            else:
-                suffix = '?token=' + app.token
         print('distill-web listening on ' + options.host + ':' + str(port), flush=True)
         print('Open in the browser:', flush=True)
         for base in base_urls(options.host, port):
-            print('  ' + base + '/' + suffix, flush=True)
-        if app.require_token and token_from_env:
-            # A token fixed in the environment (the systemd service) is never printed: the output ends
+            print('  ' + base + '/', flush=True)
+        if app.auth.configured():
+            print('Sign in as the administrator (' + str(app.auth.username()) + ').', flush=True)
+        elif token_from_env:
+            # A code fixed in the environment (the systemd service) is never printed: the output ends
             # in a log.
-            print('The token is the one of ' + TOKEN_ENV + ' (service: /etc/distill-web.env, by hand: .env of the '
-                  'clone) and is not printed.', flush=True)
-        elif app.require_token:
-            print('The token stays valid while the site is on (fix it with ' + TOKEN_ENV + ').', flush=True)
+            print('First visit: create the administrator with the setup code, the value of ' + TOKEN_ENV
+                  + ' (service: /etc/distill-web.env, by hand: .env of the clone).', flush=True)
         else:
+            print('First visit: create the administrator with this setup code: ' + app.auth.setup_code, flush=True)
+        if app.local_only:
             print('Only from this computer. From another one: ssh -L ' + str(port) + ':127.0.0.1:' + str(port)
                   + ' <server>, or restart with --host 0.0.0.0', flush=True)
         if options.test_actions:

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Distill · Sign in</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="auth-title">
+    <div class="auth-head">
+      <div class="auth-brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 18 9 2M13 18 11 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></span>Distill</div>
+      <div class="auth-steps" id="auth-steps" aria-hidden="true" hidden><span></span><span></span></div>
+    </div>
+    <button class="icon-btn auth-back" type="button" id="auth-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+    <h1 class="auth-title" id="auth-title">Distill</h1>
+    <p class="auth-sub" id="auth-sub">Loading…</p>
+
+    <!-- Sign in -->
+    <form class="auth-form" id="form-login" hidden novalidate>
+      <label class="field">Name<input type="text" id="login-user" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" required></label>
+      <label class="field">Password<input type="password" id="login-password" name="password" autocomplete="current-password" maxlength="256" required></label>
+      <div class="auth-error" id="login-error" role="alert"></div>
+      <button class="btn primary block" type="submit" id="login-submit">Sign in<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+    </form>
+
+    <!-- First visit, step 1: the setup code -->
+    <form class="auth-form" id="form-code" hidden novalidate>
+      <label class="field">Setup code<input type="password" id="setup-code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" required></label>
+      <p class="note">Whoever installed the site has it: it is printed when the site starts, or saved as the site access token. It is needed only once.</p>
+      <div class="auth-error" id="code-error" role="alert"></div>
+      <button class="btn primary block" type="submit" id="code-submit">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+    </form>
+
+    <!-- First visit, step 2: name and password -->
+    <form class="auth-form" id="form-setup" hidden novalidate>
+      <label class="field">Name<input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" required value="admin"></label>
+      <label class="field">Password<input type="password" id="setup-password" name="new-password" autocomplete="new-password" maxlength="256" minlength="12" required></label>
+      <label class="field">Repeat the password<input type="password" id="setup-repeat" autocomplete="new-password" maxlength="256" required></label>
+      <p class="note">At least 12 characters. A password manager can make one for you.</p>
+      <div class="auth-error" id="setup-error" role="alert"></div>
+      <button class="btn primary block" type="submit" id="setup-submit">Create and sign in<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+    </form>
+
+    <p class="auth-foot" id="auth-foot"></p>
+    <p class="auth-foot transport-note warn" id="auth-transport" hidden></p>
+  </section>
+</main>
+<script nonce="__DISTILL_NONCE__" src="/static/login.js"></script>
+</body>
+</html>

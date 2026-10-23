@@ -9,12 +9,12 @@
 #   helpers/web.sh --local        (this server only: from the PC you need the ssh tunnel)
 #   helpers/web.sh --foreground   (stay attached to the terminal, Ctrl+C to stop)
 #
-# By default it listens on the LAN (0.0.0.0, port 8766) and every request needs the access token:
-# the link printed here already has it. The token is created once in the .env of this clone
-# (DISTILL_WEB_TOKEN=..., permissions 600, ignored by git), the same one the service uses, so the
-# link stays the same after a restart and can be bookmarked. When the systemd service distill-web
-# (deploy/install_web_service.sh) is active it does not start a second server: it prints the link
-# of the service. Site log: outputs/web/web.log; jobs and their logs: outputs/web/jobs/.
+# By default it listens on the LAN (0.0.0.0, port 8766) and every page needs the administrator
+# signed in (name and password). The first visit creates the administrator with the setup code,
+# printed here until that is done: it is created once in the .env of this clone
+# (DISTILL_WEB_TOKEN=..., permissions 600, ignored by git), the same one the service uses. When the
+# systemd service distill-web (deploy/install_web_service.sh) is active it does not start a second
+# server: it prints the link of the service. Site log: outputs/web/web.log; jobs and their logs: outputs/web/jobs/.
 # -h, --help: this help.
 # Env: DISTILL_WEB_PORT (default 8766)
 
@@ -70,7 +70,7 @@ service_active() {
   command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE" 2>/dev/null
 }
 
-# The access token: the DISTILL_WEB_TOKEN line of the .env of the clone, created once (permissions
+# The setup code: the DISTILL_WEB_TOKEN line of the .env of the clone, created once (permissions
 # 600) and appended to the other lines of that file when it already exists.
 token() {
   local value=""
@@ -84,24 +84,37 @@ token() {
       if [ ! -f "$REPO_ENV" ]; then
         echo "# Secrets and local settings of this clone: the file is in .gitignore, it never goes into git." > "$REPO_ENV"
       fi
-      echo "# Access token of the distill-web site (distill-web service and helpers/web.sh)." >> "$REPO_ENV"
+      echo "# Setup code of the distill-web site (distill-web service and helpers/web.sh)." >> "$REPO_ENV"
       echo "DISTILL_WEB_TOKEN=$value" >> "$REPO_ENV"
     )
     chmod 600 "$REPO_ENV"
-    echo "Token created and saved in $REPO_ENV" >&2
+    echo "Setup code created and saved in $REPO_ENV" >&2
   fi
   echo "$value"
 }
 
+# The setup code is shown only while the administrator does not exist yet.
+print_setup_code() {
+  if [ -f "$WEB_DIR/auth/admin.json" ]; then
+    echo "Sign in as the administrator of the site."
+  elif [ -n "$1" ]; then
+    echo "First visit: create the administrator (name and password) with the setup code  $1"
+    echo "(it is needed only once; it stays in $REPO_ENV)"
+  else
+    echo "First visit: create the administrator with the setup code printed in $LOG."
+  fi
+}
+
 print_lan_link() {
-  echo "Open from the PC or the phone:  http://$(server_ip):$PORT/?token=$1"
-  echo "(the link stays the same after a restart too; the token is in $REPO_ENV)"
+  echo "Open from the PC or the phone:  http://$(server_ip):$PORT/"
+  print_setup_code "$1"
 }
 
 print_local_link() {
   echo "From the PC open the tunnel first (leave that terminal open):"
   echo "  ssh -L $PORT:127.0.0.1:$PORT root@$(server_ip)"
   echo "then in the browser:  http://localhost:$PORT/"
+  print_setup_code ""
 }
 
 local_only=0
@@ -149,7 +162,7 @@ if service_active; then
   if [ -r "$SERVICE_ENV" ]; then
     print_lan_link "$(sed -n 's/^DISTILL_WEB_TOKEN=//p' "$SERVICE_ENV" | tail -1)"
   else
-    echo "The token is in $SERVICE_ENV (readable by root only)."
+    echo "The setup code is in $SERVICE_ENV (readable by root only)."
   fi
   exit 0
 fi
