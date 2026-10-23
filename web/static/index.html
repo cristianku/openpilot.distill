@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>Distill · Control</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-<script nonce="__DISTILL_NONCE__">try{var t=localStorage.getItem('distill-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script nonce="__DISTILL_NONCE__">try{var t=localStorage.getItem('distill-theme');if(t==='light'||t==='auto')document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -177,40 +177,133 @@
       </details>
     </div>
 
-    <div class="card" id="train-new">
-      <h2>New training</h2>
-      <div class="form-grid">
-        <label class="field">Steps<input type="number" id="train-steps" min="1" max="200000" step="1" value="5000" inputmode="numeric"></label>
-        <label class="field">Batch per GPU<input type="number" id="train-batch" min="1" max="64" step="1" value="8" inputmode="numeric"></label>
-        <label class="field">Workers<input type="number" id="train-workers" min="0" max="16" step="1" value="6" inputmode="numeric"></label>
-        <label class="field">GPU<select id="train-gpus"></select></label>
-        <label class="field">Teacher<select id="train-teacher">
-          <option value="md-v3">MD v3 (current big model)</option>
-          <option value="084747c7">084747c7 (old big model)</option>
-        </select></label>
-        <label class="field">wandb<select id="train-wandb">
-          <option value="">automatic (online if configured)</option>
-          <option value="online">online (wandb.ai)</option>
-          <option value="offline">offline (disk only)</option>
-          <option value="disabled">off</option>
-        </select></label>
+    <!-- New training: three steps (where to start, how much, summary). The fields keep their ids. -->
+    <div class="card wizard" id="train-new">
+      <div class="wizard-head">
+        <button class="icon-btn wizard-back" type="button" id="train-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <div class="auth-steps" id="train-dots" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
       </div>
-      <div class="callout" id="wandb-callout" hidden>
-        <span id="wandb-callout-text">Weights &amp; Biases is not connected: runs are logged on this server only.</span>
-        <button class="btn small" type="button" data-goto="settings" data-account="wandb">Connect in Settings</button>
-      </div>
-      <fieldset class="modes">
-        <legend>Start</legend>
-        <label class="check"><input type="radio" name="train-mode" value="fresh" checked> From scratch</label>
-        <label class="check"><input type="radio" name="train-mode" value="continue" id="mode-continue"> From the “stable” weights on Hugging Face</label>
-        <div class="reason indent" id="continue-note"></div>
-        <label class="check"><input type="radio" name="train-mode" value="resume" id="mode-resume"> Resume an interrupted run</label>
-        <div class="indent"><select id="train-resume-run" aria-label="Run to resume" disabled></select></div>
-      </fieldset>
-      <div class="buttons">
-        <div class="action"><button class="btn primary" type="button" id="btn-train">Start training</button><div class="reason" id="reason-train"></div></div>
-        <div class="action"><button class="btn" type="button" id="btn-train-test">Test 10 steps</button><div class="reason" id="reason-train_test"></div></div>
-      </div>
+
+      <section class="wizard-step" id="train-step-1" aria-labelledby="train-step-1-title">
+        <h2 class="wizard-title" id="train-step-1-title">Where do we start?</h2>
+        <p class="wizard-sub">One choice, then we take care of the setup.</p>
+        <div class="choice-grid" role="radiogroup" aria-labelledby="train-step-1-title">
+          <label class="choice wide">
+            <input type="radio" name="train-mode" value="fresh" checked>
+            <svg class="choice-art" viewBox="0 0 320 120" aria-hidden="true">
+              <defs>
+                <radialGradient id="art-orb" cx="50%" cy="45%" r="55%"><stop offset="0" stop-color="#bcd4ff"/><stop offset=".45" stop-color="#5b8ff9"/><stop offset="1" stop-color="#1e40af"/></radialGradient>
+                <linearGradient id="art-road" x1="0" x2="1"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset=".5" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6" stop-opacity="0"/></linearGradient>
+              </defs>
+              <path d="M-10 108C70 96 90 70 160 74s110 30 170 18" fill="none" stroke="url(#art-road)" stroke-width="16" stroke-linecap="round" opacity=".55"/>
+              <path d="M-10 108C70 96 90 70 160 74s110 30 170 18" fill="none" stroke="#dbeafe" stroke-width="1.5" stroke-dasharray="6 8" opacity=".7"/>
+              <g transform="translate(160 50)">
+                <circle r="34" fill="url(#art-orb)" opacity=".95"/>
+                <ellipse rx="34" ry="13" fill="none" stroke="#dbeafe" stroke-width="2" opacity=".75" transform="rotate(25)"/>
+                <ellipse rx="34" ry="13" fill="none" stroke="#dbeafe" stroke-width="2" opacity=".55" transform="rotate(-35)"/>
+                <ellipse rx="13" ry="34" fill="none" stroke="#dbeafe" stroke-width="1.6" opacity=".45" transform="rotate(10)"/>
+              </g>
+            </svg>
+            <span class="choice-text"><strong>New model</strong><span>Start a new training from scratch</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="train-mode" value="continue" id="mode-continue">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <g fill="none" stroke-width="2">
+                <path d="M80 70 32 56l48-14 48 14z" fill="#1d4ed8" fill-opacity=".35" stroke="#60a5fa" stroke-opacity=".5"/>
+                <path d="M80 56 32 42l48-14 48 14z" fill="#2563eb" fill-opacity=".45" stroke="#93c5fd" stroke-opacity=".6"/>
+                <path d="M80 42 32 28l48-14 48 14z" fill="#3b82f6" fill-opacity=".6" stroke="#bfdbfe" stroke-opacity=".8"/>
+              </g>
+            </svg>
+            <span class="choice-text"><strong>Continue</strong><span>From the stable model on Hugging Face</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="train-mode" value="resume" id="mode-resume">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <path d="M104 26a32 32 0 1 0 8 30" fill="none" stroke="#60a5fa" stroke-width="9" stroke-linecap="round"/>
+              <path d="m98 14 16 12-18 8z" fill="#93c5fd"/>
+              <circle cx="80" cy="48" r="20" fill="#1d4ed8" fill-opacity=".55"/>
+              <path d="m74 38 16 10-16 10z" fill="#bfdbfe"/>
+            </svg>
+            <span class="choice-text"><strong>Resume</strong><span>From where a run stopped</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+        </div>
+        <div class="reason wizard-note" id="continue-note"></div>
+        <button class="btn primary block" type="button" id="train-next-1">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 1 of 3</p>
+      </section>
+
+      <section class="wizard-step" id="train-step-2" aria-labelledby="train-step-2-title" hidden>
+        <h2 class="wizard-title" id="train-step-2-title">How much to train?</h2>
+        <p class="wizard-sub" id="train-step-2-sub">Choose a session.</p>
+        <div id="train-amount">
+          <div class="dial" id="train-dial" role="slider" tabindex="0" aria-label="Training steps" aria-valuemin="10" aria-valuemax="10000" aria-valuenow="5000">
+            <svg viewBox="0 0 240 200" aria-hidden="true">
+              <defs><linearGradient id="dial-fill" x1="0" x2="1" y1="1" y2="0"><stop offset="0" stop-color="#2563eb"/><stop offset="1" stop-color="#60a5fa"/></linearGradient></defs>
+              <g id="dial-ticks"></g>
+              <path id="dial-track" class="dial-track" d=""/>
+              <path id="dial-arc" class="dial-arc" d=""/>
+              <g id="dial-knob" class="dial-knob"><circle r="13"/><circle r="7" class="dial-knob-core"/></g>
+            </svg>
+            <div class="dial-center">
+              <svg class="dial-icon" viewBox="0 0 48 32" aria-hidden="true"><path d="M6 30 22 4h8L18 30z" fill="currentColor" opacity=".55"/><path d="M26 30 34 6h4l-4 24z" fill="currentColor" opacity=".35"/><path d="M20 26l1.5-5M23.5 16l1.4-4.5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".8"/></svg>
+              <div class="dial-name" id="dial-name">Standard</div>
+              <div class="dial-value" id="dial-value">5,000 steps</div>
+            </div>
+            <span class="dial-end min">10</span><span class="dial-end max">10k</span>
+          </div>
+          <div class="presets" id="train-presets" role="radiogroup" aria-label="Session">
+            <button type="button" role="radio" class="preset" data-preset="trial" aria-checked="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17V9m0 0C10 5 7 3.5 3.5 3.5 3.5 7 6 9 10 9Zm0 0c0-3.5 2.5-5.5 6.5-5.5 0 3.5-2.5 5.5-6.5 5.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></svg>Trial</button>
+            <button type="button" role="radio" class="preset" data-preset="standard" aria-checked="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17 9 3h2L8 17zM12 17l2-11h1.5L15 17z" fill="currentColor" opacity=".8"/></svg>Standard</button>
+            <button type="button" role="radio" class="preset" data-preset="custom" aria-checked="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h9m3 0h2M3 14h2m3 0h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="13.5" cy="6" r="1.8" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="6.5" cy="14" r="1.8" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>Custom</button>
+          </div>
+          <p class="wizard-explain">The model learns from the examples of your drives.<span id="train-eta">More steps take more time.</span></p>
+        </div>
+        <div id="train-resume-box" hidden>
+          <label class="field">Run to resume<select id="train-resume-run" disabled></select></label>
+          <p class="note">It continues from its last checkpoint with the same teacher and number of steps.</p>
+        </div>
+        <div class="wizard-custom" id="train-custom" hidden>
+          <div class="form-grid">
+            <label class="field" id="train-steps-field">Steps<input type="number" id="train-steps" min="1" max="200000" step="1" value="5000" inputmode="numeric"></label>
+            <label class="field">Batch per GPU<input type="number" id="train-batch" min="1" max="64" step="1" value="8" inputmode="numeric"></label>
+            <label class="field">Workers<input type="number" id="train-workers" min="0" max="16" step="1" value="6" inputmode="numeric"></label>
+            <label class="field">GPU<select id="train-gpus"></select></label>
+            <label class="field" id="train-teacher-field">Teacher<select id="train-teacher">
+              <option value="md-v3">MD v3 (current big model)</option>
+              <option value="084747c7">084747c7 (old big model)</option>
+            </select></label>
+            <label class="field">wandb<select id="train-wandb">
+              <option value="">automatic (online if configured)</option>
+              <option value="online">online (wandb.ai)</option>
+              <option value="offline">offline (disk only)</option>
+              <option value="disabled">off</option>
+            </select></label>
+          </div>
+        </div>
+        <button class="hw-line" type="button" id="train-hw" aria-controls="train-custom">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M8 2v3m4-3v3M8 15v3m4-3v3M2 8h3m-3 4h3m10-4h3m-3 4h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span><strong id="train-hw-name">GPU</strong> · <span id="train-hw-mode">Automatic setup</span></span>
+        </button>
+        <button class="btn primary block" type="button" id="train-next-2">Summary<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 2 of 3</p>
+      </section>
+
+      <section class="wizard-step" id="train-step-3" aria-labelledby="train-step-3-title" hidden>
+        <h2 class="wizard-title" id="train-step-3-title">Ready to start</h2>
+        <p class="wizard-sub">The GPU stays busy for the whole session; you can follow it live and stop it.</p>
+        <dl class="kv wizard-summary" id="train-summary"></dl>
+        <div class="callout" id="wandb-callout" hidden>
+          <span id="wandb-callout-text">Weights &amp; Biases is not connected: runs are logged on this server only.</span>
+          <button class="btn small" type="button" data-goto="settings" data-account="wandb">Connect in Settings</button>
+        </div>
+        <div class="action wizard-action"><button class="btn primary block" type="button" id="btn-train">Start training<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-train"></div></div>
+        <div class="action wizard-action"><button class="btn small wizard-test" type="button" id="btn-train-test">Test 10 steps first</button><div class="reason" id="reason-train_test"></div></div>
+        <p class="wizard-foot">Step 3 of 3</p>
+      </section>
       <div class="job-live" data-actions="train,train_test"></div>
     </div>
 
@@ -399,9 +492,9 @@
     <div class="card" id="appearance-card">
       <h2 id="appearance-title">Appearance</h2>
       <div class="segmented" id="theme-choice" role="radiogroup" aria-labelledby="appearance-title">
-        <button type="button" role="radio" data-theme-choice="auto" aria-checked="true">Auto</button>
+        <button type="button" role="radio" data-theme-choice="dark" aria-checked="true">Dark</button>
         <button type="button" role="radio" data-theme-choice="light" aria-checked="false">Light</button>
-        <button type="button" role="radio" data-theme-choice="dark" aria-checked="false">Dark</button>
+        <button type="button" role="radio" data-theme-choice="auto" aria-checked="false">Auto</button>
       </div>
       <p class="note">Auto follows the setting of this device. The choice is kept in this browser only.</p>
     </div>

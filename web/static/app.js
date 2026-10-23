@@ -1008,30 +1008,28 @@
     return isFinite(number) ? number : value;
   }
 
-  function gpuText(gpus) {
-    if (!gpus || gpus === 'all') return 'all GPUs';
-    return 'GPU ' + gpus;
-  }
-
   byId('btn-train').addEventListener('click', () => {
     const mode = trainMode();
     const params = {mode: mode, batch_size: numberOrText(byId('train-batch').value),
       workers: numberOrText(byId('train-workers').value), wandb: byId('train-wandb').value,
       gpus: byId('train-gpus').value};
-    let question = '';
+    // Step 3 of the wizard is the confirmation: no extra question.
     if (mode === 'resume') {
       params.run = byId('train-resume-run').value;
-      question = 'Resume run ' + params.run + ' from its last checkpoint on ' + gpuText(params.gpus) + '. Start?';
     } else {
       params.steps = numberOrText(byId('train-steps').value);
       params.teacher = byId('train-teacher').value;
-      question = 'Training ' + MODE_TEXT[mode] + ', ' + params.steps + ' steps on ' + gpuText(params.gpus)
-        + ': the GPU stays busy for a long time. Start?';
     }
-    runAction('train', params, question).then((job) => { if (job) openRunView(null); });
+    runAction('train', params).then((job) => {
+      if (!job) return;
+      showTrainStep(1);
+      openRunView(null);
+    });
   });
   byId('btn-train-test').addEventListener('click', () => runAction('train_test', {gpus: byId('train-gpus').value}));
-  for (const radio of document.querySelectorAll('input[name="train-mode"]')) radio.addEventListener('change', updateButtons);
+  for (const radio of document.querySelectorAll('input[name="train-mode"]')) {
+    radio.addEventListener('change', () => { renderTrainWizard(); updateButtons(); });
+  }
   byId('train-gpus').addEventListener('change', updateButtons);
   byId('train-resume-run').addEventListener('change', () => {
     const run = (data.runs || []).find((item) => item.name === byId('train-resume-run').value);
@@ -1060,8 +1058,246 @@
     if (data.hf && data.hf.ok && data.hf.stable === false) note = 'There are no stable weights on Hugging Face yet: publish a model as “stable” first.';
     else if (data.hf && !data.hf.ok) note = 'Cannot tell whether Hugging Face has stable weights (' + data.hf.error + ').';
     byId('continue-note').textContent = note;
+    // No stable weights: "Continue" cannot start, so it cannot be chosen either.
+    const noStable = Boolean(data.hf && data.hf.ok && data.hf.stable === false);
+    byId('mode-continue').disabled = noStable;
+    for (const id of ['mode-continue', 'mode-resume']) {
+      if (byId(id).disabled && byId(id).checked) document.querySelector('input[name="train-mode"][value="fresh"]').checked = true;
+    }
     renderWandbChoice();
+    renderTrainWizard();
   }
+
+  // -- new training wizard ----------------------------------------------------------------------
+  // Step 1: where to start; step 2: how much (dial and presets, or the run to resume); step 3: summary.
+  const DIAL = {min: 10, max: 10000, cx: 120, cy: 112, r: 88, sweep: 240};
+  const PRESETS = {trial: 1000, standard: 5000};
+  let trainStep = 1;
+  let customOpen = false;
+
+  function showTrainStep(step) {
+    trainStep = step;
+    for (let index = 1; index <= 3; index++) byId('train-step-' + index).hidden = index !== step;
+    byId('train-back').hidden = step === 1;
+    const dots = byId('train-dots').children;
+    for (let index = 0; index < dots.length; index++) dots[index].className = index === step - 1 ? 'on' : '';
+    renderTrainWizard();
+    const heading = byId('train-step-' + step + '-title');
+    if (heading && step > 1) {
+      heading.tabIndex = -1;
+      heading.focus({preventScroll: true});
+      byId('train-new').scrollIntoView({block: 'start', behavior: 'smooth'});
+    }
+  }
+
+  function dialPoint(fraction, radius) {
+    const angle = (-DIAL.sweep / 2 + DIAL.sweep * fraction) * Math.PI / 180;
+    return [DIAL.cx + radius * Math.sin(angle), DIAL.cy - radius * Math.cos(angle)];
+  }
+  function dialArc(fraction) {
+    const start = dialPoint(0, DIAL.r);
+    const end = dialPoint(fraction, DIAL.r);
+    const large = DIAL.sweep * fraction > 180 ? 1 : 0;
+    return 'M' + start[0].toFixed(1) + ' ' + start[1].toFixed(1) + 'A' + DIAL.r + ' ' + DIAL.r + ' 0 ' + large + ' 1 '
+      + end[0].toFixed(1) + ' ' + end[1].toFixed(1);
+  }
+  function drawDialTicks() {
+    const group = byId('dial-ticks');
+    if (group.childNodes.length) return;
+    for (let index = 0; index <= 10; index++) {
+      const outer = dialPoint(index / 10, DIAL.r - 18);
+      const inner = dialPoint(index / 10, DIAL.r - (index % 5 === 0 ? 28 : 24));
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', outer[0].toFixed(1));
+      line.setAttribute('y1', outer[1].toFixed(1));
+      line.setAttribute('x2', inner[0].toFixed(1));
+      line.setAttribute('y2', inner[1].toFixed(1));
+      group.appendChild(line);
+    }
+    byId('dial-track').setAttribute('d', dialArc(1));
+  }
+
+  function trainSteps() {
+    const value = Number(byId('train-steps').value);
+    return isFinite(value) && value > 0 ? Math.round(value) : 0;
+  }
+  function setTrainSteps(value) {
+    byId('train-steps').value = String(value);
+    renderTrainWizard();
+    updateButtons();
+  }
+  function snapSteps(raw) {
+    const value = raw < 100 ? Math.round(raw / 10) * 10 : Math.round(raw / 100) * 100;
+    return Math.min(DIAL.max, Math.max(DIAL.min, value));
+  }
+  function presetOf(steps) {
+    if (customOpen) return 'custom';
+    for (const [name, value] of Object.entries(PRESETS)) if (steps === value) return name;
+    return 'custom';
+  }
+  function presetName(preset) {
+    return {trial: 'Trial', standard: 'Standard', custom: 'Custom'}[preset];
+  }
+
+  function duration(seconds) {
+    if (seconds < 90) return 'about a minute';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return 'about ' + minutes + ' min';
+    const hours = Math.floor(minutes / 60);
+    const rest = Math.round((minutes % 60) / 5) * 5;
+    return 'about ' + hours + ' h' + (rest ? ' ' + rest + ' min' : '');
+  }
+  // Seconds per step on this server: the latest run with the same batch, else the latest one.
+  function stepSeconds() {
+    const runs = (data.runs || []).filter((run) => run.avg_step_time && run.steps_done >= 20);
+    runs.sort((a, b) => (b.started || 0) - (a.started || 0));
+    const batch = Number(byId('train-batch').value);
+    const same = runs.find((run) => run.config && Number(run.config.batch_size) === batch);
+    const run = same || runs[0];
+    return run ? run.avg_step_time : null;
+  }
+
+  function gpuName() {
+    const gpus = (status && status.system.gpus) || [];
+    const chosen = byId('train-gpus').value;
+    if (chosen === 'all') return gpus.length + ' × ' + (gpus[0] ? gpus[0].name.replace(/-PCIE.*|-SXM.*/, '') : 'GPU');
+    const gpu = gpus.find((item) => String(item.index) === chosen);
+    if (!gpu) return 'No GPU found';
+    return gpu.name.replace(/-PCIE.*|-SXM.*/, '');
+  }
+
+  function renderTrainWizard() {
+    const mode = trainMode();
+    for (const label of document.querySelectorAll('#train-step-1 .choice')) {
+      const input = label.querySelector('input');
+      label.classList.toggle('on', input.checked);
+      label.classList.toggle('off', input.disabled);
+    }
+    const resume = mode === 'resume';
+    byId('train-amount').hidden = resume;
+    byId('train-resume-box').hidden = !resume;
+    byId('train-step-2-title').textContent = resume ? 'Which run?' : 'How much to train?';
+    byId('train-step-2-sub').textContent = resume ? 'Pick the run that stopped.' : 'Choose a session.';
+    byId('train-steps-field').hidden = resume;
+    byId('train-teacher-field').hidden = resume;
+    byId('train-custom').hidden = !customOpen;
+    byId('train-hw').setAttribute('aria-expanded', customOpen ? 'true' : 'false');
+    byId('train-hw-name').textContent = gpuName();
+    const defaults = byId('train-batch').value === '8' && byId('train-workers').value === '6'
+      && byId('train-wandb').value === '' && byId('train-teacher').value === 'md-v3';
+    byId('train-hw-mode').textContent = customOpen ? 'Hide the settings' : (defaults ? 'Automatic setup' : 'Custom setup');
+
+    drawDialTicks();
+    const steps = trainSteps();
+    const fraction = Math.min(1, Math.max(0, (steps - DIAL.min) / (DIAL.max - DIAL.min)));
+    byId('dial-arc').setAttribute('d', fraction > 0.002 ? dialArc(fraction) : '');
+    const knob = dialPoint(fraction, DIAL.r);
+    byId('dial-knob').setAttribute('transform', 'translate(' + knob[0].toFixed(1) + ' ' + knob[1].toFixed(1) + ')');
+    const dial = byId('train-dial');
+    dial.setAttribute('aria-valuenow', String(Math.min(steps, DIAL.max)));
+    dial.setAttribute('aria-valuetext', steps.toLocaleString('en-US') + ' steps');
+    const preset = presetOf(steps);
+    byId('dial-name').textContent = presetName(preset);
+    byId('dial-value').textContent = steps ? steps.toLocaleString('en-US') + ' steps' : 'Write the steps';
+    for (const button of document.querySelectorAll('#train-presets .preset')) {
+      const on = button.dataset.preset === preset;
+      button.setAttribute('aria-checked', on ? 'true' : 'false');
+      button.tabIndex = on ? 0 : -1;
+    }
+    const seconds = stepSeconds();
+    byId('train-eta').textContent = seconds && steps
+      ? 'On this server: ' + duration(seconds * steps) + '.'
+      : 'More steps take more time.';
+
+    if (trainStep === 3) renderTrainSummary();
+  }
+
+  function renderTrainSummary() {
+    const mode = trainMode();
+    const list = byId('train-summary');
+    list.replaceChildren();
+    const start = {fresh: 'New model (from scratch)', continue: 'Continue from the stable model',
+      resume: 'Resume ' + (byId('train-resume-run').value || '–')}[mode];
+    kvRow(list, 'Start', start);
+    if (mode !== 'resume') {
+      const steps = trainSteps();
+      const seconds = stepSeconds();
+      kvRow(list, 'Session', presetName(presetOf(steps)) + ' · ' + steps.toLocaleString('en-US') + ' steps'
+        + (seconds && steps ? ' · ' + duration(seconds * steps) : ''));
+      kvRow(list, 'Teacher', byId('train-teacher').selectedOptions[0].textContent);
+    }
+    const gpuOption = byId('train-gpus').selectedOptions[0];
+    kvRow(list, 'Hardware', (gpuOption ? gpuOption.textContent : 'no GPU') + ' · batch ' + byId('train-batch').value
+      + ' · ' + byId('train-workers').value + ' workers');
+    kvRow(list, 'Charts', byId('train-wandb').selectedOptions[0].textContent);
+  }
+
+  byId('train-next-1').addEventListener('click', () => showTrainStep(2));
+  byId('train-next-2').addEventListener('click', () => showTrainStep(3));
+  byId('train-back').addEventListener('click', () => showTrainStep(Math.max(1, trainStep - 1)));
+  byId('train-hw').addEventListener('click', () => {
+    customOpen = !customOpen;
+    renderTrainWizard();
+  });
+  for (const id of ['train-steps', 'train-batch', 'train-workers', 'train-teacher', 'train-wandb', 'train-gpus']) {
+    byId(id).addEventListener('input', renderTrainWizard);
+    byId(id).addEventListener('change', renderTrainWizard);
+  }
+
+  const presetButtons = Array.from(document.querySelectorAll('#train-presets .preset'));
+  function choosePreset(preset) {
+    customOpen = preset === 'custom';
+    if (PRESETS[preset]) setTrainSteps(PRESETS[preset]);
+    else renderTrainWizard();
+    if (customOpen) byId('train-steps').focus();
+  }
+  for (const button of presetButtons) {
+    button.addEventListener('click', () => choosePreset(button.dataset.preset));
+    button.addEventListener('keydown', (event) => {
+      const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = presetButtons[(presetButtons.indexOf(button) + step + presetButtons.length) % presetButtons.length];
+      next.focus();
+      choosePreset(next.dataset.preset);
+    });
+  }
+
+  // The dial: drag the knob (or anywhere on the arc), or use the arrow keys.
+  const dialElement = byId('train-dial');
+  function dialFromPointer(event) {
+    const svg = dialElement.querySelector('svg');
+    const box = svg.getBoundingClientRect();
+    const x = (event.clientX - box.left) * 240 / box.width;
+    const y = (event.clientY - box.top) * 200 / box.height;
+    let angle = Math.atan2(x - DIAL.cx, DIAL.cy - y) * 180 / Math.PI;
+    angle = Math.max(-DIAL.sweep / 2, Math.min(DIAL.sweep / 2, angle));
+    const fraction = (angle + DIAL.sweep / 2) / DIAL.sweep;
+    setTrainSteps(snapSteps(DIAL.min + fraction * (DIAL.max - DIAL.min)));
+  }
+  dialElement.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    dialElement.setPointerCapture(event.pointerId);
+    dialElement.classList.add('dragging');
+    dialFromPointer(event);
+  });
+  dialElement.addEventListener('pointermove', (event) => {
+    if (dialElement.hasPointerCapture(event.pointerId)) dialFromPointer(event);
+  });
+  for (const name of ['pointerup', 'pointercancel']) {
+    dialElement.addEventListener(name, () => dialElement.classList.remove('dragging'));
+  }
+  dialElement.addEventListener('keydown', (event) => {
+    const steps = Math.min(trainSteps() || DIAL.min, DIAL.max);
+    const change = {ArrowRight: 100, ArrowUp: 100, ArrowLeft: -100, ArrowDown: -100, PageUp: 1000, PageDown: -1000}[event.key];
+    let value = null;
+    if (change) value = snapSteps(steps + change);
+    else if (event.key === 'Home') value = DIAL.min;
+    else if (event.key === 'End') value = DIAL.max;
+    if (value === null) return;
+    event.preventDefault();
+    setTrainSteps(value);
+  });
 
   // The wandb choice says what "automatic" does with the account of Settings, and points there.
   function renderWandbChoice() {
@@ -2504,22 +2740,22 @@
   });
 
   // -- appearance --------------------------------------------------------------------------------
-  // 'light' or 'dark' sets <html data-theme>; 'auto' removes it and the CSS follows the system.
+  // Dark (the default) removes <html data-theme>; 'light' sets it, 'auto' sets it and the CSS follows the system.
   // Kept in this browser only; the <head> of the page applies it before the first paint.
   const THEME_KEY = 'distill-theme';
   function storedTheme() {
     try {
       const value = localStorage.getItem(THEME_KEY);
-      return value === 'light' || value === 'dark' ? value : 'auto';
+      return value === 'light' || value === 'auto' ? value : 'dark';
     } catch (error) {
-      return 'auto';
+      return 'dark';
     }
   }
   function applyTheme(choice) {
-    if (choice === 'light' || choice === 'dark') document.documentElement.dataset.theme = choice;
+    if (choice === 'light' || choice === 'auto') document.documentElement.dataset.theme = choice;
     else delete document.documentElement.dataset.theme;
     try {
-      if (choice === 'light' || choice === 'dark') localStorage.setItem(THEME_KEY, choice);
+      if (choice === 'light' || choice === 'auto') localStorage.setItem(THEME_KEY, choice);
       else localStorage.removeItem(THEME_KEY);
     } catch (error) {
       // Storage blocked (private window): the choice lasts until the page is closed.
