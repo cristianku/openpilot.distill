@@ -112,15 +112,32 @@ class SelfAttention(nn.Module):
         query, key, value = qkv.unbind(0)
         query = self.q_norm(query)
         key = self.k_norm(key)
-        x = F.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            dropout_p=self.dropout if self.training else 0.0,
-            is_causal=self.causal,
-        )
+        if torch.onnx.is_in_onnx_export():
+            x = self._exported_attention(query, key, value)
+        else:
+            x = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                dropout_p=self.dropout if self.training else 0.0,
+                is_causal=self.causal,
+            )
         x = rearrange(x, "b h n d -> b n (h d)")
         return self.proj_dropout(self.proj(x))
+
+
+    def _exported_attention(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        """The same attention as SDPA (scale 1/sqrt(head_dim), same causal mask), written out for the ONNX
+        export: the exporter's SDPA moves the scores to float32 and never comes back, which breaks a
+        float16 graph (helpers/export_onnx.py). Here the softmax runs in float32, for its stability, and
+        the result returns to the type of the network."""
+        scores = torch.matmul(query, key.transpose(-2, -1)) * (self.head_dim ** -0.5)
+        if self.causal:
+            size = scores.shape[-1]
+            future = torch.ones(size, size, dtype=torch.bool, device=scores.device).triu(1)
+            scores = scores.masked_fill(future, torch.finfo(scores.dtype).min)
+        weights = scores.float().softmax(dim=-1).to(value.dtype)
+        return torch.matmul(weights, value)
 
 
 class TransformerBlock(nn.Module):

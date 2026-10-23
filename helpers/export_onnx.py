@@ -15,6 +15,15 @@ the layout from the "output_slices" metadata and the parser expects the same nam
 --reference: the original driving_supercombo.onnx of the comma; only its inputs and output_slices are
              read, so the export follows the openpilot version that runs on the comma.
 --no-check: skips the check (onnxruntime on random frames vs the trained model run as in training).
+--fp32: weights and computation in float32 (the default is float16, like the comma's original model).
+
+Precision: by default the network runs in float16, as openpilot's own driving_supercombo.onnx does
+(half weights, the inputs cast to half at the start, the outputs cast back to float32): the comma's GPU
+moves half the bytes and the inputs and outputs keep the types modeld feeds and reads (uint8 frames,
+float32 desire, traffic convention, action and the feature queue). The comma's tinygrad (FLOAT16=1 in the
+openpilot build) already keeps the convolutions and the matrix products in half; float16 here also
+halves the rest of the network (LayerNorm, attention, GELU, the transposes). The check compares the
+float16 export with the float32 model, so the error it prints is the one the precision costs.
 
 Desire (lane change) is always 0: training only saw desire 0 ("TODO: desire not supported" in
 supervised/dataset.py), so the model gets 0 here too and does not do lane changes.
@@ -22,6 +31,7 @@ supervised/dataset.py), so the model gets 0 here too and does not do lane change
 
 import argparse
 import base64
+import copy
 import os
 import pickle
 import warnings
@@ -42,6 +52,9 @@ CAMERA_INPUTS = (ModelInputs.IMG, ModelInputs.BIG_IMG)
 # Inputs that modeld writes itself every frame; everything else must be a state.
 DEVICE_INPUTS = ("new_img", "desire", "traffic_convention", "action_t")
 CHECK_FRAMES = 40
+# Largest error of an output allowed by the check, relative to the largest value of that output: float32
+# only differs by rounding, float16 by its 11-bit mantissa through the whole network.
+TOLERANCE = {torch.float32: 1e-3, torch.float16: 3e-2}
 
 
 def read_reference(path: Path) -> tuple[dict[str, list[int]], dict[str, str], int]:
@@ -96,9 +109,12 @@ def output_layout(output_slices: dict[str, slice], output_size: int) -> list[tup
 class OnDeviceSupercombo(nn.Module):
     """The student with the one-frame-at-a-time interface of openpilot's modeld."""
 
-    def __init__(self, model: Supercombo, frame_skip: int, layout: list[tuple[int, int, str]]) -> None:
+    def __init__(self, model: Supercombo, frame_skip: int, layout: list[tuple[int, int, str]],
+                 dtype: torch.dtype = torch.float32) -> None:
         super().__init__()
         self.model = model
+        # The type the network computes in; the inputs and outputs keep openpilot's types.
+        self.dtype = dtype
         self.frame_skip = frame_skip
         self.layout = layout
         config = model.config
@@ -135,33 +151,37 @@ class OnDeviceSupercombo(nn.Module):
                 else:
                     frames.append(state_img_q[camera, self.img_queue_len + offset])
             vision_inputs[input_name] = torch.cat(frames, dim=0)[None]
+        # The vision casts the uint8 frames to the type of its weights.
         current = self.model.vision(vision_inputs)[0]
 
-        # History: frames t-32, t-28, ..., t-4 from the queue, then the current one.
+        # History: frames t-32, t-28, ..., t-4 from the queue, then the current one. The queue stays
+        # float32 between frames, as in the original model.
+        history = state_feat_q.to(self.dtype)
         steps = []
         for step in range(self.history_len - 1):
-            steps.append(state_feat_q[step * self.frame_skip])
+            steps.append(history[step * self.frame_skip])
         steps.append(current)
         features = torch.stack(steps)[None]
 
         # Desire always 0 like in training; "+ desire.sum() * 0" only keeps the input in the graph,
         # modeld writes it every frame.
-        desire_pulse = torch.zeros(1, self.temporal_len, self.desire_dim) + desire.sum() * 0
-        traffic = traffic_convention.reshape(1, 1, -1)
-        action = action_t.reshape(1, 1, -1)
+        desire_pulse = torch.zeros(1, self.temporal_len, self.desire_dim, dtype=self.dtype) \
+            + desire.sum().to(self.dtype) * 0
+        traffic = traffic_convention.reshape(1, 1, -1).to(self.dtype)
+        action = action_t.reshape(1, 1, -1).to(self.dtype)
 
         outputs = {}
         for name in self.policy_names:
             policy_outputs = getattr(self.model, name)(features, desire_pulse, traffic, action)
             for output_name, value in policy_outputs.items():
-                outputs[output_name] = value[:, -1]
+                outputs[output_name] = value[:, -1].float()
         # openpilot's driving_supercombo.onnx has room for 512 values of hidden_state: the 32 tokens
         # are averaged (the distill loss does the same with the old 084747c7 teacher; with the
         # queue-format teachers it compares the tokens one by one).
-        outputs["hidden_state"] = features[:, -1].mean(dim=1)
+        outputs["hidden_state"] = features[:, -1].mean(dim=1).float()
 
         next_state_img_q = torch.cat((state_img_q[:, 1:], new_img[:, None]), dim=1)
-        next_state_feat_q = torch.cat((state_feat_q[1:], current[None]), dim=0)
+        next_state_feat_q = torch.cat((state_feat_q[1:], current[None].float()), dim=0)
         return outputs, next_state_img_q, next_state_feat_q
 
     def forward(self, *inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -202,9 +222,10 @@ def example_inputs(wrapper: OnDeviceSupercombo, input_shapes: dict[str, list[int
     }
 
 
-def check(wrapper: OnDeviceSupercombo, path: Path, inputs: dict[str, torch.Tensor]) -> None:
+def check(wrapper: OnDeviceSupercombo, path: Path, inputs: dict[str, torch.Tensor],
+          reference_model: Supercombo) -> None:
     """Runs the exported model frame by frame with onnxruntime and compares the last frame with the
-    trained model run on the whole sequence, built as supervised/dataset.py does."""
+    trained model (float32) run on the whole sequence, built as supervised/dataset.py does."""
 
     import onnxruntime as ort
 
@@ -249,9 +270,11 @@ def check(wrapper: OnDeviceSupercombo, path: Path, inputs: dict[str, torch.Tenso
     dense[ModelInputs.TRAFFIC] = torch.from_numpy(np.tile(traffic.reshape(1, 1, -1), (1, temporal_len, 1)))
     dense[ModelInputs.ACTION_T] = torch.from_numpy(np.tile(action_t.reshape(1, 1, -1), (1, temporal_len, 1)))
     with torch.no_grad():
-        expected = wrapper.model(dense)
+        expected = reference_model(dense)
 
+    tolerance = TOLERANCE[wrapper.dtype]
     worst = 0.0
+    worst_name = ""
     for start, stop, name in wrapper.layout:
         if name == "pad":
             continue
@@ -261,11 +284,16 @@ def check(wrapper: OnDeviceSupercombo, path: Path, inputs: dict[str, torch.Tenso
             reference = expected[name][:, -1]
         got = packed[0, start:stop]
         reference = reference[0].float().numpy()
+        if not np.all(np.isfinite(got)):
+            raise SystemExit(f"check failed on '{name}': the export gives values that are not finite (overflow?)")
         error = float(np.max(np.abs(got - reference)) / (np.max(np.abs(reference)) + 1e-6))
-        worst = max(worst, error)
-        if error > 1e-3:
-            raise SystemExit(f"check failed on '{name}': relative error {error:.2e}")
-    print(f"check ok: {CHECK_FRAMES} frames with onnxruntime = trained model (max error {worst:.1e})")
+        if error > worst:
+            worst, worst_name = error, name
+        if error > tolerance:
+            raise SystemExit(f"check failed on '{name}': relative error {error:.2e} (allowed {tolerance:.0e})")
+    precision = "float16" if wrapper.dtype == torch.float16 else "float32"
+    print(f"check ok: {CHECK_FRAMES} frames with onnxruntime ({precision}) = trained model (max error {worst:.1e}"
+          f" on {worst_name}, allowed {tolerance:.0e})")
 
 
 def main() -> None:
@@ -274,6 +302,7 @@ def main() -> None:
     parser.add_argument("--reference", type=Path, required=True, help="original driving_supercombo.onnx of the comma")
     parser.add_argument("--output", type=Path, required=True, help="onnx to write")
     parser.add_argument("--no-check", action="store_true", help="skip the onnxruntime check")
+    parser.add_argument("--fp32", action="store_true", help="float32 weights and computation (default: float16)")
     args = parser.parse_args()
 
     input_shapes, metadata, output_size = read_reference(args.reference)
@@ -286,7 +315,9 @@ def main() -> None:
     model.eval()
 
     frame_skip = CAMERA_FPS // DatasetConfig(dataset_path="").fps
-    wrapper = OnDeviceSupercombo(model, frame_skip, layout).eval()
+    dtype = torch.float32 if args.fp32 else torch.float16
+    network = model if args.fp32 else copy.deepcopy(model).to(dtype)
+    wrapper = OnDeviceSupercombo(network, frame_skip, layout, dtype).eval()
     inputs = example_inputs(wrapper, input_shapes)
     names = list(inputs)
 
@@ -310,6 +341,9 @@ def main() -> None:
     entry.key = "output_slices"
     entry.value = metadata["output_slices"]
     entry = exported.metadata_props.add()
+    entry.key = "precision"
+    entry.value = "float32" if args.fp32 else "float16"
+    entry = exported.metadata_props.add()
     entry.key = "model_checkpoint"
     entry.value = str(args.checkpoint.resolve())
     onnx.checker.check_model(exported)
@@ -317,7 +351,7 @@ def main() -> None:
     print(f"{args.output}: {args.output.stat().st_size / 1e6:.1f} MB, input {names}")
 
     if not args.no_check:
-        check(wrapper, args.output, inputs)
+        check(wrapper, args.output, inputs, model)
 
 
 if __name__ == "__main__":
