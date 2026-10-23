@@ -174,18 +174,6 @@ fun Note(text: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant
         modifier = Modifier.fillMaxWidth())
 }
 
-/** The card that replaces a screen until the app is signed in on the site. */
-@Composable
-fun SignInCard(onSignIn: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
-        Text("Sign in first", fontSize = 28.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth())
-        Note("Sign in on the Website tab with the administrator of the site; this screen then works with your server.")
-        PrimaryAction("Sign in", "", onClick = onSignIn)
-    }
-}
-
 /** A confirmation dialog for what restarts the comma or uses the GPU for a long time. */
 @Composable
 fun Confirm(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {

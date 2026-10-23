@@ -1,9 +1,8 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- The brand mark of the site: two white strokes on blue. -->
-    <path android:fillColor="@color/site_accent" android:pathData="M0,0h108v108h-108z" />
-    <path android:fillColor="@android:color/transparent"
+    <!-- The brand mark of the site: two white strokes, inside the safe zone of an adaptive icon. -->
+    <path android:fillColor="#00000000"
         android:strokeColor="#FFFFFF" android:strokeWidth="8"
         android:strokeLineCap="round"
         android:pathData="M39,75 L47,33 M69,75 L61,33" />

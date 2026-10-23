@@ -225,7 +225,7 @@ class SignInTest(ServerTestCase):
                                       auth=False)
         self.assertEqual(response.status, 401)
         response, body = self.request('GET', '/api/auth/state', auth=False)
-        self.assertEqual(json.loads(body), {'configured': True, 'signed_in': False})
+        self.assertEqual(json.loads(body), {'configured': True, 'signed_in': False, 'api': 1})
 
     def test_sign_in_sets_a_strict_cookie(self):
         response, body = self.request('POST', '/api/auth/login',
@@ -376,7 +376,7 @@ class FirstVisitTest(ServerTestCase):
 
     def test_state_and_nothing_open(self):
         response, body = self.request('GET', '/api/auth/state', auth=False)
-        self.assertEqual(json.loads(body), {'configured': False, 'signed_in': False})
+        self.assertEqual(json.loads(body), {'configured': False, 'signed_in': False, 'api': 1})
         response, body = self.request('GET', '/api/status', auth=False)
         self.assertEqual(response.status, 401)
         response, body = self.setup_call('/api/auth/login', {'user': ADMIN, 'password': PASSWORD})
@@ -708,6 +708,77 @@ for _ in range(200):
         response, body = self.post('/api/comma/check', {})
         self.assertEqual(response.status, 200)
         self.assertTrue(json.loads(body)['comma']['reachable'])
+
+
+class AppApiTest(ServerTestCase):
+    """The API of Distill for Android (web/API.md): plain HTTP requests from the phone, with no Origin
+    or Sec-Fetch-Site header, a session cookie it keeps itself, and the fields it reads."""
+
+    def app_call(self, method, path, payload=None, cookie=None):
+        headers = {'Accept': 'application/json'}
+        body = None
+        if payload is not None:
+            headers['Content-Type'] = 'application/json'
+            body = json.dumps(payload).encode()
+        if cookie is not None:
+            headers['Cookie'] = cookie
+        response, raw = self.request(method, path, body, headers, auth=False)
+        return response, json.loads(raw)
+
+    def test_sign_in_work_and_sign_out_as_the_app(self):
+        response, state = self.app_call('GET', '/api/auth/state')
+        self.assertEqual((state['configured'], state['signed_in'], state['api']), (True, False, 1))
+        response, answer = self.app_call('GET', '/api/status')
+        self.assertEqual((response.status, answer['error']), (401, 'login_required'))
+        response, answer = self.app_call('POST', '/api/auth/login', {'user': ADMIN, 'password': 'wrong password'})
+        self.assertEqual((response.status, answer['message']), (401, web.auth.WRONG_LOGIN))
+        response, answer = self.app_call('POST', '/api/auth/login', {'user': ADMIN, 'password': PASSWORD})
+        self.assertEqual(response.status, 200)
+        cookie = response.getheader('Set-Cookie').split(';')[0]
+        response, state = self.app_call('GET', '/api/auth/state', cookie=cookie)
+        self.assertEqual((state['signed_in'], state['user'], state['api']), (True, ADMIN, 1))
+
+        # What the screens of the app read (DistillApi.kt).
+        response, status = self.app_call('GET', '/api/status', cookie=cookie)
+        self.assertEqual(response.status, 200)
+        for key in ('system', 'training', 'jobs', 'comma', 'actions', 'code'):
+            self.assertIn(key, status)
+        for key in ('cpu', 'memory', 'disk', 'gpus'):
+            self.assertIn(key, status['system'])
+        for action in ('train', 'eval', 'install', 'restore'):
+            self.assertEqual(set(status['actions'][action]) >= {'allowed', 'reason'}, True, action)
+        for key in ('reachable', 'onroad', 'bundle', 'bundle_default', 'backup', 'host', 'error', 'checked'):
+            self.assertIn(key, status['comma'])
+        response, runs = self.app_call('GET', '/api/runs', cookie=cookie)
+        for key in ('name', 'status', 'steps_done', 'steps_total', 'has_pt', 'has_training_pt', 'resumable', 'started',
+                    'config', 'last', 'avg_step_time'):
+            self.assertIn(key, runs['runs'][0])
+        response, results = self.app_call('GET', '/api/eval', cookie=cookie)
+        self.assertIsInstance(results['results'], list)
+        response, hf = self.app_call('GET', '/api/hf', cookie=cookie)
+        for key in ('ok', 'stable', 'models', 'error'):
+            self.assertIn(key, hf)
+
+        # Start, follow and stop a job; ask the comma.
+        write_task(self.repo, 'localize.py', 'import time\ntime.sleep(30)')
+        response, answer = self.app_call('POST', '/api/run/localize', {}, cookie=cookie)
+        self.assertEqual(response.status, 200, answer)
+        job = answer['job']
+        self.assertTrue(job['label'])
+        response, status = self.app_call('GET', '/api/status', cookie=cookie)
+        running = [item for item in status['jobs'] if item['id'] == job['id']]
+        self.assertEqual(running[0]['state'], 'running')
+        for key in ('label', 'summary', 'progress', 'stoppable'):
+            self.assertIn(key, running[0])
+        response, answer = self.app_call('POST', '/api/jobs/' + job['id'] + '/stop', {}, cookie=cookie)
+        self.assertEqual(response.status, 200, answer)
+        response, answer = self.app_call('POST', '/api/comma/check', {}, cookie=cookie)
+        self.assertTrue(answer['comma']['reachable'])
+
+        response, answer = self.app_call('POST', '/api/auth/logout', {}, cookie=cookie)
+        self.assertEqual(response.status, 200)
+        response, answer = self.app_call('GET', '/api/status', cookie=cookie)
+        self.assertEqual(response.status, 401)
 
 
 class VideoTest(ServerTestCase):

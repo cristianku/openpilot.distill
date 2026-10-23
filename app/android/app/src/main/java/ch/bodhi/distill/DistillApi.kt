@@ -45,22 +45,65 @@ data class EvalResult(val model: String, val avgMissM: Double, val date: Double?
 /** GET /api/hf: whether stable weights exist and which models are published. */
 data class HfState(val ok: Boolean, val stable: Boolean?, val models: List<String>, val error: String)
 
-/** The site answered 401: this app has not signed in yet (or the session ended). */
-class SignInNeeded : Exception("Sign in on the Website tab first.")
+/** The site answered 401: this app has not signed in yet (or the session ended), or a wrong name or
+ * password at sign-in (the message of the server). */
+class SignInNeeded(message: String = "Sign in first.") : Exception(message)
 
 /** The server refused a request and said why (its JSON "message"). */
 class ServerRefused(message: String) : Exception(message)
 
-/** The native calls use the session of the WebView: the cookie the site set when you signed in there.
- * POSTs carry no Origin and no Sec-Fetch-Site header, which the server accepts as same-origin. */
+/** GET /api/auth/state: whether the site has its administrator, whether this app is signed in, and the
+ * version of the API of the server (1 for the servers made before it was there). */
+data class ServerInfo(val configured: Boolean, val signedIn: Boolean, val api: Int) {
+    /** '' when this app can work with the server, otherwise what to update. */
+    val problem: String
+        get() = if (api > DistillApi.API_VERSION) "This server is newer than the app: update Distill for Android." else ""
+}
+
+/** The API of distill-web for the app (web/API.md in the repository): JSON over HTTP(S), the session in a
+ * cookie. The session is the one of the WebView: the cookie the server sets when the app signs in (the
+ * native sign-in or the site in the Website tab), kept by the CookieManager, so both are signed in together.
+ * POSTs carry no Origin and no Sec-Fetch-Site header, which the server accepts as same-origin.
+ * The address of [DemoServer] is answered inside the app. */
 object DistillApi {
-    /** True when the address answers like a Distill site (GET /api/auth/state works without a session). */
-    suspend fun probe(base: String): Boolean = withContext(Dispatchers.IO) {
+    /** The version of the API this app knows (API_VERSION in web/server.py). */
+    const val API_VERSION = 1
+
+    /** What a server answered: its JSON text, and the cookies it set (the sign-in sets the session). */
+    class Reply(val text: String, val cookies: List<String> = emptyList())
+
+    /** The state of the site when the address answers like a Distill site (GET /api/auth/state works
+     * without a session), null otherwise. */
+    suspend fun probe(base: String): ServerInfo? = withContext(Dispatchers.IO) {
         try {
-            val state = JSONObject(request(base, "GET", "/api/auth/state", null, null))
-            state.has("configured") && state.has("signed_in")
+            parseInfo(JSONObject(request(base, "GET", "/api/auth/state", cookie(base), null).text))
         } catch (_: Exception) {
-            false
+            null
+        }
+    }
+
+    internal fun parseInfo(state: JSONObject): ServerInfo? {
+        if (!state.has("configured") || !state.has("signed_in")) return null
+        return ServerInfo(state.optBoolean("configured"), state.optBoolean("signed_in"), state.optInt("api", 1))
+    }
+
+    /** POST /api/auth/login with the administrator of the site; the session cookie goes to the WebView
+     * too. Throws with the reason of the server (wrong name or password, too many attempts). */
+    suspend fun signIn(base: String, user: String, password: String) {
+        val reply = withContext(Dispatchers.IO) {
+            request(base, "POST", "/api/auth/login", null, JSONObject().put("user", user).put("password", password))
+        }
+        if (reply.cookies.isEmpty()) throw ServerRefused("The server did not open a session.")
+        val cookies = CookieManager.getInstance()
+        reply.cookies.forEach { cookies.setCookie(base, it) }
+        cookies.flush()
+    }
+
+    /** POST /api/auth/logout: ends the session on the server too; the caller erases the cookies. */
+    suspend fun signOut(base: String) {
+        try {
+            call(base, "POST", "/api/auth/logout", JSONObject()) { }
+        } catch (_: Exception) {
         }
     }
 
@@ -109,13 +152,16 @@ object DistillApi {
 
     private val NAME_RE = Regex("^[a-z0-9_]+$")
 
+    private fun cookie(base: String): String? = CookieManager.getInstance().getCookie(base)
+
     private suspend fun <T> call(base: String, method: String, path: String, body: JSONObject? = null,
                                  parse: (String) -> T): T {
-        val cookie = CookieManager.getInstance().getCookie(base)
-        return withContext(Dispatchers.IO) { parse(request(base, method, path, cookie, body)) }
+        val cookie = cookie(base)
+        return withContext(Dispatchers.IO) { parse(request(base, method, path, cookie, body).text) }
     }
 
-    private fun request(base: String, method: String, path: String, cookie: String?, body: JSONObject?): String {
+    private fun request(base: String, method: String, path: String, cookie: String?, body: JSONObject?): Reply {
+        if (base == DemoServer.BASE) return DemoServer.answer(method, path, cookie, body)
         val connection = (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 10_000
@@ -134,13 +180,16 @@ object DistillApi {
                 connection.outputStream.use { it.write(bytes) }
             }
             val status = connection.responseCode
-            if (status == 200) return connection.inputStream.bufferedReader().use { it.readText() }
-            if (status == 401) throw SignInNeeded()
+            if (status == 200) {
+                val text = connection.inputStream.bufferedReader().use { it.readText() }
+                return Reply(text, connection.headerFields["Set-Cookie"].orEmpty())
+            }
             val message = try {
                 JSONObject(connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "").optString("message")
             } catch (_: Exception) {
                 ""
             }
+            if (status == 401) throw if (message.isBlank()) SignInNeeded() else SignInNeeded(message)
             throw ServerRefused(message.ifBlank { "The server answered HTTP $status." })
         } finally {
             connection.disconnect()

@@ -4,10 +4,13 @@ import android.content.Context
 import java.net.URI
 import java.security.KeyStore
 
-/** The server this app talks to. Signing in happens on the site itself (its administrator page): the
- * session cookie lives in the WebView cookie store, never in these preferences. */
+/** The server this app talks to. The app signs in with the administrator of the site (natively or on the
+ * site): the session cookie lives in the WebView cookie store, never in these preferences. */
 data class Connection(val url: String = "", val allowHttp: Boolean = false, val connected: Boolean = false) {
     val base: String? get() = ServerAddress.parse(url, allowHttp)
+
+    /** The server inside the app ([DemoServer]). */
+    val demo: Boolean get() = url == DemoServer.BASE
 }
 
 object ServerAddress {
@@ -28,6 +31,11 @@ object ServerAddress {
     } catch (_: Exception) {
         null
     }
+
+    /** What the address field gives: "demo" is the server inside the app ([DemoServer]). */
+    fun connection(input: String, allowHttp: Boolean): Connection =
+        if (input.trim().equals(DemoServer.ADDRESS, ignoreCase = true)) Connection(DemoServer.BASE, false, true)
+        else Connection(fromPasted(input), allowHttp, true)
 
     /** What people paste, the address of a page of the site (#status, /?token=… of an old link), reduced
      * to the server. User info is kept, so parse() still refuses it. */

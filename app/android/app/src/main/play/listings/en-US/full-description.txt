@@ -1,0 +1,19 @@
+Distill is the companion app of distill-web, the control site of openpilot.distill: an open-source project that trains smaller, faster driving models for comma devices, learning from the big openpilot model and from your own drives.
+
+The app works with your own Distill server, at the address you enter, and lets you follow and drive the work from the phone:
+
+• Overview: GPU, CPU, memory and disk of the server, the jobs running with their progress, the training in progress and the state of your comma. Stop a job with one tap.
+• Train: start a new model, continue from the stable model or resume a run that stopped; choose how long to train and see how much time it takes on your server.
+• Evaluate: test a model on the drives it never saw and compare it with the model of your comma.
+• Comma: install a finished model on your comma, after a checklist (reachable, parked, models menu), or put the original model back.
+• Website: the whole distill-web site, signed in with the same session.
+
+Every action goes through the API of your server, which checks it exactly as it checks the site: a button is enabled only when the server allows it, and says why not otherwise.
+
+What you need: a Distill server (the free installer is at github.com/cristianku/openpilot.distill) that the phone can reach: on your own network, through a VPN or behind HTTPS. You sign in with the administrator of your site; the app keeps only the session, never the password.
+
+No server yet? Type "demo" as the server address to try the app with made-up data.
+
+Privacy: the app talks only to the server you enter. No account with us, no analytics, no ads, no tracking.
+
+Distill is an independent open-source project. It is not affiliated with or endorsed by comma.ai.

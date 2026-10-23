@@ -2,9 +2,12 @@ package ch.bodhi.distill
 
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.WebStorage
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,11 +15,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -84,6 +92,9 @@ private enum class Tab(val label: String) { OVERVIEW("Overview"), TRAIN("Train")
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Edge to edge, as Android 15 and later draw every app; light icons on the navy of the site.
+        enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         val storage = ConnectionSettings(applicationContext)
         setContent {
             MaterialTheme(colorScheme = SiteColors) {
@@ -98,7 +109,7 @@ private fun DistillScreen(storage: ConnectionSettings) {
     val context = LocalContext.current
     val webView = remember { siteWebView(context) }
     var connection by remember { mutableStateOf(storage.load()) }
-    var tab by remember { mutableStateOf(Tab.WEBSITE) }
+    var tab by remember { mutableStateOf(Tab.OVERVIEW) }
     var serverSettings by remember { mutableStateOf(false) }
     val base = connection.base
     if (!connection.connected || base == null) {
@@ -108,8 +119,8 @@ private fun DistillScreen(storage: ConnectionSettings) {
             onSave = {
                 storage.save(it)
                 connection = storage.load()
-                // Next: sign in with the administrator of the site, on the site itself.
-                tab = Tab.WEBSITE
+                // Next: the sign-in, in place of Overview until the app has a session.
+                tab = Tab.OVERVIEW
             },
             onDisconnect = {}
         )
@@ -146,16 +157,22 @@ private fun DistillScreen(storage: ConnectionSettings) {
                 storage.save(it)
                 connection = storage.load()
                 serverSettings = false
-                tab = Tab.WEBSITE
+                tab = Tab.OVERVIEW
             },
             onDisconnect = {
-                storage.disconnect()
-                CookieManager.getInstance().removeAllCookies(null)
-                CookieManager.getInstance().flush()
-                webView.loadUrl("about:blank")
-                webView.clearHistory()
-                serverSettings = false
-                connection = storage.load()
+                scope.launch {
+                    // The session ends on the server too, then nothing of it stays on the phone.
+                    DistillApi.signOut(base)
+                    storage.disconnect()
+                    CookieManager.getInstance().removeAllCookies(null)
+                    CookieManager.getInstance().flush()
+                    WebStorage.getInstance().deleteAllData()
+                    webView.loadUrl("about:blank")
+                    webView.clearHistory()
+                    webView.clearCache(true)
+                    serverSettings = false
+                    connection = storage.load()
+                }
             },
             onClose = { serverSettings = false }
         )
@@ -185,9 +202,15 @@ private fun DistillScreen(storage: ConnectionSettings) {
             }
         }
     ) { padding ->
-        val screen = Modifier.fillMaxSize().padding(padding)
+        val screen = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
         if (tab != Tab.WEBSITE && data.signInNeeded) {
-            Box(screen) { SignInCard(onSignIn = { tab = Tab.WEBSITE }) }
+            Box(screen) {
+                SignInScreen(base, onSignedIn = {
+                    // The site in the Website tab shows its sign-in page: open it again with the new session.
+                    if (!connection.demo) webView.loadUrl("$base/")
+                    scope.launch { data.refreshStatus() }
+                }, onWebsite = { tab = Tab.WEBSITE })
+            }
             return@Scaffold
         }
         when (tab) {
@@ -195,7 +218,7 @@ private fun DistillScreen(storage: ConnectionSettings) {
             Tab.TRAIN -> Box(screen) { TrainScreen(data, onStarted) }
             Tab.EVALUATE -> Box(screen) { EvaluateScreen(data, onStarted) }
             Tab.COMMA -> Box(screen) { CommaScreen(data, onStarted) }
-            Tab.WEBSITE -> Portal(connection, webView, screen)
+            Tab.WEBSITE -> if (connection.demo) DemoWebsite(screen) else Portal(connection, webView, screen)
         }
     }
 }
@@ -203,16 +226,17 @@ private fun DistillScreen(storage: ConnectionSettings) {
 @Composable
 private fun ConnectionForm(initial: Connection, isEditing: Boolean,
                            onSave: (Connection) -> Unit, onDisconnect: () -> Unit, onClose: (() -> Unit)? = null) {
-    var url by remember(initial.url) { mutableStateOf(initial.url) }
+    var url by remember(initial.url) { mutableStateOf(if (initial.demo) DemoServer.ADDRESS else initial.url) }
     var allowHttp by remember(initial.allowHttp) { mutableStateOf(initial.allowHttp) }
     var checking by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val target = Connection(ServerAddress.fromPasted(url), allowHttp, true)
+    val target = ServerAddress.connection(url, allowHttp)
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         onClose?.let { close ->
             item {
@@ -225,7 +249,7 @@ private fun ConnectionForm(initial: Connection, isEditing: Boolean,
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
             Text("The address you open distill-web at, for example http://192.168.1.10:8766. Then you sign in "
-                + "with the administrator of the site, as in the browser.",
+                + "with the administrator of the site, as in the browser. No server yet? Type demo to try the app.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth())
         }
@@ -260,9 +284,13 @@ private fun ConnectionForm(initial: Connection, isEditing: Boolean,
                     val base = target.base ?: return@Button
                     checking = true
                     scope.launch {
-                        val ok = DistillApi.probe(base)
+                        val info = DistillApi.probe(base)
                         checking = false
-                        if (ok) onSave(target) else problem = "No Distill site answers at $base."
+                        when {
+                            info == null -> problem = "No Distill site answers at $base."
+                            info.problem.isNotEmpty() -> problem = info.problem
+                            else -> onSave(target)
+                        }
                     }
                 },
                 enabled = target.base != null && !checking,

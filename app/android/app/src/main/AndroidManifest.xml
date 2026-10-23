@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The only permission: the app talks to the distill-web server you enter, nothing else. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Plain HTTP is allowed for a server on your own network or VPN, only after the switch in the app.
+         No backup: the session of the server stays on this phone. -->
     <application
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="true"
         android:label="@string/app_name"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
         android:theme="@style/Theme.Distill">
         <activity
             android:name=".MainActivity"

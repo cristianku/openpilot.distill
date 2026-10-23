@@ -1,0 +1,1 @@
+Distill on Google Play: sign in with the administrator of your site right in the app, try it without a server with the demo (server address "demo"), Android 16 support.

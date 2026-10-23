@@ -70,6 +70,10 @@ AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', 
 BUNDLE_REASON = ('a model is chosen in the Models menu of the comma: set it back to Default on the comma screen '
                  '(Settings > Models) and check again')
 LOGIN_MESSAGE = 'Sign in first.'
+# The version of the API that Distill for Android uses (web/API.md), in GET /api/auth/state. Adding a
+# field or an endpoint keeps it; a change that would break an installed app (a field removed or renamed,
+# another meaning) raises it, and an app that does not know the new number asks for its own update.
+API_VERSION = 1
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 # POST /api/settings/...: (account or 'site', what to do).
 SETTINGS_ROUTES = {
@@ -608,7 +612,7 @@ def make_handler(app: App):
             self._problem(401, 'login_required', LOGIN_MESSAGE, api)
 
         def _auth_state(self, signed_in):
-            state = {'configured': app.auth.configured(), 'signed_in': signed_in}
+            state = {'configured': app.auth.configured(), 'signed_in': signed_in, 'api': API_VERSION}
             if signed_in:
                 state['user'] = app.auth.username()
                 state['sessions'] = app.auth.sessions_count()
