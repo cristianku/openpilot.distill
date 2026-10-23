@@ -4,7 +4,8 @@
 # what is already there and only does what is missing.
 #
 #   1. system packages: git, curl, ca-certificates, openssh-client, rsync, util-linux (flock),
-#      iproute2, procps, unzip (apt-get, only the missing ones)
+#      iproute2, procps, unzip, ffmpeg (video index, comparison videos, the perception audits; apt-get,
+#      only the missing ones)
 #   2. uv (the Python package manager, https://docs.astral.sh/uv/) in ~/.local/bin, when missing
 #   3. the GPU: a Tesla V100 (Volta, compute capability 7.0) needs the CUDA 12 builds, so
 #      DISTILL_UV_EXTRA=v100 is written in the .env of this clone (permissions 600, outside git);
@@ -31,7 +32,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ENV="$ROOT/.env"
-PACKAGES=(git curl ca-certificates openssh-client rsync util-linux iproute2 procps unzip)
+PACKAGES=(git curl ca-certificates openssh-client rsync util-linux iproute2 procps unzip ffmpeg)
 # Jobs that run Python from .venv: uv sync must not change the packages under them.
 BUSY_PATTERN='supervised[.]train|helpers/(fetch_comma_segments|localize_segments|export_onnx|publish_model|install_model_on_comma|compare_video|eval_holdout|train_supervised)[.]sh|localizer[.]run|evaluation[.](compare|holdout)|helpers[.]export_onnx'
 
