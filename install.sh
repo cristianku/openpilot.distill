@@ -4,7 +4,7 @@
 # what is already there and only does what is missing.
 #
 #   1. system packages: git, curl, ca-certificates, openssh-client, rsync, util-linux (flock),
-#      iproute2, procps (apt-get, only the missing ones)
+#      iproute2, procps, unzip (apt-get, only the missing ones)
 #   2. uv (the Python package manager, https://docs.astral.sh/uv/) in ~/.local/bin, when missing
 #   3. the GPU: a Tesla V100 (Volta, compute capability 7.0) needs the CUDA 12 builds, so
 #      DISTILL_UV_EXTRA=v100 is written in the .env of this clone (permissions 600, outside git);
@@ -12,13 +12,18 @@
 #   4. the Python environment: the submodules when the clone was made without them
 #      (perception_repo), then uv sync --locked (with the extra of step 3); uv also downloads
 #      the right Python. Refused while a job of this clone runs (it would change packages under it)
-#   5. the control site as the systemd service distill-web (deploy/install_web_service.sh):
+#   5. the Android app (helpers/build_android.sh): its build tools in /opt/android, the signing key of
+#      this server in ~/.config/distill-android (made once, never in git), then the APK the site
+#      offers in Settings › Distill for Android. A failure (no network, not x86_64) is only a
+#      warning: the site does not need the app
+#   6. the control site as the systemd service distill-web (deploy/install_web_service.sh):
 #      started now and at every boot on port 8766; it prints the address and, until the
 #      administrator exists, the setup code to create it on the first visit
 #
-# Usage: sudo ./install.sh [--dry-run] [--no-service] [--help]
+# Usage: sudo ./install.sh [--dry-run] [--no-android] [--no-service] [--help]
 #   --dry-run      show what would be done, change nothing (no root needed)
-#   --no-service   stop after step 4 (start the site by hand with helpers/web.sh)
+#   --no-android   skip step 5 (no Android app on this server)
+#   --no-service   stop after step 5 (start the site by hand with helpers/web.sh)
 # Then open the printed address from the PC or the phone: everything else (Hugging Face, W&B,
 # the comma address) is set from the Settings page of the site.
 
@@ -26,12 +31,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ENV="$ROOT/.env"
-PACKAGES=(git curl ca-certificates openssh-client rsync util-linux iproute2 procps)
+PACKAGES=(git curl ca-certificates openssh-client rsync util-linux iproute2 procps unzip)
 # Jobs that run Python from .venv: uv sync must not change the packages under them.
 BUSY_PATTERN='supervised[.]train|helpers/(fetch_comma_segments|localize_segments|export_onnx|publish_model|install_model_on_comma|compare_video|eval_holdout|train_supervised)[.]sh|localizer[.]run|evaluation[.](compare|holdout)|helpers[.]export_onnx'
 
 DRY_RUN=0
 SERVICE=1
+ANDROID=1
 
 say() { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -46,6 +52,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
     --no-service) SERVICE=0 ;;
+    --no-android) ANDROID=0 ;;
     -h|--help) usage ;;
     *) die "invalid option: $1 (see --help)" ;;
   esac
@@ -188,8 +195,21 @@ else
   say "environment ready: $ROOT/.venv"
 fi
 
-# -- 5. site ----------------------------------------------------------------------------------------
-step "5. control site"
+# -- 5. Android app ---------------------------------------------------------------------------------
+step "5. Android app (tools, signing key, APK)"
+if [ "$ANDROID" -eq 0 ]; then
+  say "skipped (--no-android)"
+elif [ "$DRY_RUN" -eq 1 ]; then
+  say "[dry run] $ROOT/helpers/build_android.sh"
+elif "$ROOT/helpers/build_android.sh"; then
+  say "Android app ready: Settings › Distill for Android on the site"
+else
+  say "WARNING: the Android app was not built (above). The site works without it; run the installer again,"
+  say "or helpers/build_android.sh, to retry."
+fi
+
+# -- 6. site ----------------------------------------------------------------------------------------
+step "6. control site"
 if [ "$SERVICE" -eq 0 ]; then
   say "skipped (--no-service): start it with  helpers/web.sh"
   exit 0

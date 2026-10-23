@@ -20,7 +20,7 @@ cd openpilot.distill
 sudo ./install.sh            # --dry-run to only see what it would do
 ```
 
-It installs the missing system packages and [`uv`](https://docs.astral.sh/uv/), picks the right PyTorch build for the GPU (a Tesla V100 gets the CUDA 12 `v100` extra), creates the Python environment and starts the control site as the `distill-web` systemd service (port 8766, started at every boot). It is safe to run again. At the end it prints the address to open and, until the administrator exists, the setup code: the first visit creates the administrator (name and password); Hugging Face, Weights & Biases and the comma address are then set from the Settings page.
+It installs the missing system packages and [`uv`](https://docs.astral.sh/uv/), picks the right PyTorch build for the GPU (a Tesla V100 gets the CUDA 12 `v100` extra), creates the Python environment, builds the Android app (its tools in `/opt/android`, a signing key made for this server in `~/.config/distill-android`, the APK offered in Settings › Distill for Android; `--no-android` skips it) and starts the control site as the `distill-web` systemd service (port 8766, started at every boot). It is safe to run again. At the end it prints the address to open and, until the administrator exists, the setup code: the first visit creates the administrator (name and password); Hugging Face, Weights & Biases and the comma address are then set from the Settings page.
 
 ## Get started and find the helpers
 

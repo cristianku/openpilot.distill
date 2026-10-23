@@ -10,7 +10,9 @@
      (perception_repo, openpilot.perception) go to the commit the new code records.
   2. uv sync --locked, with --extra DISTILL_UV_EXTRA when the repo .env sets it (v100 on the Tesla
      V100 server). --locked: uv.lock is used as it is and never rewritten.
-  3. with the systemd service distill-web installed: restarts it, so the site runs the new code. The
+  3. the Android app (helpers/build_android.sh), when the update changed app/android or its build, or
+     the server has none yet: the site then offers the new APK. A failure is only a warning.
+  4. with the systemd service distill-web installed: restarts it, so the site runs the new code. The
      jobs started from the site keep running (KillMode=process in the unit).
 """
 from __future__ import annotations
@@ -37,7 +39,10 @@ BUSY_JOBS = (
     (re.compile(r'helpers[.]export_onnx|tasks[.]export\b|helpers/export_onnx[.]sh'), 'an ONNX export'),
     (re.compile(r'tasks[.]publish\b|helpers/publish_model[.]sh'), 'a publication'),
     (re.compile(r'tasks[.]install\b|helpers/install_model_on_comma[.]sh'), 'an installation on the comma'),
+    (re.compile(r'helpers/build_android[.]sh'), 'a build of the Android app'),
 )
+# What the Android app is built from: a change there means a new APK.
+ANDROID_SOURCES = ('app/android/', 'helpers/build_android.sh')
 
 
 def busy_jobs() -> list[str]:
@@ -135,15 +140,26 @@ def main() -> int:
         raise TaskError('package update failed: the code is updated but the packages are not '
                         '(uv.lock out of sync with pyproject.toml?)')
 
-    # 3. The web site.
+    # 3. The Android app.
+    changed = git('diff', '--name-only', before, after).splitlines() if before != after else []
+    never_built = not (REPO / 'outputs' / 'android' / 'latest.json').is_file()
+    if any(name.startswith(ANDROID_SOURCES) for name in changed) or never_built:
+        say('== 3. building the Android app' + (' (none on this server yet)' if never_built else ''))
+        build = subprocess.run([str(REPO / 'helpers' / 'build_android.sh')], cwd=REPO, stdin=subprocess.DEVNULL)
+        if build.returncode != 0:
+            say('WARNING: the Android app was not built (above); the site works without it')
+    else:
+        say('== 3. the Android app did not change')
+
+    # 4. The web site.
     if not service_installed():
-        say('== 3. the site does not run as a service: restart it to use the new code')
+        say('== 4. the site does not run as a service: restart it to use the new code')
         say('Done.')
         return 0
     if before != after and any(name.startswith('deploy/') for name in git('diff', '--name-only', before, after)
                                .splitlines()):
         say('WARNING: the service file changed (deploy/): reinstall it to use it')
-    say('== 3. restarting the site')
+    say('== 4. restarting the site')
     subprocess.run(['systemctl', 'restart', SERVICE], stdin=subprocess.DEVNULL, check=False)
     time.sleep(2)
     active = subprocess.run(['systemctl', 'is-active', '--quiet', SERVICE], stdin=subprocess.DEVNULL).returncode == 0

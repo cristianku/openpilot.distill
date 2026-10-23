@@ -9,8 +9,9 @@ car directly.
 
 Two ways, the same app:
 
-- **From your server**: `helpers/build_android.sh` builds it on the server; open distill-web on the phone,
-  Settings › Distill for Android › Download the app.
+- **From your server**: `install.sh` builds it when it installs the server, and the code update of the
+  site builds it again when `app/android` changes; open distill-web on the phone, Settings › Distill for
+  Android › Download the app.
 - **From GitHub**: every change to `app/android/` on `master` is built by GitHub Actions
   ([`.github/workflows/android.yml`](../../.github/workflows/android.yml)) and published as a release
   `android-v0.3.<commits>` with `distill-android-0.3.<commits>.apk`.
@@ -53,10 +54,12 @@ On the server, without GitHub:
 helpers/build_android.sh
 ```
 
-runs the unit tests, builds the release APK into `outputs/android/` (the last 3 are kept) and signs it
-with the key in `~/.config/distill-android/` when it is there. It needs JDK 17, Android SDK platform 35
-and build-tools 35 and Gradle 8.9 in `/opt/android` (or `DISTILL_ANDROID_TOOLS`); no wrapper jar is
-committed. By hand: `gradle :app:testDebugUnitTest :app:assembleDebug` in `app/android`.
+sets up what is missing (JDK 17, Android SDK platform 35 and build-tools 35, Gradle 8.9 in `/opt/android`
+or `DISTILL_ANDROID_TOOLS`; the signing key of the server in `~/.config/distill-android/` or
+`DISTILL_ANDROID_KEYS`), runs the unit tests and builds the release APK into `outputs/android/` (the last 3
+are kept). `--setup-only` stops before the build. `install.sh` (step 5) and the code update of the site run
+it, so a new server needs nothing by hand; x86_64 only, as the SDK build tools. No wrapper jar is
+committed; by hand: `gradle :app:testDebugUnitTest :app:assembleDebug` in `app/android`.
 
 ## Release signing
 
@@ -64,8 +67,8 @@ Android installs an update only when it is signed with the same key as the insta
 signing secrets, CI signs every build with a fresh debug key, so an update means uninstalling first. For
 updates that install over the previous version, add these repository secrets (GitHub › Settings ›
 Secrets and variables › Actions), and keep the same key in `~/.config/distill-android/` on the server
-for `helpers/build_android.sh` (`distill-release.p12` and one `ANDROID_*.txt` file per secret below). The
-key never goes into git:
+for `helpers/build_android.sh`: it makes that key on the first build (`distill-release.p12` and one
+`ANDROID_*.txt` file per secret below, so the secrets are a copy and paste). The key never goes into git:
 
 | Secret | Value |
 | --- | --- |
