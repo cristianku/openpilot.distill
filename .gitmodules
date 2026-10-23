@@ -1,0 +1,3 @@
+[submodule "perception_repo"]
+	path = perception_repo
+	url = https://github.com/cristianku/openpilot.perception.git

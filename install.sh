@@ -9,7 +9,8 @@
 #   3. the GPU: a Tesla V100 (Volta, compute capability 7.0) needs the CUDA 12 builds, so
 #      DISTILL_UV_EXTRA=v100 is written in the .env of this clone (permissions 600, outside git);
 #      a newer GPU uses the default stack; no GPU is only a warning (training needs one)
-#   4. the Python environment: uv sync --locked (with the extra of step 3); uv also downloads
+#   4. the Python environment: the submodules when the clone was made without them
+#      (perception_repo), then uv sync --locked (with the extra of step 3); uv also downloads
 #      the right Python. Refused while a job of this clone runs (it would change packages under it)
 #   5. the control site as the systemd service distill-web (deploy/install_web_service.sh):
 #      started now and at every boot on port 8766; it prints the address and, until the
@@ -164,6 +165,16 @@ busy="$(pgrep -a -f -- "$BUSY_PATTERN" || true)"
 if [ -n "$busy" ]; then
   say "$busy"
   die "a job of this clone is running (above): run the installer again when it has finished"
+fi
+if [ ! -e "$ROOT/perception_repo/.git" ]; then
+  say "downloading the submodules (perception_repo)"
+  # As the owner of the clone, so a later update from the site can change them.
+  owner="$(stat -c %U "$ROOT")"
+  as_owner=()
+  if [ "$(id -u)" -eq 0 ] && [ "$owner" != root ]; then
+    as_owner=(runuser -u "$owner" --)
+  fi
+  run "${as_owner[@]}" git -C "$ROOT" submodule update --init --recursive || die "git submodule update failed (above)"
 fi
 sync_command=(uv sync --locked)
 if [ -n "$extra" ]; then

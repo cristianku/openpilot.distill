@@ -6,7 +6,8 @@
      a localization, an export, a publication, an installation): the package sync would change the
      packages under it. The GPU lock is held until the update ends, so no GPU job starts meanwhile.
   1. git pull --ff-only of the current branch. Refuses when files of the repo are modified locally
-     (it lists them) or the branch has diverged: nothing is changed then.
+     (it lists them) or the branch has diverged: nothing is changed then. Then the submodules
+     (perception_repo, openpilot.perception) go to the commit the new code records.
   2. uv sync --locked, with --extra DISTILL_UV_EXTRA when the repo .env sets it (v100 on the Tesla
      V100 server). --locked: uv.lock is used as it is and never rewritten.
   3. with the systemd service distill-web installed: restarts it, so the site runs the new code. The
@@ -119,6 +120,10 @@ def main() -> int:
         say('Already up to date: ' + git('log', '--oneline', '-1'))
     else:
         say(git('log', '--oneline', before + '..' + after))
+    try:
+        git('submodule', 'update', '--init', '--recursive')
+    except TaskError as exc:
+        raise TaskError(str(exc) + ' (network?): the code is updated, its submodules are not') from None
 
     # 2. Packages of .venv.
     command = [uv, 'sync', '--locked']

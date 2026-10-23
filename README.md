@@ -15,7 +15,7 @@ You don't have a comma four, no problem! You can still download videos and label
 One command, from a fresh clone to the control site running:
 
 ```bash
-git clone https://github.com/cristianku/openpilot.distill.git
+git clone --recurse-submodules https://github.com/cristianku/openpilot.distill.git
 cd openpilot.distill
 sudo ./install.sh            # --dry-run to only see what it would do
 ```
@@ -27,7 +27,7 @@ It installs the missing system packages and [`uv`](https://docs.astral.sh/uv/), 
 Use [`uv`](https://docs.astral.sh/uv/) and Python **3.12.3 or newer, but below 3.13**, as specified in [`pyproject.toml`](pyproject.toml). From a clean checkout:
 
 ```bash
-git clone https://github.com/cristianku/openpilot.distill.git
+git clone --recurse-submodules https://github.com/cristianku/openpilot.distill.git
 cd openpilot.distill
 uv sync
 ```
@@ -46,6 +46,9 @@ This produces `frame_info.safetensors` (including the video byte-offset indices)
 | [`helpers/README.md`](helpers/README.md) | **Python video/calibration helpers**, function signatures, NVDEC requirements, runnable examples and troubleshooting. These are imports, not executable scripts. |
 | [`supervised/README.md`](supervised/README.md) | Download the ONNX teacher model and start supervised training with `uv run torchrun ...`. |
 | [`rl/README.md`](rl/README.md) | Start the world-model server and optional simulator/post-training workflows. |
+| [`perception_repo/`](https://github.com/cristianku/openpilot.perception) | Submodule [openpilot.perception](https://github.com/cristianku/openpilot.perception), imported as `perception`: independent spatial perception with metric labels from real sensors. Today: genuine PSA radar lead distance from `rlog.zst` (`uv run python -m perception.radar.psa data/<segment>/rlog.zst`). |
+
+A clone made without `--recurse-submodules` gets `perception_repo/` from `sudo ./install.sh`, or by hand with `git submodule update --init`; the code update from the site keeps it in step.
 
 The `supervised/dataset.py` loader already imports the functions in `helpers/video_helpers.py`; you do **not** run the helper module as a separate training stage. Training/video decoding requires a compatible NVIDIA GPU/driver (NVDEC), not just a Python virtual environment. For external data such as comma1M, follow the relevant dataset preparation steps; raw video alone is insufficient for the supervised loader.
 
