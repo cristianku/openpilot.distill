@@ -9,7 +9,7 @@ This repository is **training/experimentation code for driving-model distillatio
 - [`helpers/README.md`](helpers/README.md): how to **import and call** `helpers/video_helpers.py`, input shapes, video indices, NVDEC requirements and examples.
 - [`supervised/README.md`](supervised/README.md): download the pinned teacher and run supervised training.
 - [`rl/README.md`](rl/README.md): optional FastAPI world-model server and RL simulator.
-- [`perception_repo/`](https://github.com/cristianku/openpilot.perception) (submodule, imported through the `perception` link): independent 3D perception and real-sensor labels. Its PSA radar reader keeps only frames received on bus 1 (`src 1`); frames openpilot sent (`src 129/193`) come from the vision model and are never labels. See its `docs/psa-radar.md`.
+- [`perception_repo/`](https://github.com/cristianku/openpilot.perception) (submodule, imported through the `perception` link): independent 3D object perception. It reads the car's radar only from `carState` (`stockRadar*` fields), never from CAN, and stays vision-only when the schema or the log has none; no output goes to vehicle control. See its `docs/oem-radar-labels.md`.
 
 Use `uv sync` with Python `>=3.12.3,<3.13` (see `pyproject.toml`) from the repository root. The helper module is **not** a CLI; don't invent `helpers --help` or a helper executable. `decode_frames` requires a matching full-HEVC video/index pair and an NVIDIA NVDEC-capable GPU. Never fabricate missing timestamps/calibration or assume every comma recording is supported.
 
