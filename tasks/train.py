@@ -155,10 +155,13 @@ class RunLog:
 
     def __init__(self, path: Path):
         self.file = path.open('ab')
+        # The real stdout, taken now: sys.stdout is swapped for a TeeText over this log while the
+        # checks run, and writing through it would come back here.
+        self.out = sys.stdout.buffer
 
     def write(self, data: bytes) -> None:
-        sys.stdout.buffer.write(data)
-        sys.stdout.buffer.flush()
+        self.out.write(data)
+        self.out.flush()
         self.file.write(data)
         self.file.flush()
 

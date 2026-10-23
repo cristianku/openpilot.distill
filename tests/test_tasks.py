@@ -1,14 +1,16 @@
 """tasks/: the checks the training does before it starts, without GPU, network or a real training."""
 from __future__ import annotations
 
+import io
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import tasks.train as train_task
-from tasks.common import Gpu, TaskError, select_gpus
+from tasks.common import Gpu, TaskError, say, select_gpus
 from tasks.evaluation import uses_gpu
 from tasks.teacher import TEACHERS, teacher_of_file
 
@@ -143,6 +145,23 @@ class EvaluationTest(unittest.TestCase):
         self.assertTrue(uses_gpu(['--model=stock']))
         self.assertFalse(uses_gpu(['--model=stock', '--device=cpu']))
         self.assertFalse(uses_gpu(['--device', 'cpu']))
+
+
+
+class RunLogTest(unittest.TestCase):
+    def test_say_through_the_tee_reaches_stdout_and_the_log(self):
+        # The checks before a training print with sys.stdout swapped for a TeeText over the run log.
+        with tempfile.TemporaryDirectory() as folder:
+            stdout = io.TextIOWrapper(io.BytesIO(), encoding='utf-8')
+            with mock.patch.object(sys, 'stdout', stdout):
+                log = train_task.RunLog(Path(folder) / 'train.log')
+                sys.stdout = train_task.TeeText(log)
+                say('Teacher md-v3: ok (1 bytes).')
+                sys.stdout = stdout
+                log.say('Training started')
+                log.file.close()
+            self.assertEqual(stdout.buffer.getvalue(), b'Teacher md-v3: ok (1 bytes).\nTraining started\n')
+            self.assertEqual((Path(folder) / 'train.log').read_bytes(), stdout.buffer.getvalue())
 
 
 if __name__ == '__main__':
