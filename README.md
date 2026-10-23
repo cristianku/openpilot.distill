@@ -46,6 +46,7 @@ This produces `frame_info.safetensors` (including the video byte-offset indices)
 | [`helpers/README.md`](helpers/README.md) | **Python video/calibration helpers**, function signatures, NVDEC requirements, runnable examples and troubleshooting. These are imports, not executable scripts. |
 | [`supervised/README.md`](supervised/README.md) | Download the ONNX teacher model and start supervised training with `uv run torchrun ...`. |
 | [`rl/README.md`](rl/README.md) | Start the world-model server and optional simulator/post-training workflows. |
+| [`app/android/`](app/android/README.md) | **Distill for Android**: the companion app of the control site (the whole site, plus a native overview of the server). Built by GitHub Actions; the APK is in the [releases](https://github.com/cristianku/openpilot.distill/releases). |
 | [`perception_repo/`](https://github.com/cristianku/openpilot.perception) | Submodule [openpilot.perception](https://github.com/cristianku/openpilot.perception), imported as `perception`: independent 3D object perception, with the car's radar (logged in `carState`) as a depth label when the car port provides it, vision-only otherwise. `uv run python -m perception.dataset data/<segment>/rlog.zst` shows what a segment offers. |
 
 A clone made without `--recurse-submodules` gets `perception_repo/` from `sudo ./install.sh`, or by hand with `git submodule update --init`; the code update from the site keeps it in step.

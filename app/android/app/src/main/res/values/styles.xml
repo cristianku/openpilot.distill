@@ -1,0 +1,9 @@
+<resources>
+    <!-- The dark navy of the site, from the first frame. -->
+    <style name="Theme.Distill" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/site_background</item>
+        <item name="android:statusBarColor">@color/site_background</item>
+        <item name="android:navigationBarColor">@color/site_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -1,0 +1,5 @@
+<resources>
+    <color name="site_background">#0B0F16</color>
+    <color name="site_surface">#161B24</color>
+    <color name="site_accent">#2563EB</color>
+</resources>

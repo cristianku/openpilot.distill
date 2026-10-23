@@ -16,3 +16,9 @@ models/comma_driving_supercombo.onnx
 data_scartati/
 worldmodel-inspected/
 worldmodel-inspection.txt
+# Android app (app/android): build outputs and the local SDK path
+app/android/.gradle/
+app/android/.kotlin/
+app/android/build/
+app/android/app/build/
+app/android/local.properties
