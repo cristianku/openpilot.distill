@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- The blue of the site, darker at the bottom left (the g-blue gradient of web/static/index.html). -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="0" android:startY="108" android:endX="108" android:endY="0"
+                android:startColor="#1D4ED8" android:endColor="#3B82F6" />
+        </aapt:attr>
+    </path>
+</vector>

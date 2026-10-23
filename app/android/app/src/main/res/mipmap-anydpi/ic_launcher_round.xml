@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The icon of the app: the mark of the site on its blue; one colour for the themed icons of Android 13. -->
+<!-- The icon of the app: a road that ends in a drop, on the blue of the site; one colour for the themed
+     icons of Android 13 and later. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/site_accent" />
+    <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
     <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>

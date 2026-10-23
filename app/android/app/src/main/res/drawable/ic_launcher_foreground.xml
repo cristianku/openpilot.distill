@@ -1,9 +1,16 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- The brand mark of the site: two white strokes, inside the safe zone of an adaptive icon. -->
-    <path android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF" android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:pathData="M39,75 L47,33 M69,75 L61,33" />
+    <!-- A road in perspective, the mark of the site, that ends in a drop: the big model distilled into a
+         small one. Inside the safe zone of an adaptive icon; app/android/graphics.py draws the same shapes
+         for Google Play. -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="5.5"
+        android:strokeLineCap="round" android:pathData="M37,80 L49.5,51 M71,80 L58.5,51" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeAlpha="0.7"
+        android:strokeWidth="3.4" android:strokeLineCap="round" android:pathData="M54,76 L54,70" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeAlpha="0.7"
+        android:strokeWidth="2.8" android:strokeLineCap="round" android:pathData="M54,65.5 L54,61.5" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeAlpha="0.7"
+        android:strokeWidth="2.2" android:strokeLineCap="round" android:pathData="M54,57.5 L54,55.5" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,28.5 L58.33,36 A5,5 0 1,1 49.67,36 Z" />
 </vector>
