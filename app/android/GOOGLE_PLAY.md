@@ -23,7 +23,8 @@ the developer account.
 1. Copy its JSON key to the server: `~/.config/distill-android/play-service-account.json`, then
    `chmod 600` it. (A new key: Google Cloud › IAM › Service accounts › Keys › Add key › JSON.)
 2. When the app exists (step 2): Play Console › Users and permissions › the service account › App permissions ›
-   add Distill with "Release to testing tracks" and "Manage testing tracks" (or Admin).
+   add Distill with "Release to testing tracks", "Manage testing tracks" and, for `--listing`, "Manage store
+   presence" (or Admin).
 
 ## 2. Create the app and upload the first bundle by hand
 
@@ -63,6 +64,7 @@ pictures edited in Play Console: edit them in the repository.
 | Error of the upload | Cause | Remedy |
 | --- | --- | --- |
 | `403 The caller does not have permission` | the service account has no permission on Distill | step 1.2 |
+| the same 403 on `--listing` only | no "Manage store presence" | step 1.2 |
 | `404 Package not found` | no release yet | the first upload by hand, step 2 |
 | `version code … has already been used` | that version is on Google Play | a new commit |
 

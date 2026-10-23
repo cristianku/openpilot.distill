@@ -275,7 +275,8 @@ else
 fi
 if [ "$LISTING" -eq 1 ]; then
   [ -f "$PLAY_KEY" ] || die "no key of the Google Play service account in $PLAY_KEY"
-  gradle_run :app:publishListing
+  # --rerun: Gradle would take the listing for done after an upload that Google Play then refused.
+  gradle_run :app:publishReleaseListing --rerun
   say "Store listing uploaded to Google Play."
 fi
 say "Download it from the site: Settings › Distill for Android."
