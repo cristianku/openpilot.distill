@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Builds Distill for Android (app/android) on this server, without GitHub Actions: the unit tests, then
-# the release APK in outputs/android/, which the site offers for download (Settings › Distill for Android).
-# With --bundle or --play it also builds the Android App Bundle (AAB) that Google Play takes, and --play
-# uploads it to Google Play. Everything is built here, never by GitHub.
+# Builds Distill for Android (app/android) on this server, without GitHub Actions, and publishes it on
+# Google Play by itself: the unit tests, the release APK that the site offers for download (Settings ›
+# Distill for Android) and the Android App Bundle (AAB) that Google Play takes, in outputs/android/. Then,
+# when this server has the key of the Play service account, the AAB goes to the internal testing track of
+# Google Play. Everything is built here, never by GitHub.
 # What is missing is set up first, so a fresh server needs nothing by hand (install.sh runs this script,
 # the code update of the site runs it again when app/android changes):
 #   - the tools, in /opt/android (or DISTILL_ANDROID_TOOLS): JDK 17, Android SDK platform 36 and
@@ -11,20 +12,24 @@
 #     distill-release.p12 (PKCS12, alias "distill", RSA 4096, ~27 years) and its password in
 #     ANDROID_KEYSTORE_PASSWORD.txt. Never in git; keep a backup. For Google Play it is the upload key.
 #
-#   helpers/build_android.sh [--setup-only] [--bundle] [--play[=TRACK]] [--listing] [--help]
-#     --setup-only   install the tools and make the key when missing, do not build
-#     --bundle       also build the AAB, into outputs/android/ (e.g. for the first upload, by hand)
-#     --play[=TRACK] build the AAB and upload it to Google Play, track internal (default), alpha
-#                    (closed testing), beta (open testing) or production, then tag the commit
-#                    android-v<version> and push the tag. Needs a clean app/android, HEAD pushed to
-#                    origin, and the key of the Play service account in
-#                    ~/.config/distill-android/play-service-account.json (app/android/GOOGLE_PLAY.md)
-#     --listing      upload the store listing of app/android/app/src/main/play (texts and pictures)
+#   helpers/build_android.sh [--no-play | --play=TRACK] [--listing] [--setup-only] [--help]
+#     (nothing)       build, then publish on the internal track of Google Play when it can: the key of the
+#                     service account is in ~/.config/distill-android/play-service-account.json
+#                     (app/android/GOOGLE_PLAY.md), app/android has no local changes, the commit is on
+#                     GitHub (origin) and this version is not on Google Play yet. Otherwise it says why
+#                     not; a failed upload is a warning, the APK of the site is built all the same.
+#     --play=TRACK    the same on track internal, alpha (closed testing), beta (open testing) or production,
+#                     and every problem is an error. A version already on Google Play is promoted from the
+#                     internal track to TRACK.
+#     --no-play       build only
+#     --listing       also upload the store listing of app/android/app/src/main/play (texts and pictures)
+#     --setup-only    install the tools and make the key when missing, do not build
+#   Every published version is tagged android-v<version>, and the tag pushed to GitHub.
 #
 # Version: 0.3.<commits of HEAD>, versionCode 1000 + <commits>: every commit of master has its own,
 #   always higher, as Google Play requires. "-dev" is added when app/android has local changes (never
-#   uploaded).
-# Output: outputs/android/distill-android-<version>.apk (and .aab; the last 3 are kept) and
+#   published).
+# Output: outputs/android/distill-android-<version>.apk and .aab (the last 3 of each are kept) and
 #   outputs/android/latest.json, what the site shows of the last build.
 set -euo pipefail
 
@@ -44,25 +49,25 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 SETUP_ONLY=0
-BUNDLE=0
-TRACK=""
+# auto: publish on the internal track when everything is in place; strict: --play=TRACK; off: --no-play.
+PLAY=auto
+TRACK=internal
 LISTING=0
 for argument in "$@"; do
   case "$argument" in
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     --setup-only) SETUP_ONLY=1 ;;
-    --bundle) BUNDLE=1 ;;
-    --play) TRACK=internal ;;
-    --play=*) TRACK="${argument#--play=}" ;;
+    --no-play) PLAY=off ;;
+    --play) PLAY=strict ;;
+    --play=*) PLAY=strict; TRACK="${argument#--play=}" ;;
     --listing) LISTING=1 ;;
     *) die "invalid option: $argument (see --help)" ;;
   esac
 done
 case "$TRACK" in
-  ''|internal|alpha|beta|production) ;;
+  internal|alpha|beta|production) ;;
   *) die "unknown Google Play track: $TRACK (internal, alpha, beta or production)" ;;
 esac
-[ -n "$TRACK" ] && BUNDLE=1
 PLAY_KEY="$KEYS/play-service-account.json"
 
 # -- tools: each one only when missing, unpacked next to its final place and moved there at the end,
@@ -171,44 +176,25 @@ DISTILL_KEY_ALIAS="$(cat "$KEYS/ANDROID_KEY_ALIAS.txt")"
 DISTILL_KEY_PASSWORD="$(cat "$KEYS/ANDROID_KEY_PASSWORD.txt")"
 export DISTILL_KEYSTORE_PASSWORD DISTILL_KEY_ALIAS DISTILL_KEY_PASSWORD
 
-# Google Play gets only a commit that GitHub has too: the upload needs the key of the Play service account.
-if [ -n "$TRACK" ] || [ "$LISTING" -eq 1 ]; then
-  [ -f "$PLAY_KEY" ] || die "$PLAY_KEY is missing: the key of the Google Play service account (app/android/GOOGLE_PLAY.md)"
-  export DISTILL_PLAY_CREDENTIALS="$PLAY_KEY"
-fi
-if [ -n "$TRACK" ]; then
-  case "$version" in
-    *-dev) die "app/android has local changes: commit and push them first, Google Play gets the pushed commit" ;;
-  esac
-  branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
-  git -C "$ROOT" fetch -q origin "$branch" || die "origin cannot be reached to check that $branch is pushed"
-  [ "$(git -C "$ROOT" rev-parse HEAD)" = "$(git -C "$ROOT" rev-parse "origin/$branch")" ] \
-    || die "$branch is not the same as origin/$branch: push first, Google Play gets the pushed commit"
-fi
 
-tasks=(:app:testDebugUnitTest :app:assembleRelease)
-[ "$BUNDLE" -eq 1 ] && tasks+=(:app:bundleRelease)
-# The upload comes after the tests and the build, in the same run: a failing test uploads nothing.
-[ -n "$TRACK" ] && tasks+=(:app:publishReleaseBundle --track "$TRACK")
-[ "$LISTING" -eq 1 ] && tasks+=(:app:publishListing)
+gradle_run() {
+  (cd "$ROOT/app/android" && nice -n 10 "$TOOLS/gradle-$GRADLE_VERSION/bin/gradle" "$@" \
+    --no-daemon --console=plain -q -PdistillVersionCode="$code" -PdistillVersionName="$version")
+}
 
 say "Distill for Android $version (versionCode $code, commit $commit), signed with the key of $KEYS"
-(cd "$ROOT/app/android" && nice -n 10 "$TOOLS/gradle-$GRADLE_VERSION/bin/gradle" "${tasks[@]}" \
-  --no-daemon --console=plain -q -PdistillVersionCode="$code" -PdistillVersionName="$version")
+gradle_run :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
 
 apk="$ROOT/app/android/app/build/outputs/apk/release/app-release.apk"
+aab="$ROOT/app/android/app/build/outputs/bundle/release/app-release.aab"
 [ -s "$apk" ] || die "the build made no APK"
+[ -s "$aab" ] || die "the build made no AAB"
 mkdir -p "$OUT"
 name="distill-android-$version.apk"
+bundle="distill-android-$version.aab"
 cp "$apk" "$OUT/$name.part" && mv "$OUT/$name.part" "$OUT/$name"
+cp "$aab" "$OUT/$bundle.part" && mv "$OUT/$bundle.part" "$OUT/$bundle"
 sha="$(sha256sum "$OUT/$name" | cut -d' ' -f1)"
-bundle=""
-if [ "$BUNDLE" -eq 1 ]; then
-  aab="$ROOT/app/android/app/build/outputs/bundle/release/app-release.aab"
-  [ -s "$aab" ] || die "the build made no AAB"
-  bundle="distill-android-$version.aab"
-  cp "$aab" "$OUT/$bundle.part" && mv "$OUT/$bundle.part" "$OUT/$bundle"
-fi
 # The Python of the project (install.sh made it); a system python3 otherwise.
 PYTHON="$ROOT/.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
@@ -217,35 +203,79 @@ import json, os, sys, time
 path, name, version, code, commit, signed_with, sha, bundle = sys.argv[1:]
 folder = os.path.dirname(path)
 data = {'file': name, 'version': version, 'version_code': int(code), 'commit': commit, 'signed_with': signed_with,
-        'sha256': sha, 'size': os.path.getsize(os.path.join(folder, name)), 'built': time.time()}
-if bundle:
-    data['bundle'] = bundle
+        'sha256': sha, 'size': os.path.getsize(os.path.join(folder, name)), 'built': time.time(), 'bundle': bundle}
 with open(path + '.part', 'w') as out:
     json.dump(data, out, indent=1)
 os.replace(path + '.part', path)
 EOF
 # Keep the last 3 APKs and AABs.
-ls -1t "$OUT"/distill-android-*.apk | tail -n +4 | xargs -r rm -f
-find "$OUT" -maxdepth 1 -name 'distill-android-*.aab' -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- \
-  | xargs -r rm -f
+for kind in apk aab; do
+  find "$OUT" -maxdepth 1 -name "distill-android-*.$kind" -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- \
+    | xargs -r rm -f
+done
 say "APK: outputs/android/$name ($(awk -v b="$(stat -c %s "$OUT/$name")" 'BEGIN { printf "%.1f MB", b / 1e6 }'), sha256 $sha)"
-if [ -n "$bundle" ]; then
-  # The certificate Play Console shows for the upload key (Test and release › App integrity).
-  certificate="$("$JAVA_HOME/bin/keytool" -printcert -jarfile "$OUT/$bundle" | awk '/SHA256:/ { print $2; exit }')"
-  say "AAB: outputs/android/$bundle (upload key certificate SHA-256 $certificate)"
+# The certificate Play Console shows for the upload key (Test and release › App integrity).
+certificate="$("$JAVA_HOME/bin/keytool" -printcert -jarfile "$OUT/$bundle" | awk '/SHA256:/ { print $2; exit }')"
+say "AAB: outputs/android/$bundle (upload key certificate SHA-256 $certificate)"
+
+# -- Google Play --
+# Why this build is not published, '' when it can be: only a committed version that GitHub has too.
+tag="android-v$version"
+published=0
+why_not=""
+if [ "$PLAY" = off ]; then
+  why_not="--no-play"
+elif [ ! -f "$PLAY_KEY" ]; then
+  why_not="no key of the Google Play service account in $PLAY_KEY (app/android/GOOGLE_PLAY.md)"
+elif [ "${version%-dev}" != "$version" ]; then
+  why_not="app/android has local changes: commit and push them first"
+else
+  branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
+  if ! git -C "$ROOT" fetch -q origin "$branch"; then
+    why_not="GitHub (origin) cannot be reached to check that $branch is pushed"
+  elif [ "$(git -C "$ROOT" rev-parse HEAD)" != "$(git -C "$ROOT" rev-parse "origin/$branch")" ]; then
+    why_not="$branch is not the same as origin/$branch: push first, Google Play gets the pushed commit"
+  elif git -C "$ROOT" rev-parse -q --verify "refs/tags/$tag" > /dev/null \
+      || git -C "$ROOT" ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null 2>&1; then
+    published=1
+  fi
 fi
-if [ -n "$TRACK" ]; then
-  say "Uploaded to Google Play, track $TRACK: https://play.google.com/console"
-  tag="android-v$version"
-  if git -C "$ROOT" rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-    say "tag $tag already exists"
-  elif git -C "$ROOT" tag "$tag" && git -C "$ROOT" push -q origin "refs/tags/$tag"; then
+export DISTILL_PLAY_CREDENTIALS="$PLAY_KEY"
+
+problem() {
+  if [ "$PLAY" = strict ]; then
+    die "$1"
+  fi
+  say "WARNING: $1"
+}
+
+if [ -n "$why_not" ]; then
+  if [ "$PLAY" = strict ]; then
+    die "not published on Google Play: $why_not"
+  fi
+  say "Not published on Google Play: $why_not."
+elif [ "$published" -eq 1 ] && [ "$TRACK" = internal ]; then
+  say "Google Play already has $version ($tag)."
+elif [ "$published" -eq 1 ]; then
+  # A version code goes up once: on another track it is a promotion of the internal release.
+  if gradle_run :app:promoteReleaseArtifact --from-track internal --promote-track "$TRACK" --version-code "$code"; then
+    say "Promoted $version to the $TRACK track of Google Play: https://play.google.com/console"
+  else
+    problem "$version was not promoted to the $TRACK track of Google Play (above)"
+  fi
+elif gradle_run :app:publishReleaseBundle --track "$TRACK"; then
+  say "Published $version on the $TRACK track of Google Play: https://play.google.com/console"
+  if git -C "$ROOT" tag "$tag" && git -C "$ROOT" push -q origin "refs/tags/$tag"; then
     say "tagged and pushed $tag"
   else
     say "WARNING: the tag $tag was not pushed (above); the upload is done"
   fi
+else
+  problem "$version was not published on Google Play (above); the APK of the site is built"
 fi
 if [ "$LISTING" -eq 1 ]; then
+  [ -f "$PLAY_KEY" ] || die "no key of the Google Play service account in $PLAY_KEY"
+  gradle_run :app:publishListing
   say "Store listing uploaded to Google Play."
 fi
 say "Download it from the site: Settings › Distill for Android."

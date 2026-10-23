@@ -55,14 +55,20 @@ the server checks it exactly as it checks the site. The app on a phone and the s
 Always on the server, never by GitHub Actions:
 
 ```bash
-helpers/build_android.sh                 # tests and the APK the site offers
-helpers/build_android.sh --bundle        # also the AAB for Google Play, into outputs/android/
-helpers/build_android.sh --play[=alpha]  # build and upload to Google Play (GOOGLE_PLAY.md)
+helpers/build_android.sh                 # tests, APK and AAB, then Google Play (internal track) by itself
+helpers/build_android.sh --play=alpha    # the same on another track; every problem is an error
+helpers/build_android.sh --no-play       # build only
 ```
+
+Publishing is automatic when the server has the key of the Google Play service account
+(`~/.config/distill-android/play-service-account.json`, [`GOOGLE_PLAY.md`](GOOGLE_PLAY.md)), `app/android` has
+no local changes, the commit is on GitHub and that version is not on Google Play yet; otherwise the script says
+why not, and a failed upload is only a warning. The code update of the site runs it too, so a change of the app
+pulled from GitHub reaches the testers by itself.
 
 It sets up what is missing (JDK 17, Android SDK platform 36 and build-tools 35, Gradle 8.14.3 in
 `/opt/android` or `DISTILL_ANDROID_TOOLS`; the signing key of the server in `~/.config/distill-android/` or
-`DISTILL_ANDROID_KEYS`), runs the unit tests and builds the release APK (R8, signed with that key) into
+`DISTILL_ANDROID_KEYS`), runs the unit tests and builds the release APK and AAB (R8, signed with that key) into
 `outputs/android/` (the last 3 are kept). `--setup-only` stops before the build. `install.sh` (step 5) and the
 code update of the site run it, so a new server needs nothing by hand; x86_64 only, as the SDK build tools.
 Toolchain pinned as nav2pilot's: Android Gradle Plugin 8.13.2, Kotlin 2.2.21, Compose BOM 2025.12.01,

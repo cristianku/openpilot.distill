@@ -11,7 +11,8 @@
   2. uv sync --locked, with --extra DISTILL_UV_EXTRA when the repo .env sets it (v100 on the Tesla
      V100 server). --locked: uv.lock is used as it is and never rewritten.
   3. the Android app (helpers/build_android.sh), when the update changed app/android or its build, or
-     the server has none yet: the site then offers the new APK. A failure is only a warning.
+     the server has none yet: the site then offers the new APK, and a server with the key of the Google
+     Play service account publishes it on the internal track. A failure is only a warning.
   4. with the systemd service distill-web installed: restarts it, so the site runs the new code. The
      jobs started from the site keep running (KillMode=process in the unit).
 """

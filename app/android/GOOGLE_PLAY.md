@@ -1,7 +1,7 @@
 # Distill for Android on Google Play
 
 How the app gets to Google Play, all from the server: `helpers/build_android.sh` builds, tests, signs and
-uploads; nothing is built by GitHub. The general procedure (service account, internal and closed tests, the
+publishes by itself; nothing is built by GitHub. The general procedure (service account, internal and closed tests, the
 12 testers for 14 days) is the one of nav2pilot, `docs/GOOGLE_PLAY_SETUP.md` in
 [cristianku/nav2pilot](https://github.com/cristianku/nav2pilot); below is what is specific to Distill.
 
@@ -31,8 +31,9 @@ The API cannot make the first release of an app.
 
 1. Play Console › Create app: name `Distill: driving model trainer`, default language English (United States),
    App, Free.
-2. On the server: `helpers/build_android.sh --bundle` (committed code, so the version has no `-dev`). It writes
-   `outputs/android/distill-android-0.3.<N>.aab` and prints the certificate of the upload key.
+2. On the site: Settings › Distill for Android › Bundle for Google Play (the AAB of the last build,
+   `outputs/android/distill-android-0.3.<N>.aab`; `helpers/build_android.sh` prints the certificate of its
+   upload key).
 3. Test and release › Testing › Internal testing › Create new release. At the first upload Play asks how to sign
    the app: keep **Google-generated key** (Play App Signing). The key of the server becomes the upload key: Play
    then shows its certificate under App integrity, the one the script printed.
@@ -45,16 +46,25 @@ from Google Play.
 ## 3. Every release after that
 
 ```bash
-helpers/build_android.sh --play            # internal testing (no review)
-helpers/build_android.sh --play=alpha      # closed testing
+helpers/build_android.sh                   # build, then the internal track (no review) by itself
+helpers/build_android.sh --play=alpha      # closed testing: promotes the version already on internal
 helpers/build_android.sh --play=production
-helpers/build_android.sh --listing         # the store listing of app/src/main/play
+helpers/build_android.sh --listing         # also the store listing of app/src/main/play
 ```
 
-`--play` refuses a version with local changes or a commit that is not on GitHub, runs the tests, builds, uploads
-the AAB with its R8 mapping and the release notes of `app/src/main/play/release-notes/en-US/default.txt`, then
-tags the commit `android-v0.3.<N>` and pushes the tag. A version already on Google Play is refused (one upload
-per commit). `--listing` replaces texts and pictures edited in Play Console: edit them in the repository.
+Every build publishes: the tests, the APK and AAB, then the AAB with its R8 mapping and the release notes of
+`app/src/main/play/release-notes/en-US/default.txt` on the internal track, and the tag `android-v0.3.<N>` pushed
+to GitHub. It does so only for a version without local changes, whose commit is on GitHub and that is not on
+Google Play yet (the tag); otherwise it says why not, and a failed upload is a warning (the site still gets its
+APK). The code update of the site runs it when `app/android` changes. With `--play=TRACK` every problem is an
+error, and a version already uploaded is promoted from the internal track. `--listing` replaces texts and
+pictures edited in Play Console: edit them in the repository.
+
+| Error of the upload | Cause | Remedy |
+| --- | --- | --- |
+| `403 The caller does not have permission` | the service account has no permission on Distill | step 1.2 |
+| `404 Package not found` | no release yet | the first upload by hand, step 2 |
+| `version code … has already been used` | that version is on Google Play | a new commit |
 
 ## 4. App content (Play Console › Policy › App content)
 

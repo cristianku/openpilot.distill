@@ -15,8 +15,9 @@
 #      the right Python. Refused while a job of this clone runs (it would change packages under it)
 #   5. the Android app (helpers/build_android.sh): its build tools in /opt/android, the signing key of
 #      this server in ~/.config/distill-android (made once, never in git), then the APK the site
-#      offers in Settings › Distill for Android. A failure (no network, not x86_64) is only a
-#      warning: the site does not need the app
+#      offers in Settings › Distill for Android (and Google Play, when the key of the Play service
+#      account is there too). A failure (no network, not x86_64) is only a warning: the site does
+#      not need the app
 #   6. the control site as the systemd service distill-web (deploy/install_web_service.sh):
 #      started now and at every boot on port 8766; it prints the address and, until the
 #      administrator exists, the setup code to create it on the first visit

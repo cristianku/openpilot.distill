@@ -691,7 +691,7 @@ def video_path(repo: Path, name: str) -> Path | None:
 
 
 ANDROID_APK_RE = re.compile(r'distill-android-[0-9]+\.[0-9]+\.[0-9]+(-dev)?\.apk')
-# The bundle for Google Play (build_android.sh --bundle): a committed version only, never a -dev one.
+# The bundle for Google Play (helpers/build_android.sh): a committed version only, never a -dev one.
 ANDROID_AAB_RE = re.compile(r'distill-android-[0-9]+\.[0-9]+\.[0-9]+\.aab')
 
 
