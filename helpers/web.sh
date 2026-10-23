@@ -136,7 +136,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -x "$PY" ] || die "$PY is missing: create the environment with uv sync (docs/INSTALL.md)"
+[ -x "$PY" ] || die "$PY is missing: create the environment with sudo ./install.sh"
 mkdir -p "$WEB_DIR"
 chmod 700 "$WEB_DIR"
 

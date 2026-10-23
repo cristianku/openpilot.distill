@@ -191,7 +191,7 @@ uninstall_service() {
 
 install_service() {
   [ -f "$TEMPLATE" ] || fail "the service template is missing: $TEMPLATE"
-  [ -x "$PYTHON" ] || fail "$PYTHON is missing: create the environment first with uv sync (docs/INSTALL.md)."
+  [ -x "$PYTHON" ] || fail "$PYTHON is missing: create the environment first: sudo ./install.sh"
   [ -f "$REPO/web/server.py" ] || fail "$REPO/web/server.py is missing: this clone does not have the site."
   check_plain_path "$REPO"
   check_plain_path "$ENV_FILE"

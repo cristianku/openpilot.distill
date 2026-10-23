@@ -320,13 +320,14 @@
       const points = values.map((value, index) => (start + index) + ',' + (30 - Math.max(0, Math.min(100, value)) * 0.3));
       const area = document.createElementNS(SVG, 'polygon');
       area.setAttribute('points', start + ',30 ' + points.join(' ') + ' ' + (HISTORY_POINTS - 1) + ',30');
-      area.setAttribute('fill', color);
+      // A CSS colour (var(--...)) through style: it follows the theme.
+      area.style.fill = color;
       area.setAttribute('fill-opacity', '0.15');
       svg.appendChild(area);
       const line = document.createElementNS(SVG, 'polyline');
       line.setAttribute('points', points.join(' '));
       line.setAttribute('fill', 'none');
-      line.setAttribute('stroke', color);
+      line.style.stroke = color;
       line.setAttribute('stroke-width', '1.5');
       line.setAttribute('vector-effect', 'non-scaling-stroke');
       svg.appendChild(line);
@@ -369,7 +370,7 @@
       byId('gpu-value').textContent = util + '%';
       setBar('gpu-bar', util, util > 85 ? 'warn' : '');
       pushHistory('gpu', util);
-      renderSpark('gpu-spark', usageHistory.gpu, '#34c759');
+      renderSpark('gpu-spark', usageHistory.gpu, 'var(--spark-gpu)');
       const rows = [['Card', gpu.name.replace(/^Tesla /, '')]];
       if (gpu.memory_total_mb) {
         rows.push(['Memory', (gpu.memory_used_mb / 1024).toFixed(1) + ' of ' + Math.round(gpu.memory_total_mb / 1024) + ' GB']);
@@ -393,7 +394,7 @@
       } else {
         byId('cpu-value').textContent = '…';
       }
-      renderSpark('cpu-spark', usageHistory.cpu, '#007aff');
+      renderSpark('cpu-spark', usageHistory.cpu, 'var(--spark-cpu)');
       const rows = [];
       if (cpu) rows.push(['Busy cores', cpu.cores.filter((value) => value >= 50).length + ' of ' + system.cpus]);
       else rows.push(['Cores', String(system.cpus)]);
@@ -2501,6 +2502,50 @@
       button.disabled = false;
     }
   });
+
+  // -- appearance --------------------------------------------------------------------------------
+  // 'light' or 'dark' sets <html data-theme>; 'auto' removes it and the CSS follows the system.
+  // Kept in this browser only; the <head> of the page applies it before the first paint.
+  const THEME_KEY = 'distill-theme';
+  function storedTheme() {
+    try {
+      const value = localStorage.getItem(THEME_KEY);
+      return value === 'light' || value === 'dark' ? value : 'auto';
+    } catch (error) {
+      return 'auto';
+    }
+  }
+  function applyTheme(choice) {
+    if (choice === 'light' || choice === 'dark') document.documentElement.dataset.theme = choice;
+    else delete document.documentElement.dataset.theme;
+    try {
+      if (choice === 'light' || choice === 'dark') localStorage.setItem(THEME_KEY, choice);
+      else localStorage.removeItem(THEME_KEY);
+    } catch (error) {
+      // Storage blocked (private window): the choice lasts until the page is closed.
+    }
+    renderThemeChoice(choice);
+  }
+  function renderThemeChoice(choice) {
+    for (const button of document.querySelectorAll('[data-theme-choice]')) {
+      const on = button.dataset.themeChoice === choice;
+      button.setAttribute('aria-checked', on ? 'true' : 'false');
+      button.tabIndex = on ? 0 : -1;
+    }
+  }
+  const themeButtons = Array.from(document.querySelectorAll('[data-theme-choice]'));
+  for (const button of themeButtons) {
+    button.addEventListener('click', () => applyTheme(button.dataset.themeChoice));
+    button.addEventListener('keydown', (event) => {
+      const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = themeButtons[(themeButtons.indexOf(button) + step + themeButtons.length) % themeButtons.length];
+      applyTheme(next.dataset.themeChoice);
+      next.focus();
+    });
+  }
+  renderThemeChoice(storedTheme());
 
   // "Connect in Settings" buttons of the other tabs.
   for (const button of document.querySelectorAll('[data-goto]')) {

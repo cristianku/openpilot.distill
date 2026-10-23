@@ -11,7 +11,7 @@
 
 [Unit]
 Description=distill-web: control site of openpilot.distill
-Documentation=file://__DISTILL_REPO__/docs/INSTALL.md
+Documentation=file://__DISTILL_REPO__/README.md
 After=network-online.target
 Wants=network-online.target
 
