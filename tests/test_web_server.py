@@ -435,13 +435,22 @@ class PageTest(ServerTestCase):
         self.assertNotEqual(nonces[0], nonces[1])
 
     def test_sections_of_the_page(self):
-        """The tabs of the page and of app.js match; the Comma tab is gone: Publish installs on the comma."""
+        """The tabs of the page and of app.js match; the Comma tab is gone: Publish installs on the comma.
+        Settings is not in the bar: a gear at the bottom of the screen opens it."""
         response, body = self.request('GET', '/')
         page = body.decode()
         tabs = re.findall(r'data-tab="([a-z]+)"', page)
         self.assertEqual(tabs, ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'settings'])
         for tab in tabs:
             self.assertIn('id="panel-' + tab + '"', page)
+        bar = page[page.index('<nav class="tabs"'):page.index('</nav>')]
+        self.assertEqual(re.findall(r'data-tab="([a-z]+)"', bar), tabs[:-1])
+        self.assertIn('<button class="gear" type="button" id="tab-settings" data-tab="settings"', page)
+        # Every section that starts a job is a wizard, as Training.
+        for wizard in ('train', 'prep', 'eval', 'cmp', 'publish'):
+            self.assertIn('id="' + wizard + '-step-1"', page)
+            self.assertIn('id="' + wizard + '-back"', page)
+            self.assertIn('id="' + wizard + '-dots"', page)
         self.assertNotIn('id="panel-comma"', page)
         self.assertNotIn('data-tab="comma"', page)
         response, body = self.request('GET', '/static/app.js')

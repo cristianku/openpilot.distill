@@ -3,6 +3,8 @@
   'use strict';
 
   const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'settings'];
+  // The tabs of the bar; Settings opens from the gear at the bottom of the screen.
+  const BAR_TABS = TABS.filter((tab) => tab !== 'settings');
   // Where Publish puts a model (#publish/<destination>).
   const DESTINATIONS = ['comma', 'hf'];
   const JOB_PILL = {running: 'run', ok: 'ok', failed: 'bad', stopped: 'todo', unknown: 'muted'};
@@ -19,6 +21,8 @@
   let status = null;
   let firstCode = null;
   let currentTab = 'status';
+  // Where the back arrow of Settings returns.
+  let tabBeforeSettings = 'status';
   const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null, drives: null,
     settings: null};
   const loadedAt = {};
@@ -184,41 +188,59 @@
       name = 'publish';
       detail = 'comma';
     }
-    if (name === 'publish' && DESTINATIONS.indexOf(detail) >= 0) publishDest = detail;
+    // #publish/<destination>: straight to its last step (a bookmark, or "Install or restore a model").
+    if (name === 'publish' && DESTINATIONS.indexOf(detail) >= 0) {
+      publishDest = detail;
+      publishWizard.show(3, false);
+    }
     if (TABS.indexOf(name) < 0) name = 'status';
+    if (name === 'settings' && currentTab !== 'settings') tabBeforeSettings = currentTab;
     currentTab = name;
     for (const tab of TABS) {
       const button = byId('tab-' + tab);
       const selected = tab === name;
-      button.setAttribute('aria-selected', String(selected));
-      button.tabIndex = selected ? 0 : -1;
+      if (tab === 'settings') {
+        button.setAttribute('aria-expanded', String(selected));
+      } else {
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      }
       byId('panel-' + tab).hidden = !selected;
     }
     let hash = '#' + name;
     if (name === 'training' && openRun) hash += '/' + encodeURIComponent(openRun);
-    else if (name === 'publish') hash += '/' + publishDest;
+    else if (name === 'publish' && publishWizard.step === 3) hash += '/' + publishDest;
     if (location.hash !== hash) history.replaceState(null, '', hash);
     loadTab(true);
   }
-  for (const tab of TABS) {
+  for (const tab of BAR_TABS) {
     byId('tab-' + tab).addEventListener('click', () => showTab(tab));
     byId('tab-' + tab).addEventListener('keydown', (event) => {
-      let index = TABS.indexOf(tab);
-      if (event.key === 'ArrowRight') index = (index + 1) % TABS.length;
-      else if (event.key === 'ArrowLeft') index = (index + TABS.length - 1) % TABS.length;
+      let index = BAR_TABS.indexOf(tab);
+      if (event.key === 'ArrowRight') index = (index + 1) % BAR_TABS.length;
+      else if (event.key === 'ArrowLeft') index = (index + BAR_TABS.length - 1) % BAR_TABS.length;
       else return;
       event.preventDefault();
-      showTab(TABS[index]);
-      byId('tab-' + TABS[index]).focus();
+      showTab(BAR_TABS[index]);
+      byId('tab-' + BAR_TABS[index]).focus();
     });
   }
+  // The gear opens Settings, and closes it again; the back arrow of Settings returns too.
+  byId('tab-settings').addEventListener('click', () => {
+    showTab(currentTab === 'settings' ? tabBeforeSettings : 'settings');
+    window.scrollTo(0, 0);
+  });
+  byId('settings-back').addEventListener('click', () => {
+    showTab(tabBeforeSettings);
+    window.scrollTo(0, 0);
+  });
   window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 
   // Which data each tab needs.
   function needs(tab) {
     if (tab === 'preprocessing') return ['segments', 'drives'];
     if (tab === 'training') return ['runs', 'hf'];
-    if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
+    if (tab === 'evaluation') return ['runs', 'hf', 'evalResults', 'segments'];
     if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos', 'drives'];
     if (tab === 'publish') return ['runs', 'hf', 'evalResults'];
     if (tab === 'settings') return ['settings', 'auth'];
@@ -527,6 +549,9 @@
     const count = byId('running-count');
     count.hidden = running.length === 0;
     count.textContent = String(running.length);
+    byId('status-sub').textContent = running.length === 0 ? 'Nothing running: the server is free.'
+      : running.length === 1 ? 'Working on: ' + running[0].label + '.'
+        : running.length + ' jobs running: ' + running.map((job) => job.label).join(', ') + '.';
     // Rebuilt when a job, its progress or its settings change (and once a minute for the "for N min"
     // text), not at every status: a rebuild under the finger would lose a click on its buttons.
     const list = byId('running-jobs');
@@ -741,13 +766,13 @@
 
   function updateButtons() {
     if (!status) return;
-    setAction('btn-fetch', 'fetch');
+    setAction('btn-fetch', 'fetch', fetchFormReason());
     setAction('btn-localize', 'localize');
     updateTrainButtons();
     setAction('btn-eval', 'eval', byId('eval-model').value ? '' : 'no model to evaluate');
     setAction('btn-compare', 'compare', compareFormReason());
     updatePublishButtons();
-    setAction('btn-install', 'install', publishRun() ? '' : 'choose a finished model above');
+    setAction('btn-install', 'install', publishRun() ? '' : 'choose a finished model in step 1');
     setAction('btn-restore', 'restore');
     setAction('btn-update', 'update');
     if (status.test_actions) setAction('btn-selftest', 'selftest');
@@ -898,6 +923,7 @@
     }
     renderGps(counts);
     renderRoutes(segments.routes);
+    renderLocalizeWhat(counts);
     const discarded = byId('discarded');
     discarded.replaceChildren();
     byId('discarded-empty').hidden = segments.discarded_reasons.length > 0;
@@ -934,10 +960,37 @@
       body.appendChild(row);
     }
   }
+  // -- get new drives: a wizard, download (step 1) then localize (step 2) --
+  const prepWizard = wizard('prep', 2, renderPrepWizard);
+  function fetchMode() {
+    const chosen = document.querySelector('input[name="fetch-mode"]:checked');
+    return chosen ? chosen.value : 'new';
+  }
+  function renderPrepWizard() {
+    renderChoices(byId('prep-step-1'));
+    byId('fetch-since-field').hidden = fetchMode() !== 'since';
+  }
+  function fetchFormReason() {
+    return fetchMode() === 'since' && !byId('fetch-since').value ? 'choose the day to start from' : '';
+  }
+  // What step 2 would do: the new segments, and the ones a more accurate GPS map is out for.
+  function renderLocalizeWhat(counts) {
+    const parts = [];
+    if (counts.todo) parts.push(counts.todo + (counts.todo === 1 ? ' new segment' : ' new segments') + ' to localize');
+    if (counts.refinable) {
+      parts.push(counts.refinable + (counts.refinable === 1 ? ' segment' : ' segments') + ' can get a more accurate map');
+    }
+    byId('prep-localize-what').textContent = parts.length ? capital(parts.join(' · ')) + '.' : 'Nothing new to localize.';
+  }
+  for (const radio of document.querySelectorAll('input[name="fetch-mode"]')) {
+    radio.addEventListener('change', () => { renderPrepWizard(); updateButtons(); });
+  }
+  byId('fetch-since').addEventListener('input', updateButtons);
+  renderPrepWizard();
   byId('btn-fetch').addEventListener('click', () => {
-    const since = byId('fetch-since').value;
+    const since = fetchMode() === 'since' ? byId('fetch-since').value : '';
     const params = since ? {since: since} : {};
-    runAction('fetch', params);
+    runAction('fetch', params).then((job) => { if (job) prepWizard.show(2, false); });
   });
   byId('btn-localize').addEventListener('click', () => runAction('localize', localizeParams()));
 
@@ -1022,7 +1075,7 @@
     }
     runAction('train', params).then((job) => {
       if (!job) return;
-      showTrainStep(1);
+      trainWizard.show(1);
       openRunView(null);
     });
   });
@@ -1068,27 +1121,79 @@
     renderTrainWizard();
   }
 
+  // -- wizards ---------------------------------------------------------------------------------
+  // One card, one question per step: <id>-step-N sections, the <id>-back arrow and the <id>-dots.
+  // onShow(step) renders what the step shows; moving forward focuses the title of the new step.
+  function wizard(id, count, onShow) {
+    const self = {step: 1};
+    self.show = (step, focus) => {
+      self.step = step;
+      for (let index = 1; index <= count; index++) byId(id + '-step-' + index).hidden = index !== step;
+      byId(id + '-back').hidden = step === 1;
+      const dots = byId(id + '-dots').children;
+      for (let index = 0; index < dots.length; index++) dots[index].className = index === step - 1 ? 'on' : '';
+      if (onShow) onShow(step);
+      updateButtons();
+      // The first title of the step not inside a hidden block (Publish has one per destination).
+      const heading = Array.from(byId(id + '-step-' + step).querySelectorAll('.wizard-title'))
+        .find((title) => !title.closest('[hidden]'));
+      if (focus !== false && heading && step > 1) {
+        heading.tabIndex = -1;
+        heading.focus({preventScroll: true});
+        byId(id + '-step-1').closest('.wizard').scrollIntoView({block: 'start', behavior: 'smooth'});
+      }
+    };
+    byId(id + '-back').addEventListener('click', () => self.show(Math.max(1, self.step - 1)));
+    for (let index = 1; index < count; index++) {
+      const next = byId(id + '-next-' + index);
+      if (next) next.addEventListener('click', () => self.show(index + 1));
+    }
+    return self;
+  }
+
+  // Choice cards (label.choice around a radio): the chosen one is lit, a disabled one is dimmed.
+  function renderChoices(container) {
+    for (const label of container.querySelectorAll('.choice')) {
+      const input = label.querySelector('input');
+      label.classList.toggle('on', input.checked);
+      label.classList.toggle('off', input.disabled);
+    }
+  }
+  // Preset buttons (role=radio) that hold the value of a hidden input.
+  function presetGroup(groupId, inputId, onChange) {
+    const buttons = Array.from(byId(groupId).querySelectorAll('.preset'));
+    function render() {
+      for (const button of buttons) {
+        const on = button.dataset.value === byId(inputId).value;
+        button.setAttribute('aria-checked', String(on));
+        button.tabIndex = on ? 0 : -1;
+      }
+    }
+    function choose(button) {
+      byId(inputId).value = button.dataset.value;
+      render();
+      if (onChange) onChange();
+    }
+    for (const button of buttons) {
+      button.addEventListener('click', () => choose(button));
+      button.addEventListener('keydown', (event) => {
+        const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+        if (!step) return;
+        event.preventDefault();
+        const next = buttons[(buttons.indexOf(button) + step + buttons.length) % buttons.length];
+        next.focus();
+        choose(next);
+      });
+    }
+    render();
+  }
+
   // -- new training wizard ----------------------------------------------------------------------
   // Step 1: where to start; step 2: how much (dial and presets, or the run to resume); step 3: summary.
   const DIAL = {min: 10, max: 10000, cx: 120, cy: 112, r: 88, sweep: 240};
   const PRESETS = {trial: 1000, standard: 5000};
-  let trainStep = 1;
   let customOpen = false;
-
-  function showTrainStep(step) {
-    trainStep = step;
-    for (let index = 1; index <= 3; index++) byId('train-step-' + index).hidden = index !== step;
-    byId('train-back').hidden = step === 1;
-    const dots = byId('train-dots').children;
-    for (let index = 0; index < dots.length; index++) dots[index].className = index === step - 1 ? 'on' : '';
-    renderTrainWizard();
-    const heading = byId('train-step-' + step + '-title');
-    if (heading && step > 1) {
-      heading.tabIndex = -1;
-      heading.focus({preventScroll: true});
-      byId('train-new').scrollIntoView({block: 'start', behavior: 'smooth'});
-    }
-  }
+  const trainWizard = wizard('train', 3, () => renderTrainWizard());
 
   function dialPoint(fraction, radius) {
     const angle = (-DIAL.sweep / 2 + DIAL.sweep * fraction) * Math.PI / 180;
@@ -1168,11 +1273,7 @@
 
   function renderTrainWizard() {
     const mode = trainMode();
-    for (const label of document.querySelectorAll('#train-step-1 .choice')) {
-      const input = label.querySelector('input');
-      label.classList.toggle('on', input.checked);
-      label.classList.toggle('off', input.disabled);
-    }
+    renderChoices(byId('train-step-1'));
     const resume = mode === 'resume';
     byId('train-amount').hidden = resume;
     byId('train-resume-box').hidden = !resume;
@@ -1209,7 +1310,7 @@
       ? 'On this server: ' + duration(seconds * steps) + '.'
       : 'More steps take more time.';
 
-    if (trainStep === 3) renderTrainSummary();
+    if (trainWizard.step === 3) renderTrainSummary();
   }
 
   function renderTrainSummary() {
@@ -1232,9 +1333,6 @@
     kvRow(list, 'Charts', byId('train-wandb').selectedOptions[0].textContent);
   }
 
-  byId('train-next-1').addEventListener('click', () => showTrainStep(2));
-  byId('train-next-2').addEventListener('click', () => showTrainStep(3));
-  byId('train-back').addEventListener('click', () => showTrainStep(Math.max(1, trainStep - 1)));
   byId('train-hw').addEventListener('click', () => {
     customOpen = !customOpen;
     renderTrainWizard();
@@ -1813,7 +1911,7 @@
       if (pickerOpen[id] && !byId(id + '-picker').contains(event.target)) setPickerOpen(id, false);
     }
   });
-  for (const id of ['eval-model', 'cmp-student', 'cmp-reference']) {
+  for (const id of ['eval-model', 'cmp-student']) {
     byId(id).addEventListener('change', () => { if (!pickerOpen[id]) renderPicker(id); updateButtons(); });
   }
 
@@ -1825,7 +1923,25 @@
     const firstRun = runModelOptions();
     fillSelect(byId('eval-model'), options, firstRun.length ? firstRun[0].value : 'stock');
     renderPicker('eval-model');
+    if (evalWizard.step === 2) renderEvalSummary();
     renderResults(data.evalResults || []);
+  }
+
+  // -- evaluate a model: a wizard, the model (step 1) then the summary (step 2) --
+  const evalWizard = wizard('eval', 2, (step) => { if (step === 2) renderEvalSummary(); });
+  function renderEvalSummary() {
+    const spec = byId('eval-model').value;
+    const list = byId('eval-summary');
+    list.replaceChildren();
+    kvRow(list, 'Model', spec ? modelInfo(spec).title : '–');
+    const counts = data.segments ? data.segments.counts : null;
+    kvRow(list, 'Test drives', counts ? counts.heldout_localized + ' hold-out segments, never seen in training' : '–');
+    const result = spec ? evalResultOf(spec) : null;
+    if (result && result.avg_miss_m !== null) {
+      kvRow(list, 'Last time', result.avg_miss_m.toFixed(2) + ' m average miss · '
+        + fmtDay(typeof result.date === 'string' ? Date.parse(result.date) / 1000 : result.date));
+    }
+    kvRow(list, 'Hardware', 'the GPU, for a few minutes');
   }
 
   // Colours of the models in the results, in ranking order (Apple system colours).
@@ -1930,9 +2046,9 @@
     }
     plot.appendChild(axis);
   }
+  // Step 2 is the confirmation: no extra question.
   byId('btn-eval').addEventListener('click', () => {
-    const model = byId('eval-model').value;
-    runAction('eval', {model: model}, 'Evaluate ' + model + ' on the hold-out segments (uses the GPU). Start?');
+    runAction('eval', {model: byId('eval-model').value});
   });
 
   // -- drive picker --------------------------------------------------------------------------
@@ -2078,7 +2194,8 @@
     const students = runModelOptions().concat(hfModelOptions());
     fillSelect(byId('cmp-student'), students);
     renderPicker('cmp-student');
-    renderPicker('cmp-reference');
+    renderReferences();
+    renderMoment();
 
     const videos = data.videos || [];
     if (same('videos', videos)) return;
@@ -2138,8 +2255,45 @@
     card.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
+  // -- new comparison video: a wizard, the models (step 1), the drive (step 2), the moment (step 3) --
+  const cmpWizard = wizard('cmp', 3, (step) => { if (step === 2) renderDrives(); if (step === 3) renderMoment(); });
+  function compareReference() {
+    const chosen = document.querySelector('input[name="cmp-reference"]:checked');
+    return chosen ? chosen.value : 'stock';
+  }
+  // The reference cards: what each one is, and how it did when it was evaluated.
+  function renderReferences() {
+    renderChoices(byId('cmp-step-1'));
+    for (const spec of Object.keys(REFERENCE_INFO)) {
+      const result = evalResultOf(spec);
+      byId('cmp-ref-' + spec + '-sub').textContent = result && result.avg_miss_m !== null
+        ? result.avg_miss_m.toFixed(2) + ' m average miss' : REFERENCE_INFO[spec][1];
+    }
+  }
+  function clock(seconds) {
+    const whole = Math.floor(seconds);
+    return Math.floor(whole / 60) + ':' + String(whole % 60).padStart(2, '0') + (seconds % 1 ? '.5' : '');
+  }
+  // The stretch fits in the minute of the segment: the start slider ends where the length allows.
+  function renderMoment() {
+    const start = byId('cmp-start');
+    const length = Number(byId('cmp-duration').value);
+    start.max = String(Math.max(Number(start.min), 60 - length));
+    if (Number(start.value) > Number(start.max)) start.value = start.max;
+    const from = Number(start.value);
+    byId('cmp-moment').textContent = clock(from) + ' – ' + clock(Math.min(60, from + length));
+    start.setAttribute('aria-valuetext', 'from ' + clock(from));
+  }
+  for (const radio of document.querySelectorAll('input[name="cmp-reference"]')) {
+    radio.addEventListener('change', () => renderChoices(byId('cmp-step-1')));
+  }
+  byId('cmp-start').addEventListener('input', renderMoment);
+  presetGroup('cmp-durations', 'cmp-duration', renderMoment);
+  presetGroup('cmp-speeds', 'cmp-speed');
+  renderChoices(byId('cmp-step-1'));
+
   byId('btn-compare').addEventListener('click', () => {
-    const params = {segment: byId('cmp-segment').value, reference: byId('cmp-reference').value,
+    const params = {segment: byId('cmp-segment').value, reference: compareReference(),
       student: byId('cmp-student').value, start: numberOrText(byId('cmp-start').value),
       duration: numberOrText(byId('cmp-duration').value), speed: Number(byId('cmp-speed').value),
       inset: byId('cmp-inset').checked, show_gt: byId('cmp-gt').checked};
@@ -2181,10 +2335,22 @@
     return account ? account.problem || '' : '';
   }
 
+  // -- a wizard: the model (step 1), where (step 2), install or publish there (step 3) --
+  // At step 3 the hash says where: #publish/comma, #publish/hf.
+  const publishWizard = wizard('publish', 3, () => {
+    renderDestinations();
+    const hash = '#publish' + (publishWizard.step === 3 ? '/' + publishDest : '');
+    if (currentTab === 'publish' && location.hash !== hash) history.replaceState(null, '', hash);
+  });
+  // Putting the original model back needs no model: straight to the comma.
+  byId('publish-restore-shortcut').addEventListener('click', () => {
+    publishDest = 'comma';
+    publishWizard.show(3);
+  });
+
   // -- the two destinations --
   function chooseDestination(dest, focus) {
     publishDest = dest;
-    if (currentTab === 'publish') history.replaceState(null, '', '#publish/' + dest);
     renderDestinations();
     updateButtons();
     if (focus) byId('dest-' + dest).focus();
@@ -2400,7 +2566,7 @@
 
     let dryReason = '';
     if (problem) dryReason = problem;
-    else if (!params.run) dryReason = 'choose a finished model above';
+    else if (!params.run) dryReason = 'choose a finished model in step 1';
     else if (!validName) dryReason = 'type a valid name';
     setAction('btn-publish-dry', 'publish_dry', dryReason);
 
@@ -2422,7 +2588,7 @@
     }
 
     let reason = '';
-    if (!params.run) reason = 'choose a finished model above';
+    if (!params.run) reason = 'choose a finished model in step 1';
     else if (!validName) reason = 'type a valid name';
     else if (taken) reason = 'name already used on Hugging Face';
     else if (!dry || dry.state !== 'ok') reason = 'first a successful dry run with the same settings';

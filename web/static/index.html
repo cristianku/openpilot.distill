@@ -10,6 +10,14 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<!-- Gradients shared by the illustrations of the wizards (not display:none, or some browsers drop them). -->
+<svg class="svg-defs" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="g-blue" x1="0" x2="1" y1="1" y2="0"><stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#60a5fa"/></linearGradient>
+    <radialGradient id="g-orb" cx="50%" cy="45%" r="55%"><stop offset="0" stop-color="#bcd4ff"/><stop offset=".45" stop-color="#5b8ff9"/><stop offset="1" stop-color="#1e40af"/></radialGradient>
+    <linearGradient id="g-road" x1="0" x2="1"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset=".5" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6" stop-opacity="0"/></linearGradient>
+  </defs>
+</svg>
 <header class="topbar">
   <div class="topbar-inner">
     <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 18 9 2M13 18 11 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></span>
@@ -24,7 +32,6 @@
     <button type="button" role="tab" id="tab-evaluation" data-tab="evaluation" aria-controls="panel-evaluation" aria-selected="false">Evaluation</button>
     <button type="button" role="tab" id="tab-compare" data-tab="compare" aria-controls="panel-compare" aria-selected="false">Comparison</button>
     <button type="button" role="tab" id="tab-publish" data-tab="publish" aria-controls="panel-publish" aria-selected="false">Publish</button>
-    <button type="button" role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
   </nav>
 </header>
 
@@ -37,6 +44,10 @@
 
   <!-- STATUS -->
   <section class="panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status">
+    <header class="page-head">
+      <h2 class="wizard-title">Status</h2>
+      <p class="wizard-sub" id="status-sub">How the server is doing and what it is working on.</p>
+    </header>
     <div class="metrics">
       <div class="card metric"><h2>GPU</h2><div class="value" id="gpu-value">–</div>
         <div class="bar" aria-hidden="true"><span id="gpu-bar"></span></div>
@@ -95,6 +106,71 @@
 
   <!-- DATA -->
   <section class="panel" id="panel-preprocessing" role="tabpanel" aria-labelledby="tab-preprocessing" hidden>
+    <!-- Get new drives: download from the comma, then localize. -->
+    <div class="card wizard" id="prep-new">
+      <div class="wizard-head">
+        <button class="icon-btn wizard-back" type="button" id="prep-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <div class="auth-steps" id="prep-dots" aria-hidden="true"><span class="on"></span><span></span></div>
+      </div>
+
+      <section class="wizard-step" id="prep-step-1" aria-labelledby="prep-step-1-title">
+        <h2 class="wizard-title" id="prep-step-1-title">New drives from the comma</h2>
+        <p class="wizard-sub">Dashcam drives of at least 5 minutes, without their first and last two minutes.</p>
+        <div class="choice-grid" role="radiogroup" aria-labelledby="prep-step-1-title">
+          <label class="choice">
+            <input type="radio" name="fetch-mode" value="new" checked>
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <rect x="14" y="30" width="46" height="32" rx="9" fill="url(#g-blue)" opacity=".85"/>
+              <circle cx="37" cy="46" r="8" fill="#0b1220" stroke="#bfdbfe" stroke-width="2"/>
+              <circle cx="37" cy="46" r="3" fill="#60a5fa"/>
+              <path d="M68 46h28" stroke="#93c5fd" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 6"/>
+              <path d="m94 39 9 7-9 7" fill="none" stroke="#bfdbfe" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <g fill="#2563eb" fill-opacity=".55" stroke="#93c5fd" stroke-opacity=".7" stroke-width="1.5">
+                <rect x="110" y="22" width="38" height="14" rx="4"/><rect x="110" y="39" width="38" height="14" rx="4"/><rect x="110" y="56" width="38" height="14" rx="4"/>
+              </g>
+              <g fill="#bfdbfe"><circle cx="118" cy="29" r="2"/><circle cx="118" cy="46" r="2"/><circle cx="118" cy="63" r="2"/></g>
+            </svg>
+            <span class="choice-text"><strong>All new</strong><span>Every drive not downloaded yet</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="fetch-mode" value="since">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <rect x="50" y="18" width="60" height="62" rx="11" fill="#1d4ed8" fill-opacity=".4" stroke="#60a5fa" stroke-opacity=".6" stroke-width="2"/>
+              <path d="M50 38V29a11 11 0 0 1 11-11h38a11 11 0 0 1 11 11v9z" fill="#3b82f6" fill-opacity=".8"/>
+              <path d="M66 12v12M94 12v12" stroke="#bfdbfe" stroke-width="4" stroke-linecap="round"/>
+              <g fill="#93c5fd" fill-opacity=".55"><circle cx="64" cy="50" r="3.5"/><circle cx="80" cy="50" r="3.5"/><circle cx="96" cy="50" r="3.5"/><circle cx="64" cy="66" r="3.5"/><circle cx="96" cy="66" r="3.5"/></g>
+              <circle cx="80" cy="66" r="7" fill="#bfdbfe"/>
+            </svg>
+            <span class="choice-text"><strong>Since a date</strong><span>Only the drives from that day on</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+        </div>
+        <label class="field" id="fetch-since-field" hidden>From this day<input type="date" id="fetch-since"></label>
+        <div class="action wizard-action"><button class="btn primary block" type="button" id="btn-fetch">Download from the comma<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-fetch"></div></div>
+        <button class="btn small wizard-test" type="button" id="prep-next-1">Already downloaded? Localize</button>
+        <p class="wizard-foot">Step 1 of 2</p>
+      </section>
+
+      <section class="wizard-step" id="prep-step-2" aria-labelledby="prep-step-2-title" hidden>
+        <h2 class="wizard-title" id="prep-step-2-title">Localize</h2>
+        <p class="wizard-sub">Works out the real path of every segment. A segment that is not localized is left out of training.</p>
+        <svg class="wizard-art" viewBox="0 0 320 120" aria-hidden="true">
+          <path d="M10 108C80 100 110 62 168 64s110 22 142-24" fill="none" stroke="url(#g-road)" stroke-width="16" stroke-linecap="round" opacity=".55"/>
+          <path d="M10 108C80 100 110 62 168 64s110 22 142-24" fill="none" stroke="#dbeafe" stroke-width="1.5" stroke-dasharray="6 8" opacity=".7"/>
+          <path d="M70 26 160 52M250 18 172 50" stroke="#93c5fd" stroke-width="1.5" stroke-dasharray="3 5" opacity=".7"/>
+          <g fill="#3b82f6" fill-opacity=".75" stroke="#bfdbfe" stroke-width="1.2"><rect x="58" y="20" width="16" height="10" rx="2"/><rect x="246" y="12" width="16" height="10" rx="2"/></g>
+          <g fill="#1d4ed8" fill-opacity=".6"><rect x="42" y="22" width="14" height="6" rx="1.5"/><rect x="76" y="22" width="14" height="6" rx="1.5"/><rect x="230" y="14" width="14" height="6" rx="1.5"/><rect x="264" y="14" width="14" height="6" rx="1.5"/></g>
+          <path d="M166 66s-16-15-16-26a16 16 0 0 1 32 0c0 11-16 26-16 26z" fill="url(#g-blue)"/>
+          <circle cx="166" cy="40" r="6" fill="#dbeafe"/>
+        </svg>
+        <p class="wizard-explain" id="prep-localize-what">Nothing to localize right now.</p>
+        <div class="action wizard-action"><button class="btn primary block" type="button" id="btn-localize">Localize<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-localize"></div></div>
+        <p class="note wizard-note">While it runs, Status lets you give it more or fewer CPU cores.</p>
+        <p class="wizard-foot">Step 2 of 2</p>
+      </section>
+      <div class="job-live" data-actions="fetch,localize"></div>
+    </div>
     <div class="tiles" id="data-tiles"></div>
     <div class="card" id="gps-card">
       <h2>GPS accuracy</h2>
@@ -104,26 +180,6 @@
       <div class="gps-bar" id="gps-bar" aria-hidden="true"></div>
       <ul class="gps-legend" id="gps-legend"></ul>
       <div class="gps-callout" id="gps-callout" hidden></div>
-    </div>
-    <div class="card">
-      <h2>Download and localize</h2>
-      <div class="step-block">
-        <div class="step-title"><span class="step-number">1</span> From the comma</div>
-        <p class="note">New dashcam drives of at least 5 minutes, without their first and last two minutes.</p>
-        <div class="step-row">
-          <label class="field compact">Since (optional)<input type="date" id="fetch-since"></label>
-          <div class="action"><button class="btn primary" type="button" id="btn-fetch">Download from the comma</button><div class="reason" id="reason-fetch"></div></div>
-        </div>
-      </div>
-      <div class="step-block">
-        <div class="step-title"><span class="step-number">2</span> Localize</div>
-        <p class="note">Works out the real path of every new segment; a segment that is not localized is left out of training.</p>
-        <div class="step-row">
-          <div class="action"><button class="btn primary" type="button" id="btn-localize">Localize</button><div class="reason" id="reason-localize"></div></div>
-        </div>
-        <p class="note">While it runs, Status lets you give it more or fewer CPU cores.</p>
-      </div>
-      <div class="job-live" data-actions="fetch,localize"></div>
     </div>
     <div class="card">
       <h2>Your drives</h2>
@@ -321,12 +377,37 @@
 
   <!-- EVALUATION -->
   <section class="panel" id="panel-evaluation" role="tabpanel" aria-labelledby="tab-evaluation" hidden>
-    <div class="card">
-      <h2>Evaluate a model</h2>
-      <p class="lead">Runs the model on the hold-out segments (never seen in training) and measures by how many metres the predicted path misses the one you actually drove (next 10 s).</p>
-      <select id="eval-model" hidden aria-hidden="true"></select>
-      <div class="field-label" id="eval-model-label">Choose a model</div><div class="picker" id="eval-model-picker" role="radiogroup" aria-labelledby="eval-model-label"></div>
-      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-eval">Evaluate</button><div class="reason" id="reason-eval"></div></div></div>
+    <!-- Evaluate a model: which one, then the summary. -->
+    <div class="card wizard" id="eval-new">
+      <div class="wizard-head">
+        <button class="icon-btn wizard-back" type="button" id="eval-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <div class="auth-steps" id="eval-dots" aria-hidden="true"><span class="on"></span><span></span></div>
+      </div>
+
+      <section class="wizard-step" id="eval-step-1" aria-labelledby="eval-step-1-title">
+        <h2 class="wizard-title" id="eval-step-1-title">Which model?</h2>
+        <p class="wizard-sub">It is tested on the drives it never saw in training.</p>
+        <select id="eval-model" hidden aria-hidden="true"></select>
+        <div class="picker" id="eval-model-picker" role="radiogroup" aria-labelledby="eval-step-1-title"></div>
+        <button class="btn primary block" type="button" id="eval-next-1">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 1 of 2</p>
+      </section>
+
+      <section class="wizard-step" id="eval-step-2" aria-labelledby="eval-step-2-title" hidden>
+        <h2 class="wizard-title" id="eval-step-2-title">Ready to evaluate</h2>
+        <p class="wizard-sub">How many metres its path misses the one you really drove, over the next 10 s.</p>
+        <svg class="wizard-art" viewBox="0 0 320 120" aria-hidden="true">
+          <path d="M40 112C90 96 120 60 150 36s70-28 120-22" fill="none" stroke="url(#g-road)" stroke-width="16" stroke-linecap="round" opacity=".5"/>
+          <path d="M40 112C90 96 120 60 150 36s70-28 120-22" fill="none" stroke="#dbeafe" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M40 112C96 100 132 72 168 54s66-20 108-12" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="7 7"/>
+          <path d="M262 16v26" stroke="#bfdbfe" stroke-width="2" stroke-linecap="round"/>
+          <path d="M256 16h12M256 42h12" stroke="#bfdbfe" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="40" cy="112" r="6" fill="url(#g-blue)"/>
+        </svg>
+        <dl class="kv wizard-summary" id="eval-summary"></dl>
+        <div class="action wizard-action"><button class="btn primary block" type="button" id="btn-eval">Evaluate<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-eval"></div></div>
+        <p class="wizard-foot">Step 2 of 2</p>
+      </section>
       <div class="job-live" data-actions="eval"></div>
     </div>
     <div class="card">
@@ -346,36 +427,97 @@
 
   <!-- COMPARISON -->
   <section class="panel" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
-    <div class="card">
-      <h2>New comparison video</h2>
-      <select id="cmp-segment" hidden aria-hidden="true"></select>
-      <select id="cmp-student" hidden aria-hidden="true"></select>
-      <div class="field-label" id="cmp-student-label">Your model (bottom of the video)</div><div class="picker" id="cmp-student-picker" role="radiogroup" aria-labelledby="cmp-student-label"></div>
-      <select id="cmp-reference" hidden aria-hidden="true">
-        <option value="stock">Stock</option>
-        <option value="teacher">Teacher</option>
-        <option value="logged">Logged</option>
-      </select>
-      <div class="field-label" id="cmp-reference-label">Compare it with (top of the video)</div><div class="picker" id="cmp-reference-picker" role="radiogroup" aria-labelledby="cmp-reference-label"></div>
-      <div class="drive-head">
-        <div class="field-label" id="drive-label">On which drive</div>
-        <label class="switch"><input type="checkbox" id="drive-all"><span class="switch-track"></span> Also drives used in training</label>
+    <!-- New comparison video: the two models, the drive, the moment. -->
+    <div class="card wizard" id="cmp-new">
+      <div class="wizard-head">
+        <button class="icon-btn wizard-back" type="button" id="cmp-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <div class="auth-steps" id="cmp-dots" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
       </div>
-      <p class="note" id="drive-note"></p>
-      <div class="drive-picker" id="drive-picker" role="radiogroup" aria-labelledby="drive-label"></div>
-      <div class="form-grid">
-        <label class="field">Start (s)<input type="number" id="cmp-start" min="0" max="59" step="0.5" value="10" inputmode="decimal"></label>
-        <label class="field">Duration (s)<input type="number" id="cmp-duration" min="1" max="60" step="0.5" value="15" inputmode="decimal"></label>
-        <label class="field">Speed<select id="cmp-speed">
-          <option value="0.25">0.25×</option><option value="0.5" selected>0.5×</option><option value="1">1×</option>
-        </select></label>
-      </div>
-      <div class="buttons">
-        <label class="check"><input type="checkbox" id="cmp-inset" checked> Top view (inset)</label>
-        <label class="check"><input type="checkbox" id="cmp-gt"> Show the real path</label>
-      </div>
-      <p class="note">The earliest start is 5.2 s: before that the models are warming up (a lower value is moved there). On the GPU a 15 s video takes about a minute.</p>
-      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-compare">Make the video</button><div class="reason" id="reason-compare"></div></div></div>
+
+      <section class="wizard-step" id="cmp-step-1" aria-labelledby="cmp-step-1-title">
+        <h2 class="wizard-title" id="cmp-step-1-title">Which models?</h2>
+        <p class="wizard-sub">Yours at the bottom of the video, the one to compare it with at the top.</p>
+        <select id="cmp-student" hidden aria-hidden="true"></select>
+        <div class="field-label" id="cmp-student-label">Your model</div><div class="picker" id="cmp-student-picker" role="radiogroup" aria-labelledby="cmp-student-label"></div>
+        <div class="field-label" id="cmp-reference-label">Compare it with</div>
+        <div class="choice-grid three" role="radiogroup" aria-labelledby="cmp-reference-label">
+          <label class="choice">
+            <input type="radio" name="cmp-reference" value="stock" checked>
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <rect x="46" y="28" width="68" height="44" rx="12" fill="url(#g-blue)" opacity=".85"/>
+              <circle cx="80" cy="50" r="12" fill="#0b1220" stroke="#bfdbfe" stroke-width="2.5"/>
+              <circle cx="80" cy="50" r="4.5" fill="#60a5fa"/>
+              <path d="M58 20h44" stroke="#93c5fd" stroke-width="4" stroke-linecap="round" opacity=".6"/>
+            </svg>
+            <span class="choice-text"><strong>Stock</strong><span id="cmp-ref-stock-sub">The model on your comma today</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="cmp-reference" value="teacher">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <g transform="translate(80 48)">
+                <circle r="28" fill="url(#g-orb)" opacity=".95"/>
+                <ellipse rx="28" ry="11" fill="none" stroke="#dbeafe" stroke-width="2" opacity=".75" transform="rotate(25)"/>
+                <ellipse rx="28" ry="11" fill="none" stroke="#dbeafe" stroke-width="2" opacity=".55" transform="rotate(-35)"/>
+              </g>
+            </svg>
+            <span class="choice-text"><strong>Teacher</strong><span id="cmp-ref-teacher-sub">The big model yours learns from</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="cmp-reference" value="logged">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <path d="M20 86C60 80 70 44 96 40s34-18 46-30" fill="none" stroke="url(#g-road)" stroke-width="14" stroke-linecap="round" opacity=".6"/>
+              <path d="M20 86C60 80 70 44 96 40s34-18 46-30" fill="none" stroke="#dbeafe" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="96" cy="40" r="7" fill="url(#g-blue)" stroke="#dbeafe" stroke-width="2"/>
+            </svg>
+            <span class="choice-text"><strong>What you drove</strong><span id="cmp-ref-logged-sub">The real path, no model</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </label>
+        </div>
+        <button class="btn primary block" type="button" id="cmp-next-1">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 1 of 3</p>
+      </section>
+
+      <section class="wizard-step" id="cmp-step-2" aria-labelledby="cmp-step-2-title" hidden>
+        <h2 class="wizard-title" id="cmp-step-2-title">Which drive?</h2>
+        <p class="wizard-sub" id="drive-note"></p>
+        <select id="cmp-segment" hidden aria-hidden="true"></select>
+        <label class="switch drive-switch"><input type="checkbox" id="drive-all"><span class="switch-track"></span> Also drives used in training</label>
+        <div class="drive-picker" id="drive-picker" role="radiogroup" aria-labelledby="cmp-step-2-title"></div>
+        <button class="btn primary block" type="button" id="cmp-next-2">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 2 of 3</p>
+      </section>
+
+      <section class="wizard-step" id="cmp-step-3" aria-labelledby="cmp-step-3-title" hidden>
+        <h2 class="wizard-title" id="cmp-step-3-title">Which moment?</h2>
+        <p class="wizard-sub">A stretch of the chosen minute of driving.</p>
+        <div class="moment">
+          <div class="moment-value" id="cmp-moment">0:10 – 0:25</div>
+          <label class="field">Start<input type="range" id="cmp-start" min="5" max="55" step="0.5" value="10"></label>
+        </div>
+        <input type="hidden" id="cmp-duration" value="15">
+        <input type="hidden" id="cmp-speed" value="0.5">
+        <div class="field-label" id="cmp-duration-label">Length</div>
+        <div class="presets" id="cmp-durations" role="radiogroup" aria-labelledby="cmp-duration-label">
+          <button type="button" role="radio" class="preset" data-value="5" aria-checked="false">5 s</button>
+          <button type="button" role="radio" class="preset" data-value="15" aria-checked="true">15 s</button>
+          <button type="button" role="radio" class="preset" data-value="30" aria-checked="false">30 s</button>
+        </div>
+        <div class="field-label" id="cmp-speed-label">Speed</div>
+        <div class="presets" id="cmp-speeds" role="radiogroup" aria-labelledby="cmp-speed-label">
+          <button type="button" role="radio" class="preset" data-value="0.25" aria-checked="false">0.25×</button>
+          <button type="button" role="radio" class="preset" data-value="0.5" aria-checked="true">0.5×</button>
+          <button type="button" role="radio" class="preset" data-value="1" aria-checked="false">1×</button>
+        </div>
+        <div class="switch-list">
+          <label class="switch"><input type="checkbox" id="cmp-inset" checked><span class="switch-track"></span> Top view (inset)</label>
+          <label class="switch"><input type="checkbox" id="cmp-gt"><span class="switch-track"></span> Show the real path</label>
+        </div>
+        <div class="action wizard-action"><button class="btn primary block" type="button" id="btn-compare">Make the video<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-compare"></div></div>
+        <p class="note wizard-note">Before 5.2 s the models are still warming up. On the GPU a 15 s video takes about a minute.</p>
+        <p class="wizard-foot">Step 3 of 3</p>
+      </section>
       <div class="job-live" data-actions="compare"></div>
     </div>
     <div class="card" id="player-card" hidden>
@@ -394,81 +536,110 @@
 
   <!-- PUBLISH: a finished model, then where it goes (the comma or Hugging Face) -->
   <section class="panel" id="panel-publish" role="tabpanel" aria-labelledby="tab-publish" hidden>
-    <div class="card">
-      <h2>Publish a model</h2>
-      <p class="lead">Choose a finished training, then where you want it: try it on your comma, or share it on Hugging Face.</p>
-      <select id="publish-run" hidden aria-hidden="true"></select>
-      <div class="field-label" id="publish-run-label">Which model</div><div class="picker" id="publish-run-picker" role="radiogroup" aria-labelledby="publish-run-label"></div>
-      <div class="field-label" id="dest-label">Where do you want it</div>
-      <div class="dest-options" id="dest-options" role="radiogroup" aria-labelledby="dest-label">
-        <button class="dest-option" type="button" role="radio" id="dest-comma" data-dest="comma" aria-checked="true">
-          <span class="dest-icon comma" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2.5M19 16v2.5M7.5 13h.01M16.5 13h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <span class="dest-title">On your comma</span>
-          <span class="dest-sub" id="dest-comma-sub">Checking…</span>
-        </button>
-        <button class="dest-option" type="button" role="radio" id="dest-hf" data-dest="hf" aria-checked="false" tabindex="-1">
-          <span class="dest-icon hf" aria-hidden="true">HF</span>
-          <span class="dest-title">On Hugging Face</span>
-          <span class="dest-sub" id="dest-hf-sub">Checking…</span>
-        </button>
+    <!-- Publish a model: which one, where (the comma or Hugging Face), then install or publish. -->
+    <div class="card wizard" id="publish-new">
+      <div class="wizard-head">
+        <button class="icon-btn wizard-back" type="button" id="publish-back" aria-label="Back" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <div class="auth-steps" id="publish-dots" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
       </div>
-    </div>
 
-    <!-- On your comma: its state, install, put the original back -->
-    <div class="card" id="dest-panel-comma">
-      <div class="card-head">
-        <h2>On your comma</h2>
-        <button class="btn small" type="button" id="btn-comma-check">Check now</button>
-      </div>
-      <ul class="checklist" id="comma-checklist" aria-live="polite"></ul>
-      <p class="note" id="comma-checked"></p>
-      <div class="dest-block">
-        <h3>Install this model</h3>
-        <p class="note">It takes the place of openpilot's driving model and the comma restarts; the first start takes a few
-          extra minutes while the comma prepares the model. The comma must be parked, with the Models menu on Default.</p>
-        <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
-        <div class="job-live" data-actions="install"></div>
-      </div>
-      <div class="dest-block">
-        <h3>Put the original model back</h3>
-        <p class="note">openpilot's own driving model comes back and the comma restarts. A software update from the comma
-          screen does the same.</p>
-        <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Put the original model back</button><div class="reason" id="reason-restore"></div></div></div>
-        <div class="job-live" data-actions="restore"></div>
-      </div>
-    </div>
+      <section class="wizard-step" id="publish-step-1" aria-labelledby="publish-step-1-title">
+        <h2 class="wizard-title" id="publish-step-1-title">Which model?</h2>
+        <p class="wizard-sub">A finished training, ready to drive.</p>
+        <select id="publish-run" hidden aria-hidden="true"></select>
+        <div class="picker" id="publish-run-picker" role="radiogroup" aria-labelledby="publish-step-1-title"></div>
+        <button class="btn primary block" type="button" id="publish-next-1">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <button class="btn small wizard-test" type="button" id="publish-restore-shortcut">Put the original model back on the comma</button>
+        <p class="wizard-foot">Step 1 of 3</p>
+      </section>
 
-    <!-- On Hugging Face: dry run, publish, what is already there -->
-    <div class="card" id="dest-panel-hf" hidden>
-      <h2>On Hugging Face</h2>
-      <p class="lead">Shares the model in your Hugging Face repository, where sunnypilot offers it in the comma's Models menu.
-        A dry run comes first: it prepares the model and checks it on the comma without uploading anything. If it
-        succeeds, Publish uploads it after you confirm the name.</p>
-      <div class="callout warn" id="publish-hf-callout" hidden>
-        <span id="publish-hf-text">Hugging Face is not connected: connect it in Settings to publish.</span>
-        <button class="btn small" type="button" data-goto="settings" data-account="hf">Connect in Settings</button>
-      </div>
-      <p class="note" id="publish-hf-account" hidden></p>
-      <div class="form-grid wide">
-        <label class="field">Model name<input type="text" id="publish-name" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-      </div>
-      <div class="buttons"><label class="check"><input type="checkbox" id="publish-stable"> Stable (becomes the base for “From the stable weights”)</label></div>
-      <div class="reason" id="publish-name-note"></div>
-      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-publish-dry">Dry run</button><div class="reason" id="reason-publish_dry"></div></div></div>
-      <div id="dry-status" class="note"></div>
-      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Publish to Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
-      <div class="job-live" data-actions="publish_dry,publish"></div>
-      <div class="dest-block">
-        <h3>Already on Hugging Face</h3>
-        <dl class="kv" id="hf-kv"></dl>
-        <ul class="list" id="hf-models"></ul>
-        <p class="empty" id="hf-empty" hidden>No published models.</p>
-      </div>
+      <section class="wizard-step" id="publish-step-2" aria-labelledby="publish-step-2-title" hidden>
+        <h2 class="wizard-title" id="publish-step-2-title">Where do you want it?</h2>
+        <p class="wizard-sub">Try it on your comma, or share it on Hugging Face.</p>
+        <div class="dest-options" id="dest-options" role="radiogroup" aria-labelledby="publish-step-2-title">
+          <button class="dest-option" type="button" role="radio" id="dest-comma" data-dest="comma" aria-checked="true">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <path d="M18 84 50 30h60l32 54" fill="#1d4ed8" fill-opacity=".25" stroke="#60a5fa" stroke-opacity=".5" stroke-width="2" stroke-linejoin="round"/>
+              <rect x="58" y="22" width="44" height="26" rx="8" fill="url(#g-blue)"/>
+              <circle cx="80" cy="35" r="7" fill="#0b1220" stroke="#bfdbfe" stroke-width="2"/>
+              <circle cx="80" cy="35" r="2.5" fill="#60a5fa"/>
+              <path d="M80 60v20M70 70h20" stroke="#dbeafe" stroke-width="1.5" stroke-dasharray="3 4" opacity=".6"/>
+            </svg>
+            <span class="choice-text"><strong>On your comma</strong><span class="dest-sub" id="dest-comma-sub">Checking…</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+          <button class="dest-option" type="button" role="radio" id="dest-hf" data-dest="hf" aria-checked="false" tabindex="-1">
+            <svg class="choice-art" viewBox="0 0 160 96" aria-hidden="true">
+              <path d="M52 74a20 20 0 0 1-2-40 26 26 0 0 1 50-6 22 22 0 0 1 12 46z" fill="url(#g-blue)" opacity=".85"/>
+              <path d="M80 66V40m-11 11 11-11 11 11" fill="none" stroke="#dbeafe" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="choice-text"><strong>On Hugging Face</strong><span class="dest-sub" id="dest-hf-sub">Checking…</span></span>
+            <span class="choice-check" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5 10.5 3.2 3L15 6.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+        </div>
+        <button class="btn primary block" type="button" id="publish-next-2">Continue<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+        <p class="wizard-foot">Step 2 of 3</p>
+      </section>
+
+      <section class="wizard-step" id="publish-step-3" aria-labelledby="publish-step-3-title" hidden>
+        <!-- On your comma: its state, install, put the original back -->
+        <div class="wizard-step" id="dest-panel-comma">
+          <h2 class="wizard-title" id="publish-step-3-title">On your comma</h2>
+          <p class="wizard-sub">It takes the place of openpilot's driving model and the comma restarts; the first start
+            takes a few extra minutes.</p>
+          <div class="card-head">
+            <span class="field-label">Your comma</span>
+            <button class="btn small" type="button" id="btn-comma-check">Check now</button>
+          </div>
+          <ul class="checklist" id="comma-checklist" aria-live="polite"></ul>
+          <p class="note" id="comma-checked"></p>
+          <div class="action wizard-action"><button class="btn danger solid block" type="button" id="btn-install">Install on the comma<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-install"></div></div>
+          <div class="job-live" data-actions="install"></div>
+          <div class="dest-block">
+            <h3>Put the original model back</h3>
+            <p class="note">openpilot's own driving model comes back and the comma restarts. A software update from the
+              comma screen does the same.</p>
+            <div class="action"><button class="btn danger" type="button" id="btn-restore">Put the original model back</button><div class="reason" id="reason-restore"></div></div>
+            <div class="job-live" data-actions="restore"></div>
+          </div>
+        </div>
+
+        <!-- On Hugging Face: dry run, publish, what is already there -->
+        <div class="wizard-step" id="dest-panel-hf" hidden>
+          <h2 class="wizard-title">On Hugging Face</h2>
+          <p class="wizard-sub">Shared in your repository, where sunnypilot offers it in the comma's Models menu. A dry run
+            checks it on the comma first, without uploading anything.</p>
+          <div class="callout warn" id="publish-hf-callout" hidden>
+            <span id="publish-hf-text">Hugging Face is not connected: connect it in Settings to publish.</span>
+            <button class="btn small" type="button" data-goto="settings" data-account="hf">Connect in Settings</button>
+          </div>
+          <p class="note wizard-note" id="publish-hf-account" hidden></p>
+          <label class="field">Model name<input type="text" id="publish-name" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+          <div class="reason" id="publish-name-note"></div>
+          <label class="switch"><input type="checkbox" id="publish-stable"><span class="switch-track"></span> Stable: the base for “Continue” in Training</label>
+          <div class="action wizard-action"><button class="btn block" type="button" id="btn-publish-dry">1 · Dry run</button><div class="reason" id="reason-publish_dry"></div></div>
+          <div id="dry-status" class="note wizard-note"></div>
+          <div class="action wizard-action"><button class="btn danger solid block" type="button" id="btn-publish">2 · Publish to Hugging Face<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4.5-4.5L15 10l-4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button><div class="reason" id="reason-publish"></div></div>
+          <div class="job-live" data-actions="publish_dry,publish"></div>
+          <div class="dest-block">
+            <h3>Already on Hugging Face</h3>
+            <dl class="kv" id="hf-kv"></dl>
+            <ul class="list" id="hf-models"></ul>
+            <p class="empty" id="hf-empty" hidden>No published models.</p>
+          </div>
+        </div>
+        <p class="wizard-foot">Step 3 of 3</p>
+      </section>
     </div>
   </section>
 
   <!-- SETTINGS -->
-  <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+  <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="settings-title" hidden>
+    <header class="page-head">
+      <button class="icon-btn wizard-back" type="button" id="settings-back" aria-label="Back"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+      <h2 class="wizard-title" id="settings-title">Settings</h2>
+      <p class="wizard-sub">Your sign-in, the accounts this server uses, how the site looks.</p>
+    </header>
     <div class="card" id="admin-card">
       <h2>Administrator</h2>
       <div class="account-row">
@@ -554,6 +725,11 @@
   </section>
 
 </main>
+
+<!-- Settings: a gear at the bottom of the screen, outside the tabs. -->
+<button class="gear" type="button" id="tab-settings" data-tab="settings" aria-controls="panel-settings" aria-label="Settings" title="Settings">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.17 9.19L22.06 10.33L22.06 13.67L19.17 14.81L19.05 15.09L20.30 17.93L17.93 20.30L15.09 19.05L14.81 19.17L13.67 22.06L10.33 22.06L9.19 19.17L8.91 19.05L6.07 20.30L3.70 17.93L4.95 15.09L4.83 14.81L1.94 13.67L1.94 10.33L4.83 9.19L4.95 8.91L3.70 6.07L6.07 3.70L8.91 4.95L9.19 4.83L10.33 1.94L13.67 1.94L14.81 4.83L15.09 4.95L17.93 3.70L20.30 6.07L19.05 8.91Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+</button>
 
 <div class="sheet-backdrop" id="sheet-backdrop"></div>
 <section class="sheet" id="info-sheet" role="dialog" aria-modal="true" aria-labelledby="info-title">
