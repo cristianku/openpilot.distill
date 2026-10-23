@@ -496,6 +496,8 @@ border-right:1px solid var(--line);height:100%;display:grid;place-items:center;p
 font-size:13px;letter-spacing:-.02em}
 .account-badge.hf{background:var(--todo-soft);color:var(--todo)}
 .account-badge.wandb{background:var(--imp-soft);color:var(--imp)}
+.account-badge.android{background:var(--ok-soft);color:var(--ok)}
+.account-badge.android svg{width:22px;height:22px}
 .account-title{font-weight:700;font-size:16px}
 .account-sub{color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
 .account-pill{flex:none}

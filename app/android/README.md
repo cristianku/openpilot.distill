@@ -7,10 +7,17 @@ car directly.
 
 ## Install
 
-Every change to `app/android/` on `master` is built by GitHub Actions
-([`.github/workflows/android.yml`](../../.github/workflows/android.yml)) and published as a release
-`android-v0.2.<build>` with `distill-android-0.2.<build>.apk`. Download the APK on the phone, open it and
-allow installing apps from that source. Android 8.0 (API 26) or newer.
+Two ways, the same app:
+
+- **From your server**: `helpers/build_android.sh` builds it on the server; open distill-web on the phone,
+  Settings › Distill for Android › Download the app.
+- **From GitHub**: every change to `app/android/` on `master` is built by GitHub Actions
+  ([`.github/workflows/android.yml`](../../.github/workflows/android.yml)) and published as a release
+  `android-v0.3.<commits>` with `distill-android-0.3.<commits>.apk`.
+
+Open the APK on the phone and allow installing apps from that source. Android 8.0 (API 26) or newer.
+Both use version 0.3.<number of commits> and versionCode 1000 + that number, so a build of the server and
+the GitHub release of the same commit install over each other (when signed with the same key, below).
 
 ## Use
 
@@ -40,19 +47,25 @@ fixtures produced by `web/server.py`: regenerate them when the server changes th
 
 ## Build
 
-JDK 17, Android SDK platform 35 and build-tools 35, Gradle 8.9 (no wrapper jar is committed):
+On the server, without GitHub:
 
 ```bash
-cd app/android
-gradle :app:testDebugUnitTest :app:assembleDebug
+helpers/build_android.sh
 ```
+
+runs the unit tests, builds the release APK into `outputs/android/` (the last 3 are kept) and signs it
+with the key in `~/.config/distill-android/` when it is there. It needs JDK 17, Android SDK platform 35
+and build-tools 35 and Gradle 8.9 in `/opt/android` (or `DISTILL_ANDROID_TOOLS`); no wrapper jar is
+committed. By hand: `gradle :app:testDebugUnitTest :app:assembleDebug` in `app/android`.
 
 ## Release signing
 
 Android installs an update only when it is signed with the same key as the installed app. Without
 signing secrets, CI signs every build with a fresh debug key, so an update means uninstalling first. For
 updates that install over the previous version, add these repository secrets (GitHub › Settings ›
-Secrets and variables › Actions); the key never goes into git:
+Secrets and variables › Actions), and keep the same key in `~/.config/distill-android/` on the server
+for `helpers/build_android.sh` (`distill-release.p12` and one `ANDROID_*.txt` file per secret below). The
+key never goes into git:
 
 | Secret | Value |
 | --- | --- |

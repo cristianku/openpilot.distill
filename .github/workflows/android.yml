@@ -1,7 +1,10 @@
 name: Android app
 
 # Builds the Android companion app (app/android) and publishes the APK in a GitHub release.
-# Version: 0.2.<run number>, versionCode 1000 + <run number>, tag android-v0.2.<run number>.
+# Version: 0.3.<commits of the built commit>, versionCode 1000 + <commits>, tag android-v0.3.<commits>:
+# the same numbers as helpers/build_android.sh on the server, so the two APKs install over each other.
+# Run again on the same commit (Actions › Run workflow, e.g. after adding the signing secrets), it
+# replaces the APK of that release.
 # Signing: the ANDROID_* secrets below, when the repository has them; without them the APK is signed
 # with a debug key that changes with every build (Android then asks to uninstall before an update).
 
@@ -24,13 +27,17 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      VERSION_NAME: 0.2.${{ github.run_number }}
-      VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Version
+        run: |
+          COUNT="$(git rev-list --count HEAD)"
+          echo "VERSION_NAME=0.3.$COUNT" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((1000 + COUNT))" >> "$GITHUB_ENV"
 
       - name: JDK 17
         uses: actions/setup-java@v4
@@ -73,7 +80,7 @@ jobs:
         working-directory: app/android
         run: >
           gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon --stacktrace
-          -PdistillVersionCode=$((1000 + VERSION_CODE)) -PdistillVersionName=$VERSION_NAME
+          -PdistillVersionCode=$VERSION_CODE -PdistillVersionName=$VERSION_NAME
 
       - name: Name the APK
         run: |
@@ -110,5 +117,11 @@ jobs:
 
           SHA-256: \`$SHA256\`
           EOF
-          gh release create "android-v$VERSION_NAME" "$APK" --target "$GITHUB_SHA" \
-            --title "Distill for Android $VERSION_NAME" --notes-file notes.md
+          TAG="android-v$VERSION_NAME"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "$APK" --target "$GITHUB_SHA" \
+              --title "Distill for Android $VERSION_NAME" --notes-file notes.md
+          fi

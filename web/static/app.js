@@ -2757,6 +2757,24 @@
     renderAccount('hf', settings.accounts.hf, repo);
     renderAccount('wandb', settings.accounts.wandb, repo);
     if (settings.site) renderSite(settings.site);
+    renderAndroid(settings.android);
+  }
+
+  // The Android app built on this server (helpers/build_android.sh), for download from the phone.
+  function renderAndroid(build) {
+    const link = byId('android-download');
+    link.hidden = !build;
+    byId('android-note').hidden = !build;
+    if (!build) {
+      byId('android-sub').textContent = 'No app built on this server yet.';
+      return;
+    }
+    const parts = ['Version ' + (build.version || '?')];
+    if (build.built) parts.push('built ' + fmtDay(build.built));
+    parts.push(fmtBytes(build.size));
+    if (build.signed_with === 'debug') parts.push('debug key: uninstall the previous version first');
+    byId('android-sub').textContent = parts.join(' \u00b7 ');
+    link.textContent = 'Download the app';
   }
 
   async function connectAccount(kind) {

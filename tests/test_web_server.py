@@ -213,7 +213,8 @@ class SignInTest(ServerTestCase):
             self.assertEqual(response.status, 200, name)
         response, body = self.request('GET', '/static/app.js', auth=False)
         self.assertEqual(response.status, 401)
-        for path in ('/api/status', '/api/settings', '/api/jobs', '/video/clip.mp4', '/thumb/' + '0' * 20 + '.jpg'):
+        for path in ('/api/status', '/api/settings', '/api/jobs', '/video/clip.mp4', '/thumb/' + '0' * 20 + '.jpg',
+                     '/download/android'):
             response, body = self.request('GET', path, auth=False)
             self.assertEqual(response.status, 401, path)
         response, body = self.request('GET', '/api/status', auth=False)
@@ -763,6 +764,58 @@ class VideoTest(ServerTestCase):
             self.assertNotEqual(body, b'secret')
         response, body = self.request('GET', '/video/clip_1.mp4', auth=False)
         self.assertEqual(response.status, 401)
+
+
+class AndroidDownloadTest(ServerTestCase):
+    """The app built on the server by helpers/build_android.sh, offered in Settings and at /download/android."""
+
+    def build(self, info, name='distill-android-0.3.120.apk', content=b'PK apk'):
+        folder = self.repo / 'outputs' / 'android'
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(content)
+        (folder / 'latest.json').write_text(json.dumps(info))
+        return folder
+
+    def test_no_build(self):
+        response, body = self.request('GET', '/api/settings')
+        self.assertIsNone(json.loads(body)['android'])
+        response, body = self.request('GET', '/download/android')
+        self.assertEqual(response.status, 404)
+
+    def test_the_last_build(self):
+        self.build({'file': 'distill-android-0.3.120.apk', 'version': '0.3.120', 'version_code': 1120,
+                    'commit': 'abc1234', 'signed_with': 'release', 'sha256': 'f' * 64, 'built': 1.5e9})
+        response, body = self.request('GET', '/api/settings')
+        android = json.loads(body)['android']
+        self.assertEqual(android, {'file': 'distill-android-0.3.120.apk', 'size': 6, 'version': '0.3.120',
+                                   'version_code': 1120, 'commit': 'abc1234', 'signed_with': 'release',
+                                   'sha256': 'f' * 64, 'built': 1.5e9})
+        response, body = self.request('GET', '/download/android')
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body, b'PK apk')
+        self.assertEqual(response.getheader('Content-Type'), 'application/vnd.android.package-archive')
+        self.assertEqual(response.getheader('Content-Disposition'),
+                         'attachment; filename="distill-android-0.3.120.apk"')
+
+    def test_only_a_plain_apk_inside_outputs_android(self):
+        secret = self.repo / 'secret.apk'
+        secret.write_bytes(b'secret')
+        folder = self.build({'file': 'distill-android-0.3.1.apk'}, name='other.apk')
+        os.symlink(secret, folder / 'distill-android-0.3.1.apk')
+        for name in ('distill-android-0.3.1.apk', '../secret.apk', 'other.apk', 'distill-android-0.3.1.apk/../x'):
+            (folder / 'latest.json').write_text(json.dumps({'file': name, 'version': '1'}))
+            response, body = self.request('GET', '/download/android')
+            self.assertEqual(response.status, 404, name)
+            self.assertNotEqual(body, b'secret')
+        (folder / 'latest.json').write_text('not json')
+        response, body = self.request('GET', '/api/settings')
+        self.assertIsNone(json.loads(body)['android'])
+
+    def test_wrong_field_types_are_dropped(self):
+        self.build({'file': 'distill-android-0.3.120.apk', 'version': 3, 'version_code': True, 'built': 'yesterday'})
+        response, body = self.request('GET', '/api/settings')
+        android = json.loads(body)['android']
+        self.assertEqual((android['version'], android['version_code'], android['built']), (None, None, None))
 
 
 class RangeParseTest(unittest.TestCase):

@@ -41,8 +41,8 @@ from web.hf import HfCatalog
 from web.jobs import JOB_ID_RE, JobManager, describe
 from web.metrics import RunReader, running_runs_from_processes
 from web.settings import Accounts, clean_site_changes, site_payload, update_env_file
-from web.status import (Cache, activities, compare_videos, eval_results, gpu_busy_reason, segments, system_info,
-                        video_path)
+from web.status import (Cache, activities, android_build, compare_videos, eval_results, gpu_busy_reason, segments,
+                        system_info, video_path)
 
 # The setup code of the first visit (creates the administrator); it opens nothing else.
 TOKEN_ENV = 'DISTILL_WEB_TOKEN'
@@ -389,7 +389,10 @@ class App:
     def settings_payload(self) -> dict:
         """The Settings tab: who the accounts belong to (asked to the services, kept a few minutes) and
         the site settings. Never a secret."""
-        return {'accounts': self.accounts.payload(self.hf.repo), 'site': site_payload(self.repo)}
+        android = android_build(self.repo)
+        if android is not None:
+            android = {key: value for key, value in android.items() if key != 'path'}
+        return {'accounts': self.accounts.payload(self.hf.repo), 'site': site_payload(self.repo), 'android': android}
 
     def connect_account(self, kind: str, body) -> dict:
         field = 'token' if kind == 'hf' else 'key'
@@ -697,6 +700,15 @@ def make_handler(app: App):
             match = re.fullmatch(r'/video/([^/]+)', path)
             if match:
                 self._send_video(match.group(1))
+                return
+            if path == '/download/android':
+                build = android_build(app.repo)
+                if build is None:
+                    self._problem(404, 'not_found', 'No Android app has been built on this server yet.', False)
+                    return
+                self._send(200, 'application/vnd.android.package-archive', build['path'].read_bytes(),
+                           extra=[('Content-Disposition', 'attachment; filename="' + build['file'] + '"'),
+                                  ('Cache-Control', 'no-store')])
                 return
             if path == '/api/drives':
                 self._json(200, app.drives.drives())

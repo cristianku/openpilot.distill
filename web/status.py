@@ -690,6 +690,32 @@ def video_path(repo: Path, name: str) -> Path | None:
     return path
 
 
+ANDROID_APK_RE = re.compile(r'distill-android-[0-9]+\.[0-9]+\.[0-9]+(-dev)?\.apk')
+
+
+def android_build(repo: Path) -> dict | None:
+    """The last Android app built on this server (helpers/build_android.sh): what Settings shows and
+    /download/android sends. None without a build, or when outputs/android/latest.json does not name a
+    plain APK inside outputs/android (no links)."""
+    folder = repo / 'outputs' / 'android'
+    try:
+        info = json.loads((folder / 'latest.json').read_text())
+    except (OSError, ValueError):
+        return None
+    name = info.get('file') if isinstance(info, dict) else None
+    if not isinstance(name, str) or not ANDROID_APK_RE.fullmatch(name):
+        return None
+    path = folder / name
+    if path.is_symlink() or not path.is_file() or not inside(folder, path):
+        return None
+    result = {'file': name, 'size': path.stat().st_size, 'path': path}
+    for key, kind in (('version', str), ('version_code', int), ('commit', str), ('signed_with', str),
+                      ('sha256', str), ('built', (int, float))):
+        value = info.get(key)
+        result[key] = value if isinstance(value, kind) and not isinstance(value, bool) else None
+    return result
+
+
 class Cache:
     """A value recomputed at most every `seconds` (nvidia-smi and the /proc scan cost tens of ms,
     and every open page asks for the status every few seconds)."""
