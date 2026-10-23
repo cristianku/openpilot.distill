@@ -1,8 +1,9 @@
 # Distill for Android
 
-The companion app of distill-web, the control site of this repository: the whole site in the app, plus a
-native overview of the server. It is not an openpilot/sunnypilot build and it never talks to the comma
-or the car.
+The companion app of distill-web, the control site of this repository: native screens to follow the
+server and to start trainings, evaluations and installations on the comma, plus the whole site. It is
+not an openpilot/sunnypilot build: it talks to your distill-web server only, never to the comma or the
+car directly.
 
 ## Install
 
@@ -19,12 +20,23 @@ allow installing apps from that source. Android 8.0 (API 26) or newer.
    own network or a VPN; prefer HTTPS through a reverse proxy.
 2. **Sign in** on the Website tab with the administrator of the site, as in a browser. The session cookie
    (HttpOnly, 30 days) stays in the app's WebView; the app stores no password and no token.
-3. **Website**: the full site; Android back goes to the previous page of the site, links to other sites
-   open in the browser. **Overview**: CPU, GPU, RAM, disk, training, running jobs and the comma, read
-   from `GET /api/status` every 10 s with the same session. **Server**: change the address, or
+3. **Overview**: the server every 5 s (CPU, GPU, RAM, disk, training, the comma) and the running jobs, with
+   their progress and a Stop button. The gear opens **the server settings**: change the address, or
    disconnect (signs the phone out: its cookies are erased).
+4. **Train**, **Evaluate**, **Comma**: native wizards, the same steps and rules as the site.
+   - Train: where to start (new model, continue from the stable weights, resume a stopped run), how much
+     (Trial 1,000 / Standard 5,000 / custom steps, with the time it takes on this server), then the summary
+     and Start. Batch 8, 6 workers and the GPU are set as the site does by default.
+   - Evaluate: which model (yours, the references, the published ones, with their score), then Evaluate.
+   - Comma: which finished model, then the checklist of the comma, Check now, Install (with a
+     confirmation) or put the original model back.
+   A button is enabled only when the server allows the action, and says why not otherwise.
+5. **Website**: the full site; Android back goes to the previous page of the site, links to other sites
+   open in the browser.
 
-Actions (training, install, publish…) happen on the site only, where the server checks them.
+Every action goes through the same `POST /api/run/<action>` as the site, with the session of the app, so
+the server checks it exactly as it checks the site. `ApiContractTest` reads `/api/status` and `/api/runs`
+fixtures produced by `web/server.py`: regenerate them when the server changes those payloads.
 
 ## Build
 

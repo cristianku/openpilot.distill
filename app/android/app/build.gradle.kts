@@ -61,4 +61,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    // The real org.json: the one of android.jar is a stub in JVM unit tests.
+    testImplementation("org.json:json:20240303")
 }

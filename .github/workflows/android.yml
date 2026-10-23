@@ -102,7 +102,7 @@ jobs:
           cat > notes.md <<EOF
           Distill for Android $VERSION_NAME, built by GitHub Actions from ${GITHUB_SHA::7}.
 
-          The companion app of distill-web: enter the address of your server, sign in with the administrator of the site, then use the whole site (Website tab) or a native overview of the server (Overview tab).
+          The companion app of distill-web: enter the address of your server and sign in with the administrator of the site. Then follow the server and its jobs (Overview), start a training (Train), an evaluation (Evaluate) or an installation on the comma (Comma), or use the whole site (Website).
 
           Install: download \`$APK\` on the phone and open it (allow installing apps from this source). Android 8.0 or newer.
 

@@ -1,0 +1,54 @@
+{
+ "runs": [
+  {
+   "avg_step_time": 0.7,
+   "config": {},
+   "eta_seconds": null,
+   "finished": null,
+   "has_onnx": false,
+   "has_pt": false,
+   "has_training_pt": true,
+   "job_id": null,
+   "last": {
+    "distill": 2.0,
+    "grad_norm": null,
+    "gt": 1.0,
+    "gt/plan": null,
+    "loss": 90.0
+   },
+   "name": "2026-10-22_115537",
+   "percent": 2.0,
+   "resumable": true,
+   "source": "train.log",
+   "started": 1792670137.0,
+   "status": "interrupted",
+   "steps_done": 1,
+   "steps_total": 50
+  },
+  {
+   "avg_step_time": 0.7,
+   "config": {},
+   "eta_seconds": null,
+   "finished": 1792766164.8174791,
+   "has_onnx": false,
+   "has_pt": true,
+   "has_training_pt": false,
+   "job_id": null,
+   "last": {
+    "distill": 2.0,
+    "grad_norm": null,
+    "gt": 1.0,
+    "gt/plan": null,
+    "loss": 80.0
+   },
+   "name": "2026-10-21_1544",
+   "percent": 100.0,
+   "resumable": false,
+   "source": "train.log",
+   "started": 1792597440.0,
+   "status": "finished",
+   "steps_done": 20,
+   "steps_total": 20
+  }
+ ]
+}
