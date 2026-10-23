@@ -29,7 +29,7 @@ the developer account.
 
 The API cannot make the first release of an app.
 
-1. Play Console › Create app: name `Distill: driving model trainer`, default language English (United States),
+1. Play Console › Create app: name `Openpilot Distill`, default language English (United States),
    App, Free.
 2. On the site: Settings › Distill for Android › Bundle for Google Play (the AAB of the last build,
    `outputs/android/distill-android-0.3.<N>.aab`; `helpers/build_android.sh` prints the certificate of its

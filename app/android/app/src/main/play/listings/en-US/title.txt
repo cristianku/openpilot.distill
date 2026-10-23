@@ -1,1 +1,1 @@
-Distill: driving model trainer
+Openpilot Distill
