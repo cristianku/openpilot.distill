@@ -2,7 +2,9 @@
 (function () {
   'use strict';
 
-  const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'comma'];
+  const TABS = ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'settings'];
+  // Where Publish puts a model (#publish/<destination>).
+  const DESTINATIONS = ['comma', 'hf'];
   const JOB_PILL = {running: 'run', ok: 'ok', failed: 'bad', stopped: 'todo', unknown: 'muted'};
   const RUN_STATE = {running: ['running', 'run'], finished: ['finished', 'ok'], interrupted: ['interrupted', 'todo']};
   const SEGMENT_STATE = {localized: ['localized', 'ok'], failed: ['failed', 'bad'], todo: ['to localize', 'todo']};
@@ -10,18 +12,21 @@
     'gt/plan': 'gt/plan (path)', 'grad_norm': 'grad_norm', 'step_time': 'time per step (s)'};
   // How often (ms) the data of each tab is read again while the tab is open.
   const TAB_PERIOD = {preprocessing: 15000, training: 10000, evaluation: 30000, compare: 30000, publish: 15000,
-    comma: 0, status: 0};
+    status: 0, settings: 30000};
   const STATUS_PERIOD = 4000;
   const SMOOTHING = 0.85;
 
   let status = null;
   let firstCode = null;
   let currentTab = 'status';
-  const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null, drives: null};
+  const data = {segments: null, runs: null, evalResults: null, videos: null, hf: null, metrics: null, detail: null, drives: null,
+    settings: null};
   const loadedAt = {};
   let selectedRun = null;
   // The run opened from the list of the Training tab (#training/<run>); null = the one in progress.
   let openRun = null;
+  // The destination chosen in Publish: 'comma' or 'hf'.
+  let publishDest = 'comma';
   // A choice to make in a select as soon as it has that option (see goTo).
   const pendingChoice = {};
   let previousRunning = '';
@@ -153,16 +158,28 @@
 
   // -- tabs ------------------------------------------------------------------------------------
   function showTab(name) {
-    // #training/<run>: the Training tab with that run open.
+    // #training/<run>: the Training tab with that run open; #publish/<destination>.
+    let detail = null;
     const slash = name.indexOf('/');
     if (slash >= 0) {
-      if (name.slice(0, slash) === 'training') openRun = decodeURIComponent(name.slice(slash + 1)) || null;
+      try {
+        detail = decodeURIComponent(name.slice(slash + 1));
+      } catch (error) {
+        detail = '';
+      }
       name = name.slice(0, slash);
     }
+    if (name === 'training' && detail !== null) openRun = detail || null;
     // The tab was called Data before: old bookmarks still land on it.
     if (name === 'data') name = 'preprocessing';
     // The Jobs tab is gone: its job list and the code update are in Status.
     if (name === 'jobs') name = 'status';
+    // The Comma tab is gone: installing and restoring are in Publish, "On your comma".
+    if (name === 'comma') {
+      name = 'publish';
+      detail = 'comma';
+    }
+    if (name === 'publish' && DESTINATIONS.indexOf(detail) >= 0) publishDest = detail;
     if (TABS.indexOf(name) < 0) name = 'status';
     currentTab = name;
     for (const tab of TABS) {
@@ -172,7 +189,9 @@
       button.tabIndex = selected ? 0 : -1;
       byId('panel-' + tab).hidden = !selected;
     }
-    const hash = '#' + name + (name === 'training' && openRun ? '/' + encodeURIComponent(openRun) : '');
+    let hash = '#' + name;
+    if (name === 'training' && openRun) hash += '/' + encodeURIComponent(openRun);
+    else if (name === 'publish') hash += '/' + publishDest;
     if (location.hash !== hash) history.replaceState(null, '', hash);
     loadTab(true);
   }
@@ -196,8 +215,8 @@
     if (tab === 'training') return ['runs', 'hf'];
     if (tab === 'evaluation') return ['runs', 'hf', 'evalResults'];
     if (tab === 'compare') return ['segments', 'runs', 'hf', 'videos', 'drives'];
-    if (tab === 'publish') return ['runs', 'hf'];
-    if (tab === 'comma') return ['runs'];
+    if (tab === 'publish') return ['runs', 'hf', 'evalResults'];
+    if (tab === 'settings') return ['settings'];
     return [];
   }
 
@@ -209,6 +228,7 @@
       else if (what === 'videos') data.videos = (await api('/api/compare')).videos;
       else if (what === 'drives') data.drives = await api('/api/drives');
       else if (what === 'hf') data.hf = await api('/api/hf');
+      else if (what === 'settings') data.settings = await api('/api/settings');
       loadedAt[what] = Date.now();
     } catch (error) {
       toast(error.message, true);
@@ -240,7 +260,7 @@
     else if (currentTab === 'evaluation') renderEval();
     else if (currentTab === 'compare') renderCompare();
     else if (currentTab === 'publish') renderPublish();
-    else if (currentTab === 'comma') renderCommaTab();
+    else if (currentTab === 'settings') renderSettings();
     updateButtons();
   }
 
@@ -542,7 +562,7 @@
       else row('State', 'offroad (parked)', 'ok');
       if (comma.bundle_default === false) row('Model chosen in the Models menu', comma.bundle, 'imp');
       else row('Models menu', 'Default (openpilot\'s model)');
-      row('Copy of the original', comma.backup ? 'present (/data/driving_supercombo.onnx.orig)' : 'none');
+      row('Copy of the original model', comma.backup ? 'saved on the comma' : 'none yet');
     } else if (comma.error) {
       row('Error', comma.error);
     }
@@ -719,9 +739,8 @@
     updateTrainButtons();
     setAction('btn-eval', 'eval', byId('eval-model').value ? '' : 'no model to evaluate');
     setAction('btn-compare', 'compare', compareFormReason());
-    setAction('btn-export', 'export', byId('export-run').value ? '' : 'no finished run');
     updatePublishButtons();
-    setAction('btn-install', 'install', byId('install-run').value ? '' : 'no finished run');
+    setAction('btn-install', 'install', publishRun() ? '' : 'choose a finished model above');
     setAction('btn-restore', 'restore');
     setAction('btn-update', 'update');
     if (status.test_actions) setAction('btn-selftest', 'selftest');
@@ -967,6 +986,10 @@
     if (mode === 'resume' && !byId('train-resume-run').value) extra = 'no run to resume';
     if (mode === 'continue' && data.hf && data.hf.ok && data.hf.stable === false) extra = 'no stable weights on Hugging Face';
     if (!byId('train-gpus').value) extra = extra || 'no GPU found';
+    const wandb = accountOf('wandb');
+    if (!extra && byId('train-wandb').value === 'online' && wandb && !wandb.connected) {
+      extra = 'Weights & Biases is not connected: connect it in Settings, or choose offline';
+    }
     setAction('btn-train', 'train', extra);
     setAction('btn-train-test', 'train_test', byId('train-gpus').value ? '' : 'no GPU found');
   }
@@ -1030,7 +1053,28 @@
     if (data.hf && data.hf.ok && data.hf.stable === false) note = 'There are no stable weights on Hugging Face yet: publish a model as “stable” first.';
     else if (data.hf && !data.hf.ok) note = 'Cannot tell whether Hugging Face has stable weights (' + data.hf.error + ').';
     byId('continue-note').textContent = note;
+    renderWandbChoice();
   }
+
+  // The wandb choice says what "automatic" does with the account of Settings, and points there.
+  function renderWandbChoice() {
+    const account = accountOf('wandb');
+    // A server without accounts in its status: the choice as it always was.
+    const connected = !account || account.connected;
+    const select = byId('train-wandb');
+    const automatic = select.querySelector('option[value=""]');
+    const online = select.querySelector('option[value="online"]');
+    automatic.textContent = connected ? 'automatic (online: W&B connected)' : 'automatic (offline: W&B not connected)';
+    online.textContent = connected ? 'online (wandb.ai)' : 'online (connect W&B in Settings)';
+    online.disabled = !connected;
+    byId('wandb-callout').hidden = connected;
+    if (!connected) {
+      byId('wandb-callout-text').textContent = account.problem && account.problem.indexOf('no longer works') >= 0
+        ? 'The saved Weights & Biases API key no longer works: runs are logged on this server only.'
+        : 'Weights & Biases is not connected: runs are logged on this server only.';
+    }
+  }
+  byId('train-wandb').addEventListener('change', updateButtons);
 
   function renderTraining() {
     renderTrainForm();
@@ -1096,7 +1140,7 @@
         button('Evaluate', '', () => goTo('evaluation', 'eval-model', 'run:' + name));
         button('Comparison video', '', () => goTo('compare', 'cmp-student', 'run:' + name));
       }
-      if (run.has_pt) button('Export / publish', '', () => { pendingChoice['export-run'] = name; goTo('publish', 'publish-run', name); });
+      if (run.has_pt) button('Install or publish', '', () => goTo('publish', 'publish-run', 'run:' + name));
     }
 
     const config = run.config || {};
@@ -1433,6 +1477,8 @@
 
   // Which pickers are open: a refresh rebuilds a picker, it must not close it under the finger.
   const pickerOpen = {};
+  // What an empty picker says.
+  const PICKER_EMPTY = {'publish-run': 'No finished training yet: start one in Training.'};
 
   function pickerRowContent(row, spec, checked) {
     const info = modelInfo(spec);
@@ -1471,7 +1517,7 @@
     box.replaceChildren();
     box.classList.toggle('open', !!pickerOpen[selectId]);
     if (!options.length) {
-      box.appendChild(node('p', 'empty', 'No models yet.'));
+      box.appendChild(node('p', 'empty', PICKER_EMPTY[selectId] || 'No models yet.'));
       return;
     }
 
@@ -1859,9 +1905,16 @@
   for (const id of ['cmp-segment', 'cmp-student']) byId(id).addEventListener('change', updateButtons);
 
   // -- Publish --------------------------------------------------------------------------------
+  // A finished model (the picker), then where it goes: "On your comma" (install, put the original
+  // back) or "On Hugging Face" (dry run, publish). The destination is in the hash: #publish/comma, #publish/hf.
   function slugOf(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '_'); }
+  // The run chosen in the picker ('' when there is none).
+  function publishRun() {
+    const value = byId('publish-run').value;
+    return value.startsWith('run:') ? value.slice(4) : '';
+  }
   function publishParams() {
-    return {run: byId('publish-run').value, name: byId('publish-name').value, stable: byId('publish-stable').checked};
+    return {run: publishRun(), name: byId('publish-name').value, stable: byId('publish-stable').checked};
   }
   function sameParams(a, b) {
     return a && b && a.run === b.run && a.name === b.name && Boolean(a.stable) === Boolean(b.stable);
@@ -1879,128 +1932,533 @@
     const slug = slugOf(name);
     return data.hf.models.indexOf(slug) >= 0 || data.hf.releases.indexOf(slug) >= 0;
   }
+  // What stops publishing to Hugging Face ('' = nothing, or a server without accounts).
+  function hfProblem() {
+    const account = accountOf('hf');
+    return account ? account.problem || '' : '';
+  }
 
+  // -- the two destinations --
+  function chooseDestination(dest, focus) {
+    publishDest = dest;
+    if (currentTab === 'publish') history.replaceState(null, '', '#publish/' + dest);
+    renderDestinations();
+    updateButtons();
+    if (focus) byId('dest-' + dest).focus();
+  }
+  for (const dest of DESTINATIONS) byId('dest-' + dest).addEventListener('click', () => chooseDestination(dest));
+  byId('dest-options').addEventListener('keydown', (event) => {
+    let step = 0;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') step = 1;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') step = -1;
+    if (!step) return;
+    event.preventDefault();
+    const index = (DESTINATIONS.indexOf(publishDest) + step + DESTINATIONS.length) % DESTINATIONS.length;
+    chooseDestination(DESTINATIONS[index], true);
+  });
+
+  // [text, kind] under each destination: what it is doing, what stops it, or that it is ready.
+  function commaSummary() {
+    const job = status ? liveJob(['install', 'restore']) : null;
+    if (job && job.state === 'running') return [job.action === 'install' ? 'Installing…' : 'Putting the original back…', 'run'];
+    const comma = status ? status.comma : null;
+    if (!comma || comma.reachable === null) return ['Not checked yet', 'muted'];
+    if (!comma.reachable) return ['Not reachable', 'bad'];
+    if (comma.onroad) return ['Driving: park first', 'todo'];
+    if (comma.bundle_default === false) return ['Models menu not on Default', 'todo'];
+    return ['Ready, parked', 'ok'];
+  }
+  function hfSummary() {
+    const job = status ? liveJob(['publish_dry', 'publish']) : null;
+    if (job && job.state === 'running') return [job.action === 'publish' ? 'Publishing…' : 'Dry run…', 'run'];
+    const account = accountOf('hf');
+    if (!account) return [(status && status.hf_repo) || 'Your repository', 'muted'];
+    if (!account.connected) {
+      return [account.problem && account.problem.indexOf('no longer works') >= 0 ? 'Token no longer works' : 'Not connected', 'bad'];
+    }
+    if (account.problem) return ['Token cannot write', 'todo'];
+    return [account.user ? 'As ' + account.user : 'Connected', 'ok'];
+  }
+
+  function renderDestinations() {
+    const summaries = {comma: commaSummary(), hf: hfSummary()};
+    for (const dest of DESTINATIONS) {
+      const chosen = dest === publishDest;
+      const option = byId('dest-' + dest);
+      option.setAttribute('aria-checked', String(chosen));
+      option.tabIndex = chosen ? 0 : -1;
+      const [text, kind] = summaries[dest];
+      option.classList.toggle('blocked', kind === 'bad');
+      if (!same('dest-sub:' + dest, summaries[dest])) {
+        byId('dest-' + dest + '-sub').replaceChildren(node('span', 'dest-dot ' + kind), document.createTextNode(text));
+      }
+      byId('dest-panel-' + dest).hidden = !chosen;
+    }
+  }
+
+  // -- On your comma: a checklist of what installing and restoring need --
+  const CHECK_MARK = {ok: '✓', todo: '!', bad: '✕', muted: '–'};
+  function capital(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+
+  // [kind, title, detail] rows from the comma state of the status.
+  function commaChecks(comma) {
+    if (comma.reachable === null) return [['muted', 'Not checked yet', 'Tap Check now to ask the comma.']];
+    if (!comma.reachable) {
+      return [['bad', 'Not reachable', (comma.error ? capital(comma.error) + '. ' : '') + 'Its address (' + comma.host
+        + ') is set in Settings.']];
+    }
+    const checks = [['ok', 'Reachable', 'Address: ' + comma.host]];
+    if (comma.onroad) checks.push(['todo', 'Driving', 'Installing and restoring wait until the car is off (offroad).']);
+    else checks.push(['ok', 'Parked', 'The car is off (offroad).']);
+    if (comma.bundle_default === false) {
+      checks.push(['todo', 'Models menu: ' + comma.bundle, 'The comma drives with the model chosen there, so an '
+        + 'installed model would not be used. To install, set it back to Default on the comma screen (Settings › Models).']);
+    } else if (comma.bundle_default === true) {
+      checks.push(['ok', 'Models menu on Default', 'The comma drives with openpilot\'s model, or the one you installed.']);
+    }
+    if (comma.backup === true) checks.push(['ok', 'Original model saved', 'It can be put back at any time.']);
+    else if (comma.backup === false) checks.push(['muted', 'Original model not saved yet', 'Installing a model saves it first.']);
+    return checks;
+  }
+
+  function renderCommaChecklist() {
+    const comma = status ? status.comma : null;
+    const checks = comma ? commaChecks(comma) : [['muted', 'Reading the state of the comma…', '']];
+    if (!same('comma-checklist', checks)) {
+      const list = byId('comma-checklist');
+      list.replaceChildren();
+      for (const [kind, title, detail] of checks) {
+        const item = node('li');
+        item.appendChild(node('span', 'check-mark ' + kind, CHECK_MARK[kind]));
+        const text = node('div', 'check-text');
+        text.appendChild(node('div', 'check-title', title));
+        if (detail) text.appendChild(node('div', 'check-detail', detail));
+        item.appendChild(text);
+        list.appendChild(item);
+      }
+    }
+    byId('comma-checked').textContent = comma && comma.checked
+      ? 'Checked at ' + fmtClock(comma.checked) + ' · again every 30 s while this page is open.' : '';
+  }
+
+  byId('btn-comma-check').addEventListener('click', async () => {
+    const button = byId('btn-comma-check');
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    try {
+      const answer = await post('/api/comma/check', {});
+      if (status) {
+        status.comma = answer.comma;
+        renderComma('comma-kv-stato');
+      }
+      renderPublish();
+      updateButtons();
+    } catch (error) {
+      toast(error.message, true);
+    }
+    button.disabled = false;
+    button.textContent = 'Check now';
+    // The install and restore buttons follow the new state of the comma.
+    refreshStatus();
+  });
+  byId('btn-install').addEventListener('click', () => {
+    const run = publishRun();
+    if (!run) return;
+    runAction('install', {run: run, confirm: 'INSTALL'}, 'Install the model ' + run + ' on the comma? It takes the '
+      + 'place of openpilot\'s driving model and the comma restarts.');
+  });
+  byId('btn-restore').addEventListener('click', () => {
+    runAction('restore', {confirm: 'RESTORE'}, 'Put openpilot\'s original driving model back on the comma? The comma restarts.');
+  });
+
+  // -- On Hugging Face --
+  // Publishing needs the Hugging Face account of Settings: say whose it is, or point there.
+  function renderPublishAccount() {
+    const account = accountOf('hf');
+    const callout = byId('publish-hf-callout');
+    const note = byId('publish-hf-account');
+    const problem = hfProblem();
+    byId('publish-name').disabled = Boolean(problem);
+    byId('publish-stable').disabled = Boolean(problem);
+    if (!account) {
+      callout.hidden = true;
+      note.hidden = true;
+      return;
+    }
+    const repo = (status && status.hf_repo) || '';
+    callout.hidden = !problem;
+    if (problem) byId('publish-hf-text').textContent = capital(problem) + '.';
+    note.hidden = Boolean(problem);
+    note.textContent = account.user ? 'Publishes to ' + repo + ' as ' + account.user + '.'
+      : 'Publishes to ' + repo + ' with the Hugging Face account of Settings.';
+  }
+
+  function renderHfCatalog() {
+    const hf = data.hf;
+    if (!hf || same('hf', hf)) return;
+    const kv = byId('hf-kv');
+    kv.replaceChildren();
+    kv.appendChild(node('dt', '', 'Repository'));
+    const repoCell = node('dd');
+    const link = node('a', '', hf.repo);
+    link.href = hf.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    repoCell.appendChild(link);
+    kv.appendChild(repoCell);
+    kv.appendChild(node('dt', '', 'Stable weights'));
+    kv.appendChild(node('dd', '', hf.ok ? (hf.stable ? 'yes' : 'no') : '?'));
+    kv.appendChild(node('dt', '', 'Checked'));
+    kv.appendChild(node('dd', '', fmtTime(hf.checked) + (hf.ok ? '' : ' · ' + hf.error)));
+    const list = byId('hf-models');
+    list.replaceChildren();
+    byId('hf-empty').hidden = !hf.ok || hf.models.length > 0;
+    for (const name of hf.models) {
+      const item = node('li', 'item');
+      item.appendChild(node('span', 'what mono', name));
+      if (hf.releases.indexOf(name) >= 0) item.appendChild(pill('PyTorch weights', 'ok'));
+      list.appendChild(item);
+    }
+  }
+
+  // The name follows the chosen model until the user writes another one.
   let lastPublishRun = '';
-  function renderPublish() {
-    const finished = runsWith((run) => run.has_pt).map((run) => ({value: run.name, label: run.name + (run.has_onnx ? ' (onnx done)' : '')}));
-    fillSelect(byId('export-run'), finished);
-    fillSelect(byId('publish-run'), finished);
-    // The name follows the run until the user writes another one.
-    const run = byId('publish-run').value;
+  function followRunName() {
+    const run = publishRun();
     const nameField = byId('publish-name');
     if (run !== lastPublishRun) {
       if (!nameField.value || nameField.value === lastPublishRun) nameField.value = run;
       lastPublishRun = run;
     }
-    const hf = data.hf;
-    if (hf && !same('hf', hf)) {
-      const kv = byId('hf-kv');
-      kv.replaceChildren();
-      kv.appendChild(node('dt', '', 'Repo'));
-      const repoCell = node('dd');
-      const link = node('a', '', hf.repo);
-      link.href = hf.url;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      repoCell.appendChild(link);
-      kv.appendChild(repoCell);
-      kv.appendChild(node('dt', '', 'Stable weights'));
-      kv.appendChild(node('dd', '', hf.ok ? (hf.stable ? 'yes' : 'no') : '?'));
-      kv.appendChild(node('dt', '', 'Checked'));
-      kv.appendChild(node('dd', '', fmtTime(hf.checked) + (hf.ok ? '' : ' · ' + hf.error)));
-      const list = byId('hf-models');
-      list.replaceChildren();
-      byId('hf-empty').hidden = !hf.ok || hf.models.length > 0;
-      for (const name of hf.models) {
-        const item = node('li', 'item');
-        item.appendChild(node('span', 'what mono', name));
-        if (hf.releases.indexOf(name) >= 0) item.appendChild(pill('PyTorch weights', 'ok'));
-        list.appendChild(item);
-      }
-    }
+  }
+
+  function renderPublish() {
+    const finished = runsWith((run) => run.has_pt).map((run) => ({value: 'run:' + run.name, label: run.name,
+      group: 'Finished trainings'}));
+    fillSelect(byId('publish-run'), finished);
+    renderPicker('publish-run');
+    followRunName();
+    renderDestinations();
+    renderCommaChecklist();
+    renderPublishAccount();
+    renderHfCatalog();
   }
 
   function updatePublishButtons() {
     const params = publishParams();
+    const problem = hfProblem();
     const validName = /^[A-Za-z0-9_.-]{1,64}$/.test(params.name);
     const taken = nameOnHf(params.name);
     let nameNote = '';
     if (params.name && !validName) nameNote = 'Invalid name: letters, digits, _ . - (64 at most).';
     else if (taken) nameNote = 'Hugging Face already has ' + slugOf(params.name) + ': the real publish will be refused.';
     else if (params.name) nameNote = 'On Hugging Face it becomes models/' + slugOf(params.name) + '/.';
-    byId('publish-name-note').textContent = nameNote;
+    byId('publish-name-note').textContent = problem ? '' : nameNote;
 
     let dryReason = '';
-    if (!params.run) dryReason = 'no finished run';
+    if (problem) dryReason = problem;
+    else if (!params.run) dryReason = 'choose a finished model above';
     else if (!validName) dryReason = 'type a valid name';
     setAction('btn-publish-dry', 'publish_dry', dryReason);
 
     const dry = lastDryRun();
     const dryStatus = byId('dry-status');
-    dryStatus.replaceChildren();
-    if (dry) {
-      dryStatus.appendChild(document.createTextNode('Dry run for these settings: '));
-      dryStatus.appendChild(pill(dry.state_label, JOB_PILL[dry.state] || 'muted'));
-      dryStatus.appendChild(document.createTextNode(' ' + fmtTime(dry.started) + ' '));
-      const view = node('button', 'btn small', 'Log');
-      view.type = 'button';
-      view.addEventListener('click', () => openLog(dry.id, dry.label));
-      dryStatus.appendChild(view);
-    } else if (params.run && validName) {
-      dryStatus.textContent = 'No dry run yet for this run, name and “stable” setting.';
+    if (!same('dry-status', [dry ? [dry.id, dry.state, dry.state_label] : null, Boolean(params.run && validName)])) {
+      dryStatus.replaceChildren();
+      if (dry) {
+        dryStatus.appendChild(document.createTextNode('Dry run for these settings: '));
+        dryStatus.appendChild(pill(dry.state_label, JOB_PILL[dry.state] || 'muted'));
+        dryStatus.appendChild(document.createTextNode(' ' + fmtTime(dry.started) + ' '));
+        const view = node('button', 'btn small', 'Details');
+        view.type = 'button';
+        view.addEventListener('click', () => openLog(dry.id, dry.label));
+        dryStatus.appendChild(view);
+      } else if (params.run && validName) {
+        dryStatus.textContent = 'No dry run yet for this model, name and “stable” setting.';
+      }
     }
 
     let reason = '';
-    if (!params.run) reason = 'no finished run';
+    if (!params.run) reason = 'choose a finished model above';
     else if (!validName) reason = 'type a valid name';
     else if (taken) reason = 'name already used on Hugging Face';
     else if (!dry || dry.state !== 'ok') reason = 'first a successful dry run with the same settings';
     setAction('btn-publish', 'publish', reason);
   }
 
-  byId('btn-export').addEventListener('click', () => runAction('export', {run: byId('export-run').value}));
   byId('btn-publish-dry').addEventListener('click', () => runAction('publish_dry', publishParams()));
   byId('btn-publish').addEventListener('click', () => {
     const params = publishParams();
     // The confirmation the server asks for is the popup's OK: it sends the name back.
     params.confirm = params.name;
-    runAction('publish', params, 'Publish run ' + params.run + ' to Hugging Face as "' + params.name + '"'
+    runAction('publish', params, 'Publish the model ' + params.run + ' to Hugging Face as "' + params.name + '"'
       + (params.stable ? ' and make it the stable weights' : '') + '? Anyone can download it once published.');
   });
-  for (const id of ['publish-run', 'publish-name', 'publish-stable']) {
-    byId(id).addEventListener('input', () => { renderPublish(); updateButtons(); });
-    byId(id).addEventListener('change', () => { renderPublish(); updateButtons(); });
+  byId('publish-run').addEventListener('change', () => {
+    followRunName();
+    if (!pickerOpen['publish-run']) renderPicker('publish-run');
+    updateButtons();
+  });
+  for (const id of ['publish-name', 'publish-stable']) {
+    byId(id).addEventListener('input', updateButtons);
+    byId(id).addEventListener('change', updateButtons);
   }
 
-  // -- Comma -----------------------------------------------------------------------------------
-  function renderCommaTab() {
-    if (status) renderComma('comma-kv-comma');
-    const finished = runsWith((run) => run.has_pt).map((run) => ({value: run.name, label: run.name}));
-    fillSelect(byId('install-run'), finished);
+  // -- Settings ---------------------------------------------------------------------------------
+  // The account as the status reports it ({connected, user, problem}), null from an older server.
+  function accountOf(kind) {
+    return status && status.accounts ? status.accounts[kind] || null : null;
   }
-  byId('btn-comma-check').addEventListener('click', async () => {
-    const button = byId('btn-comma-check');
+
+  const ACCOUNTS = {
+    hf: {name: 'Hugging Face', secret: 'token', field: 'token', path: '/api/settings/hf',
+      dropped: 'Publishing to Hugging Face stops working until you connect again.'},
+    wandb: {name: 'Weights & Biases', secret: 'API key', field: 'key', path: '/api/settings/wandb',
+      dropped: 'New trainings log on this server only until you connect again.'},
+  };
+  // The form of an account that is connected, opened by "Use another token".
+  const replacing = {hf: false, wandb: false};
+
+  function hfAccess(account, repo) {
+    if (account.access === 'write') return account.fine_grained ? 'can write ' + repo : 'write access';
+    if (account.access === 'read') return account.fine_grained ? 'cannot write ' + repo : 'read only';
+    return 'access not known';
+  }
+
+  // [line under the name, pill text, pill kind] of an account.
+  function accountTexts(kind, account, repo) {
+    const meta = ACCOUNTS[kind];
+    let texts = null;
+    if (account.state === 'none') {
+      texts = ['Not connected', 'Off', 'muted'];
+    } else if (account.state === 'connected') {
+      let line = 'Connected as ' + (account.user || '?');
+      let label = ['Connected', 'ok'];
+      if (kind === 'hf') {
+        line += ' \u00b7 ' + hfAccess(account, repo);
+        if (account.access === 'read') label = ['Read only', 'todo'];
+      } else if (account.entity && account.entity !== account.user) {
+        line += ' \u00b7 team ' + account.entity;
+      }
+      texts = [line, label[0], label[1]];
+    } else if (account.state === 'invalid') {
+      texts = ['The saved ' + meta.secret + ' no longer works: connect again with a new one.', 'Not working', 'bad'];
+    } else if (account.state === 'unreachable') {
+      texts = ['A ' + meta.secret + ' is saved, but it cannot be checked now (' + account.error + ').', 'Not checked', 'todo'];
+    } else {
+      texts = ['A ' + meta.secret + ' is saved, not checked yet.', 'Saved', 'muted'];
+    }
+    if (account.source === 'environment') texts[0] += ' \u00b7 set by the server configuration, change it there';
+    return texts;
+  }
+
+  function renderAccount(kind, account, repo) {
+    const texts = accountTexts(kind, account, repo);
+    byId(kind + '-account-sub').textContent = texts[0];
+    if (!same('account-pill:' + kind, texts.slice(1))) byId(kind + '-account-pill').replaceChildren(pill(texts[1], texts[2]));
+    const editable = account.can_change !== false;
+    const saved = account.state !== 'none';
+    const formOpen = editable && (!saved || account.state === 'invalid' || replacing[kind]);
+    byId(kind + '-form').hidden = !formOpen;
+    byId('btn-' + kind + '-cancel').hidden = !(formOpen && saved && replacing[kind]);
+    byId(kind + '-manage').hidden = !(editable && saved && !formOpen);
+    if (!formOpen) byId(kind + '-reason').textContent = '';
+  }
+
+  function transportNote() {
+    const note = byId('transport-note');
+    const host = location.hostname;
+    let text = '';
+    let warn = false;
+    if (location.protocol === 'https:') {
+      text = 'This page uses HTTPS: a token travels encrypted from your browser to the server.';
+    } else if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
+      text = 'This page talks to the server on this computer (or through an ssh tunnel): a token does not cross the '
+        + 'network in clear.';
+    } else {
+      text = 'Honest note: this site talks plain HTTP on the local network, so a token you paste here travels '
+        + 'unencrypted on your LAN. Fine at home; put the site behind HTTPS before exposing it anywhere else.';
+      warn = true;
+    }
+    note.textContent = text;
+    note.classList.toggle('warn', warn);
+  }
+
+  // Site settings: the field shows the saved value (or the one in use), until the user changes it.
+  const SITE_FIELDS = {
+    hf_repo: {input: 'site-hf-repo', pattern: /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/,
+      label: 'Hugging Face repository', about: 'Where Publish uploads your models: owner/name on huggingface.co.',
+      invalid: 'The Hugging Face repository is owner/name: letters, digits, "-", "_" and ".".'},
+    comma_host: {input: 'site-comma-host', pattern: /^[A-Za-z0-9][A-Za-z0-9_.@-]*$/, label: 'Comma address',
+      about: 'How this server reaches your comma over ssh: a host name, an IP address or user@host.',
+      invalid: 'The comma address is a host name, an IP address or user@host: letters, digits, ".", "-", "_" and "@".'},
+  };
+
+  function renderSite(site) {
+    for (const [name, field] of Object.entries(SITE_FIELDS)) {
+      const info = site[name];
+      if (!info) continue;
+      const input = byId(field.input);
+      const shown = info.from_environment ? (info.saved || info.default) : info.value;
+      // Not while the user is changing it: only a field still showing the last server value follows it.
+      if (input.dataset.server === undefined || input.value === input.dataset.server) input.value = shown;
+      input.dataset.server = shown;
+      input.placeholder = info.default;
+      const note = byId(field.input + '-note');
+      let text = field.about;
+      if (info.from_environment) {
+        text = 'In use: ' + info.value + '. The server configuration sets it, and it wins over the value saved here.';
+      } else if (info.value === info.default) {
+        text += ' Empty = the default.';
+      }
+      note.textContent = text;
+      note.classList.toggle('warn', Boolean(info.from_environment));
+    }
+    updateSiteButton();
+  }
+
+  // {name: value} of the fields the user changed, or a reason why they cannot be saved.
+  function siteChanges() {
+    const changes = {};
+    for (const [name, field] of Object.entries(SITE_FIELDS)) {
+      const input = byId(field.input);
+      if (input.dataset.server === undefined) continue;
+      const value = input.value.trim();
+      if (value === input.dataset.server) continue;
+      if (value && !field.pattern.test(value)) return {reason: field.invalid};
+      changes[name] = value;
+    }
+    if (!Object.keys(changes).length) return {reason: 'nothing changed'};
+    return {changes: changes};
+  }
+
+  // The server's answer to the last save that failed, shown until the fields change.
+  let siteError = '';
+  function updateSiteButton() {
+    const result = siteChanges();
+    byId('btn-site-save').disabled = Boolean(result.reason);
+    byId('site-reason').textContent = result.reason && result.reason !== 'nothing changed' ? result.reason : siteError;
+  }
+
+  function renderSettings() {
+    transportNote();
+    const settings = data.settings;
+    if (!settings) return;
+    const repo = settings.site && settings.site.hf_repo ? settings.site.hf_repo.value : '';
+    renderAccount('hf', settings.accounts.hf, repo);
+    renderAccount('wandb', settings.accounts.wandb, repo);
+    if (settings.site) renderSite(settings.site);
+  }
+
+  async function connectAccount(kind) {
+    const meta = ACCOUNTS[kind];
+    const input = byId(kind + '-secret');
+    const reason = byId(kind + '-reason');
+    const button = byId('btn-' + kind + '-connect');
+    const value = input.value.trim();
+    if (!value) {
+      reason.textContent = 'Paste the ' + meta.secret + ' first.';
+      input.focus();
+      return;
+    }
+    const payload = {};
+    payload[meta.field] = value;
     button.disabled = true;
+    button.textContent = 'Checking\u2026';
+    reason.textContent = '';
     try {
-      const answer = await post('/api/comma/check', {});
-      status.comma = answer.comma;
-      renderComma('comma-kv-comma');
-      renderComma('comma-kv-stato');
-      updateButtons();
+      const answer = await post(meta.path, payload);
+      input.value = '';
+      replacing[kind] = false;
+      if (data.settings) data.settings.accounts[kind] = answer.account;
+      toast(meta.name + ': connected as ' + (answer.account.user || '?'));
+      renderSettings();
+      refreshStatus();
     } catch (error) {
+      reason.textContent = error.message;
       toast(error.message, true);
     }
     button.disabled = false;
+    button.textContent = 'Connect';
+  }
+
+  async function disconnectAccount(kind) {
+    const meta = ACCOUNTS[kind];
+    if (!window.confirm('Disconnect ' + meta.name + '? The ' + meta.secret + ' is deleted from this server. '
+      + meta.dropped)) return;
+    try {
+      const answer = await post(meta.path + '/logout', {});
+      if (data.settings) data.settings.accounts[kind] = answer.account;
+      toast(meta.name + ' disconnected');
+      renderSettings();
+      refreshStatus();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  for (const kind of Object.keys(ACCOUNTS)) {
+    byId('btn-' + kind + '-connect').addEventListener('click', () => connectAccount(kind));
+    byId(kind + '-secret').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        connectAccount(kind);
+      }
+    });
+    byId('btn-' + kind + '-replace').addEventListener('click', () => {
+      replacing[kind] = true;
+      renderSettings();
+      byId(kind + '-secret').focus();
+    });
+    byId('btn-' + kind + '-cancel').addEventListener('click', () => {
+      replacing[kind] = false;
+      byId(kind + '-secret').value = '';
+      renderSettings();
+    });
+    byId('btn-' + kind + '-disconnect').addEventListener('click', () => disconnectAccount(kind));
+  }
+
+  for (const field of Object.values(SITE_FIELDS)) {
+    byId(field.input).addEventListener('input', () => {
+      siteError = '';
+      updateSiteButton();
+    });
+  }
+  byId('btn-site-save').addEventListener('click', async () => {
+    const result = siteChanges();
+    if (result.reason) return;
+    const button = byId('btn-site-save');
+    button.disabled = true;
+    try {
+      const answer = await post('/api/settings/site', result.changes);
+      siteError = '';
+      for (const field of Object.values(SITE_FIELDS)) delete byId(field.input).dataset.server;
+      if (data.settings) data.settings.site = answer.site;
+      const overridden = Object.keys(result.changes).filter((name) => answer.site[name] && answer.site[name].from_environment);
+      if (overridden.length) {
+        toast('Saved, but the server configuration sets ' + overridden.map((name) => SITE_FIELDS[name].label).join(' and ')
+          + ', and it wins.', true);
+      } else {
+        toast(answer.applied ? 'Saved: in use now.' : 'Saved: restart the site to use it.');
+      }
+      renderSettings();
+      refreshStatus();
+    } catch (error) {
+      siteError = error.message;
+      updateSiteButton();
+      toast(error.message, true);
+    }
   });
-  byId('btn-install').addEventListener('click', () => {
-    const run = byId('install-run').value;
-    runAction('install', {run: run, confirm: 'INSTALL'},
-      'Install the model of run ' + run + ' on the comma? It replaces openpilot\'s model and reboots the comma.');
-  });
-  byId('btn-restore').addEventListener('click', () => {
-    runAction('restore', {confirm: 'RESTORE'}, 'Put the original openpilot model back on the comma? The comma reboots.');
-  });
-  byId('install-run').addEventListener('input', updateButtons);
+
+  // "Connect in Settings" buttons of the other tabs.
+  for (const button of document.querySelectorAll('[data-goto]')) {
+    button.addEventListener('click', () => {
+      showTab(button.dataset.goto);
+      const target = button.dataset.account ? byId('account-' + button.dataset.account) : null;
+      if (target && target.scrollIntoView) target.scrollIntoView({block: 'start'});
+      else window.scrollTo(0, 0);
+    });
+  }
 
   // -- Jobs -------------------------------------------------------------------------------------
   byId('btn-update').addEventListener('click', () => runAction('update', {}, 'Update the code: pull the latest version, update the libraries and restart the site (a few seconds). Start?'));

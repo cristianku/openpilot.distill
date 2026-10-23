@@ -224,7 +224,7 @@ def install(args: argparse.Namespace, comma: Comma) -> int:
     # 5. In place of the original, then reboot.
     put_model(comma, BUILD_DIR + '/' + ONNX_NAME, info)
     comma.run('rm -rf ' + BUILD_DIR)
-    say('== 5. installed: to go back to the original use the restore in the Comma section')
+    say('== 5. installed: to go back to the original, use "Put the original model back" in Publish')
     say('PROGRESS 5/' + str(STEPS))
     reboot(comma, not args.no_reboot)
     return 0

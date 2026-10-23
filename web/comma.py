@@ -115,15 +115,27 @@ class CommaMonitor:
                 self.probe_now()
             time.sleep(INTERVAL_SECONDS)
 
+    def set_host(self, host: str) -> None:
+        """Another comma address (saved in Settings): its state is unknown until the next probe."""
+        with self._lock:
+            if host == self.host:
+                return
+            self.host = host
+            self._state = {'host': host, 'checked': None, 'reachable': None, 'onroad': None, 'bundle': None,
+                           'bundle_default': None, 'backup': None, 'error': 'not checked yet'}
+
     def probe_now(self) -> dict:
         # One ssh at a time: a page and the thread asking together get the same answer.
         with self._probe_lock:
-            code, output = self._probe(self.host)
+            host = self.host
+            code, output = self._probe(host)
             result = parse_probe(code, output)
-            result['host'] = self.host
+            result['host'] = host
             result['checked'] = time.time()
             with self._lock:
-                self._state = result
+                # The address changed during the probe: this answer is about the old comma.
+                if host == self.host:
+                    self._state = result
                 return dict(self._state)
 
     def snapshot(self) -> dict:

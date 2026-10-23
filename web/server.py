@@ -37,6 +37,7 @@ from web.common import CODE_ROOT, RUN_RE, WebError, comma_host, hf_repo, short_t
 from web.hf import HfCatalog
 from web.jobs import JOB_ID_RE, JobManager, describe
 from web.metrics import RunReader, running_runs_from_processes
+from web.settings import Accounts, clean_site_changes, site_payload, update_env_file
 from web.status import (Cache, activities, compare_videos, eval_results, gpu_busy_reason, segments, system_info,
                         video_path)
 
@@ -57,10 +58,18 @@ STATIC_FILES = {
     'app.css': 'text/css; charset=utf-8',
     'favicon.svg': 'image/svg+xml',
 }
-BUNDLE_REASON = ('a model is chosen in the Models menu of the comma: set it back to Default (Settings > Models) '
-                 'and check again')
+BUNDLE_REASON = ('a model is chosen in the Models menu of the comma: set it back to Default on the comma screen '
+                 '(Settings > Models) and check again')
 TOKEN_MESSAGE = 'Access denied: open the site link that contains the token.'
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+# POST /api/settings/...: (account or 'site', what to do).
+SETTINGS_ROUTES = {
+    '/api/settings/hf': ('hf', 'connect'),
+    '/api/settings/hf/logout': ('hf', 'disconnect'),
+    '/api/settings/wandb': ('wandb', 'connect'),
+    '/api/settings/wandb/logout': ('wandb', 'disconnect'),
+    '/api/settings/site': ('site', 'save'),
+}
 PROBLEM_CSP = ("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
                "frame-ancestors 'none'")
 
@@ -195,7 +204,8 @@ class App:
     """State shared by the request threads."""
 
     def __init__(self, repo: Path, *, token: str | None, require_token: bool, test_actions: bool = False,
-                 jobs: JobManager | None = None, comma: CommaMonitor | None = None, hf: HfCatalog | None = None):
+                 jobs: JobManager | None = None, comma: CommaMonitor | None = None, hf: HfCatalog | None = None,
+                 accounts: Accounts | None = None):
         self.repo = repo
         self.token = token
         self.require_token = require_token
@@ -210,6 +220,10 @@ class App:
         if hf is None:
             hf = HfCatalog(hf_repo(repo))
         self.hf = hf
+        if accounts is None:
+            accounts = Accounts()
+        self.accounts = accounts
+        self._site_lock = threading.Lock()
         self.runs = RunReader(repo)
         self.drives = DriveIndex(repo)
         self._machine = Cache(3.0)
@@ -295,7 +309,8 @@ class App:
             detail['job_id'] = self.running_jobs_by_run(jobs).get(name)
         return detail
 
-    def action_states(self, machine: dict, jobs: list[dict], comma_state: dict, runs: list[dict]) -> dict:
+    def action_states(self, machine: dict, jobs: list[dict], comma_state: dict, runs: list[dict],
+                      accounts: dict | None = None) -> dict:
         running = set()
         for job in jobs:
             if job['state'] == 'running':
@@ -331,6 +346,8 @@ class App:
                     reason = BUNDLE_REASON
             if not reason and action_id in ('export', 'publish_dry', 'publish', 'install') and not finished_runs:
                 reason = 'no finished run (with supercombo.pt)'
+            if not reason and action_id == 'publish' and accounts is not None:
+                reason = accounts['hf']['problem']
             states[action_id] = {'label': action.label, 'group': action.group, 'allowed': not reason,
                                  'reason': reason, 'needs_gpu': action.needs_gpu}
         return states
@@ -340,14 +357,15 @@ class App:
         jobs = self.jobs.list_jobs()
         comma_state = self.comma.snapshot()
         runs = self.runs_payload(jobs)
+        accounts = self.accounts.presence(self.hf.repo)
         training = []
         for run in runs:
             if run['status'] == 'running':
                 training.append(run)
         return {'time': time.time(), 'code': code_version(self.repo), 'system': machine['system'],
                 'activities': machine['activities'], 'jobs': jobs, 'comma': comma_state, 'training': training,
-                'actions': self.action_states(machine, jobs, comma_state, runs), 'hf_repo': self.hf.repo,
-                'test_actions': self.test_actions,
+                'actions': self.action_states(machine, jobs, comma_state, runs, accounts), 'hf_repo': self.hf.repo,
+                'accounts': accounts, 'test_actions': self.test_actions,
                 'limits': {'steps': [actions_module.STEPS_MIN, actions_module.STEPS_MAX],
                            'batch_size': [actions_module.BATCH_MIN, actions_module.BATCH_MAX],
                            'workers': [actions_module.WORKERS_MIN, actions_module.WORKERS_MAX],
@@ -359,6 +377,58 @@ class App:
     def hf_payload(self) -> dict:
         snapshot = dict(self.hf.snapshot())
         return snapshot
+
+    # -- settings ----------------------------------------------------------------------------------
+    def settings_payload(self) -> dict:
+        """The Settings tab: who the accounts belong to (asked to the services, kept a few minutes) and
+        the site settings. Never a secret."""
+        return {'accounts': self.accounts.payload(self.hf.repo), 'site': site_payload(self.repo)}
+
+    def connect_account(self, kind: str, body) -> dict:
+        field = 'token' if kind == 'hf' else 'key'
+        if not isinstance(body, dict) or set(body) != {field}:
+            raise WebError(400, 'invalid_param', 'Send {"' + field + '": "..."}.')
+        state = self.accounts.connect(kind, body[field], self.hf.repo)
+        print('Settings: ' + ('Hugging Face' if kind == 'hf' else 'Weights & Biases') + ' connected as '
+              + short_text(state.get('user') or '?', 80), flush=True)
+        return state
+
+    def disconnect_account(self, kind: str, body) -> dict:
+        if not isinstance(body, dict) or body:
+            raise WebError(400, 'invalid_param', 'Send {}.')
+        state = self.accounts.disconnect(kind, self.hf.repo)
+        print('Settings: ' + ('Hugging Face' if kind == 'hf' else 'Weights & Biases') + ' disconnected', flush=True)
+        return state
+
+    def save_site_settings(self, body) -> dict:
+        """Saves HF_REPO / COMMA_HOST in the repo .env (the tasks read it at every start) and uses them in
+        this server at once: the Hugging Face catalog and the comma monitor."""
+        updates = clean_site_changes(body)
+        with self._site_lock:
+            update_env_file(self.repo / '.env', updates)
+            applied = self.apply_site_settings()
+        print('Settings: site settings saved (' + ', '.join(sorted(updates)) + ')', flush=True)
+        return {'site': site_payload(self.repo), 'applied': applied}
+
+    def apply_site_settings(self) -> bool:
+        """Re-reads HF_REPO and COMMA_HOST (environment, then .env) into the running server. False when a
+        part cannot change while running (a restart applies it)."""
+        applied = True
+        repo_name = hf_repo(self.repo)
+        if repo_name != self.hf.repo:
+            if hasattr(self.hf, 'set_repo'):
+                self.hf.set_repo(repo_name)
+            else:
+                applied = False
+        host = comma_host(self.repo)
+        if host != self.comma.host:
+            if hasattr(self.comma, 'set_host'):
+                self.comma.set_host(host)
+                # The page shows the new comma's state without waiting for the next round.
+                threading.Thread(target=self.comma.probe_now, name='comma-probe', daemon=True).start()
+            else:
+                applied = False
+        return applied
 
     # -- actions -----------------------------------------------------------------------------------
     def run_action(self, action_id: str, params) -> dict:
@@ -377,7 +447,15 @@ class App:
             # in place of openpilot's one, so the installed model would not be used.
             if action_id == 'install' and state.get('bundle_default') is False:
                 raise WebError(409, 'comma_bundle', BUNDLE_REASON[0].upper() + BUNDLE_REASON[1:] + '.')
+        if action_id == 'train' and spec.params.get('wandb') == 'online':
+            problem = self.accounts.problem('wandb', self.hf.repo)
+            if problem:
+                raise WebError(409, 'wandb_not_connected', 'Weights & Biases cannot log online: ' + problem
+                               + ', or choose offline.')
         if action_id == 'publish':
+            problem = self.accounts.problem('hf', self.hf.repo)
+            if problem:
+                raise WebError(409, 'hf_not_connected', 'Cannot publish: ' + problem + '.')
             snapshot = self.hf.snapshot(force=True)
             if not snapshot['ok']:
                 raise WebError(503, 'hf_unreachable',
@@ -553,6 +631,9 @@ def make_handler(app: App):
             if path == '/api/hf':
                 self._json(200, app.hf_payload())
                 return
+            if path == '/api/settings':
+                self._json(200, app.settings_payload())
+                return
             if path == '/api/jobs':
                 self._json(200, {'jobs': app.jobs.list_jobs()})
                 return
@@ -584,7 +665,8 @@ def make_handler(app: App):
                 self._send(200, 'image/jpeg', thumbnail.read_bytes(),
                            extra=[('Cache-Control', 'private, max-age=86400')])
                 return
-            if path.startswith('/api/run/') or re.fullmatch(r'/api/jobs/[^/]+/(stop|parallel)', path):
+            if path.startswith(('/api/run/', '/api/settings/')) or re.fullmatch(r'/api/jobs/[^/]+/(stop|parallel)',
+                                                                                  path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Page not found.', path.startswith('/api/'))
@@ -638,7 +720,8 @@ def make_handler(app: App):
             stop = re.fullmatch(r'/api/jobs/([^/]+)/stop', path)
             parallel = re.fullmatch(r'/api/jobs/([^/]+)/parallel', path)
             check = path == '/api/comma/check'
-            if not run and not stop and not parallel and not check:
+            settings = SETTINGS_ROUTES.get(path)
+            if not run and not stop and not parallel and not check and settings is None:
                 self._problem(404, 'not_found', 'Invalid address.', True)
                 return
             # Same origin and JSON only: no other site and no HTML form can start a job.
@@ -668,6 +751,15 @@ def make_handler(app: App):
                     raise WebError(400, 'invalid_param', 'Send {"jobs": N}.')
                 job = app.jobs.set_parallel(job_id, body['jobs'])
                 self._json(200, {'ok': True, 'job': job})
+            elif settings is not None:
+                kind, change = settings
+                if kind == 'site':
+                    answer = app.save_site_settings(body)
+                    self._json(200, {'ok': True, 'site': answer['site'], 'applied': answer['applied']})
+                elif change == 'connect':
+                    self._json(200, {'ok': True, 'account': app.connect_account(kind, body)})
+                else:
+                    self._json(200, {'ok': True, 'account': app.disconnect_account(kind, body)})
             else:
                 self._json(200, {'ok': True, 'comma': app.comma.probe_now()})
 

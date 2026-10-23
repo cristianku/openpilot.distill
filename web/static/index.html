@@ -22,7 +22,7 @@
     <button type="button" role="tab" id="tab-evaluation" data-tab="evaluation" aria-controls="panel-evaluation" aria-selected="false">Evaluation</button>
     <button type="button" role="tab" id="tab-compare" data-tab="compare" aria-controls="panel-compare" aria-selected="false">Comparison</button>
     <button type="button" role="tab" id="tab-publish" data-tab="publish" aria-controls="panel-publish" aria-selected="false">Publish</button>
-    <button type="button" role="tab" id="tab-comma" data-tab="comma" aria-controls="panel-comma" aria-selected="false">Comma</button>
+    <button type="button" role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
   </nav>
 </header>
 
@@ -63,6 +63,7 @@
       <div class="card">
         <h2>Comma</h2>
         <dl class="kv" id="comma-kv-stato"></dl>
+        <div class="buttons"><button class="btn small" type="button" data-goto="publish/comma">Install or restore a model</button></div>
       </div>
     </div>
     <div class="card">
@@ -192,6 +193,10 @@
           <option value="disabled">off</option>
         </select></label>
       </div>
+      <div class="callout" id="wandb-callout" hidden>
+        <span id="wandb-callout-text">Weights &amp; Biases is not connected: runs are logged on this server only.</span>
+        <button class="btn small" type="button" data-goto="settings" data-account="wandb">Connect in Settings</button>
+      </div>
       <fieldset class="modes">
         <legend>Start</legend>
         <label class="check"><input type="radio" name="train-mode" value="fresh" checked> From scratch</label>
@@ -292,20 +297,64 @@
     </div>
   </section>
 
-  <!-- PUBLISH -->
+  <!-- PUBLISH: a finished model, then where it goes (the comma or Hugging Face) -->
   <section class="panel" id="panel-publish" role="tabpanel" aria-labelledby="tab-publish" hidden>
     <div class="card">
-      <h2>Export ONNX</h2>
-      <p class="lead">Builds the ONNX model for the comma from a finished run (needs the comma's original model as a reference).</p>
-      <div class="form-grid wide"><label class="field">Run<select id="export-run"></select></label></div>
-      <div class="buttons"><div class="action"><button class="btn" type="button" id="btn-export">Export ONNX</button><div class="reason" id="reason-export"></div></div></div>
-      <div class="job-live" data-actions="export"></div>
+      <h2>Publish a model</h2>
+      <p class="lead">Choose a finished training, then where you want it: try it on your comma, or share it on Hugging Face.</p>
+      <select id="publish-run" hidden aria-hidden="true"></select>
+      <div class="field-label" id="publish-run-label">Which model</div><div class="picker" id="publish-run-picker" role="radiogroup" aria-labelledby="publish-run-label"></div>
+      <div class="field-label" id="dest-label">Where do you want it</div>
+      <div class="dest-options" id="dest-options" role="radiogroup" aria-labelledby="dest-label">
+        <button class="dest-option" type="button" role="radio" id="dest-comma" data-dest="comma" aria-checked="true">
+          <span class="dest-icon comma" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2.5M19 16v2.5M7.5 13h.01M16.5 13h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dest-title">On your comma</span>
+          <span class="dest-sub" id="dest-comma-sub">Checking…</span>
+        </button>
+        <button class="dest-option" type="button" role="radio" id="dest-hf" data-dest="hf" aria-checked="false" tabindex="-1">
+          <span class="dest-icon hf" aria-hidden="true">HF</span>
+          <span class="dest-title">On Hugging Face</span>
+          <span class="dest-sub" id="dest-hf-sub">Checking…</span>
+        </button>
+      </div>
     </div>
-    <div class="card">
-      <h2>Publish to Hugging Face</h2>
-      <p class="lead">Dry run first: it exports, compiles on the comma and prepares everything without uploading anything. If it succeeds, the real publish asks you to type the name.</p>
+
+    <!-- On your comma: its state, install, put the original back -->
+    <div class="card" id="dest-panel-comma">
+      <div class="card-head">
+        <h2>On your comma</h2>
+        <button class="btn small" type="button" id="btn-comma-check">Check now</button>
+      </div>
+      <ul class="checklist" id="comma-checklist" aria-live="polite"></ul>
+      <p class="note" id="comma-checked"></p>
+      <div class="dest-block">
+        <h3>Install this model</h3>
+        <p class="note">It takes the place of openpilot's driving model and the comma restarts; the first start takes a few
+          extra minutes while the comma prepares the model. The comma must be parked, with the Models menu on Default.</p>
+        <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
+        <div class="job-live" data-actions="install"></div>
+      </div>
+      <div class="dest-block">
+        <h3>Put the original model back</h3>
+        <p class="note">openpilot's own driving model comes back and the comma restarts. A software update from the comma
+          screen does the same.</p>
+        <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Put the original model back</button><div class="reason" id="reason-restore"></div></div></div>
+        <div class="job-live" data-actions="restore"></div>
+      </div>
+    </div>
+
+    <!-- On Hugging Face: dry run, publish, what is already there -->
+    <div class="card" id="dest-panel-hf" hidden>
+      <h2>On Hugging Face</h2>
+      <p class="lead">Shares the model in your Hugging Face repository, where sunnypilot offers it in the comma's Models menu.
+        A dry run comes first: it prepares the model and checks it on the comma without uploading anything. If it
+        succeeds, Publish uploads it after you confirm the name.</p>
+      <div class="callout warn" id="publish-hf-callout" hidden>
+        <span id="publish-hf-text">Hugging Face is not connected: connect it in Settings to publish.</span>
+        <button class="btn small" type="button" data-goto="settings" data-account="hf">Connect in Settings</button>
+      </div>
+      <p class="note" id="publish-hf-account" hidden></p>
       <div class="form-grid wide">
-        <label class="field">Run<select id="publish-run"></select></label>
         <label class="field">Model name<input type="text" id="publish-name" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       </div>
       <div class="buttons"><label class="check"><input type="checkbox" id="publish-stable"> Stable (becomes the base for “From the stable weights”)</label></div>
@@ -314,35 +363,69 @@
       <div id="dry-status" class="note"></div>
       <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-publish">Publish to Hugging Face</button><div class="reason" id="reason-publish"></div></div></div>
       <div class="job-live" data-actions="publish_dry,publish"></div>
-    </div>
-    <div class="card">
-      <h2>Already on Hugging Face</h2>
-      <dl class="kv" id="hf-kv"></dl>
-      <ul class="list" id="hf-models"></ul>
-      <p class="empty" id="hf-empty" hidden>No published models.</p>
+      <div class="dest-block">
+        <h3>Already on Hugging Face</h3>
+        <dl class="kv" id="hf-kv"></dl>
+        <ul class="list" id="hf-models"></ul>
+        <p class="empty" id="hf-empty" hidden>No published models.</p>
+      </div>
     </div>
   </section>
 
-  <!-- COMMA -->
-  <section class="panel" id="panel-comma" role="tabpanel" aria-labelledby="tab-comma" hidden>
+  <!-- SETTINGS -->
+  <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
     <div class="card">
-      <h2>Comma status</h2>
-      <dl class="kv" id="comma-kv-comma"></dl>
-      <div class="buttons"><button class="btn small" type="button" id="btn-comma-check">Check now</button></div>
-    </div>
-    <div class="card">
-      <h2>Install a model on the comma</h2>
-      <p class="lead">Puts the run's model in place of openpilot's and reboots the comma (the first boot recompiles, a few extra minutes). Only when parked (offroad) and with the Models menu set to Default.</p>
-      <div class="form-grid wide">
-        <label class="field">Run<select id="install-run"></select></label>
+      <h2>Accounts</h2>
+      <p class="lead">The services this server uses on your behalf. A token is checked with the service before it is saved, it stays on the server and never comes back to this page: only the account name does.</p>
+      <div class="account" id="account-hf">
+        <div class="account-row">
+          <span class="account-badge hf" aria-hidden="true">HF</span>
+          <div class="grow"><div class="account-title">Hugging Face</div><div class="account-sub" id="hf-account-sub">Checking…</div></div>
+          <span class="account-pill" id="hf-account-pill"></span>
+        </div>
+        <p class="note">Publish uploads your models there. Create an access token with write access at <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">huggingface.co/settings/tokens</a> and paste it here.</p>
+        <div class="secret-form" id="hf-form">
+          <label class="field">Access token<input type="password" id="hf-secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" placeholder="hf_…"></label>
+          <button class="btn primary" type="button" id="btn-hf-connect">Connect</button>
+          <button class="btn" type="button" id="btn-hf-cancel" hidden>Cancel</button>
+        </div>
+        <div class="reason" id="hf-reason" aria-live="polite"></div>
+        <div class="account-buttons" id="hf-manage" hidden>
+          <button class="btn" type="button" id="btn-hf-replace">Use another token</button>
+          <button class="btn danger" type="button" id="btn-hf-disconnect">Disconnect</button>
+        </div>
       </div>
-      <div class="buttons"><div class="action"><button class="btn danger solid" type="button" id="btn-install">Install on the comma</button><div class="reason" id="reason-install"></div></div></div>
-      <div class="job-live" data-actions="install"></div>
+      <div class="account" id="account-wandb">
+        <div class="account-row">
+          <span class="account-badge wandb" aria-hidden="true">W&amp;B</span>
+          <div class="grow"><div class="account-title">Weights &amp; Biases</div><div class="account-sub" id="wandb-account-sub">Checking…</div></div>
+          <span class="account-pill" id="wandb-account-pill"></span>
+        </div>
+        <p class="note">Optional: trainings also send their charts to wandb.ai. Copy your API key from <a href="https://wandb.ai/authorize" target="_blank" rel="noopener noreferrer">wandb.ai/authorize</a> and paste it here.</p>
+        <div class="secret-form" id="wandb-form">
+          <label class="field">API key<input type="password" id="wandb-secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256"></label>
+          <button class="btn primary" type="button" id="btn-wandb-connect">Connect</button>
+          <button class="btn" type="button" id="btn-wandb-cancel" hidden>Cancel</button>
+        </div>
+        <div class="reason" id="wandb-reason" aria-live="polite"></div>
+        <div class="account-buttons" id="wandb-manage" hidden>
+          <button class="btn" type="button" id="btn-wandb-replace">Use another key</button>
+          <button class="btn danger" type="button" id="btn-wandb-disconnect">Disconnect</button>
+        </div>
+      </div>
+      <p class="transport-note" id="transport-note"></p>
     </div>
     <div class="card">
-      <h2>Restore the original model</h2>
-      <div class="buttons"><div class="action"><button class="btn danger" type="button" id="btn-restore">Restore and reboot</button><div class="reason" id="reason-restore"></div></div></div>
-      <div class="job-live" data-actions="restore"></div>
+      <h2>Site settings</h2>
+      <div class="form-grid wide">
+        <label class="field">Hugging Face repository<input type="text" id="site-hf-repo" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url"></label>
+        <label class="field">Comma address<input type="text" id="site-comma-host" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url"></label>
+      </div>
+      <ul class="field-notes">
+        <li id="site-hf-repo-note">Where Publish uploads your models: owner/name on huggingface.co.</li>
+        <li id="site-comma-host-note">How this server reaches your comma over ssh: a host name, an IP address or user@host.</li>
+      </ul>
+      <div class="buttons"><div class="action"><button class="btn primary" type="button" id="btn-site-save">Save</button><div class="reason" id="site-reason" aria-live="polite"></div></div></div>
     </div>
   </section>
 

@@ -73,7 +73,7 @@ h3{margin:0 0 8px;font-size:15px}
 margin-bottom:12px}
 .form-grid.wide{grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr))}
 label.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:500;min-width:0}
-input[type="text"],input[type="number"],input[type="date"],select{font:inherit;font-size:15px;color:var(--fg);
+input[type="text"],input[type="password"],input[type="number"],input[type="date"],select{font:inherit;font-size:15px;color:var(--fg);
 background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:40px;
 width:100%;min-width:0}
 input:disabled,select:disabled{opacity:.55}
@@ -448,3 +448,73 @@ border-right:1px solid var(--line);height:100%;display:grid;place-items:center;p
 .item .parallel .stepper{height:40px}
 .item .parallel .stepper-button{width:40px}
 .item .parallel .stepper-value{min-width:52px}
+
+/* Settings: the accounts and the site settings */
+.account{padding:16px 0;border-top:1px solid var(--surface-2)}
+.account:first-of-type{border-top:0;padding-top:4px}
+.account-row{display:flex;align-items:center;gap:12px;min-width:0}
+.account-row .grow{flex:1;min-width:0}
+.account-badge{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;flex:none;font-weight:800;
+font-size:13px;letter-spacing:-.02em}
+.account-badge.hf{background:var(--todo-soft);color:var(--todo)}
+.account-badge.wandb{background:var(--imp-soft);color:var(--imp)}
+.account-title{font-weight:700;font-size:16px}
+.account-sub{color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
+.account-pill{flex:none}
+.account .note{margin:10px 0 12px}
+.secret-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.secret-form .field{flex:1 1 220px}
+.secret-form .btn{flex:none}
+.account .reason{margin-top:6px}
+.account .reason:empty{display:none}
+.account-buttons{display:flex;gap:10px;flex-wrap:wrap}
+.transport-note{display:flex;gap:10px;align-items:flex-start;margin:4px 0 0;padding:12px 14px;border-radius:12px;
+background:var(--surface-2);color:var(--muted);font-size:13.5px}
+.transport-note.warn{background:var(--todo-soft);color:var(--fg)}
+.field-notes{list-style:none;margin:-4px 0 14px;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12.5px;
+color:var(--muted)}
+.field-notes li.warn{color:var(--todo)}
+/* A pointer to another tab (Training and Publish to Settings) */
+.callout{margin:0 0 12px;padding:12px 14px;border-radius:12px;background:var(--rev-soft);color:var(--fg);font-size:14px;
+display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.callout span{flex:1 1 200px;min-width:0}
+.callout .btn{flex:none}
+.callout.warn{background:var(--todo-soft)}
+
+/* Publish: the two destinations as big option cards, then the chosen one */
+.dest-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:340px){.dest-options{grid-template-columns:1fr}}
+.dest-option{appearance:none;display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0;padding:16px;
+border:2px solid var(--line);border-radius:18px;background:var(--surface-2);color:var(--fg);font:inherit;text-align:left;
+cursor:pointer;transition:transform .2s ease,border-color .2s,box-shadow .2s,background .2s}
+.dest-option:active{transform:scale(.97)}
+.dest-option[aria-checked="true"]{border-color:var(--rev);background:var(--surface);box-shadow:0 0 0 4px var(--rev-soft)}
+.dest-icon{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-weight:800;font-size:13px;
+letter-spacing:-.02em;margin-bottom:4px}
+.dest-icon svg{width:26px;height:26px}
+.dest-icon.comma{background:var(--rev-soft);color:var(--rev)}
+.dest-icon.hf{background:var(--todo-soft);color:var(--todo)}
+.dest-option.blocked .dest-icon{background:var(--surface);color:var(--muted)}
+.dest-title{font-weight:700;font-size:16px;line-height:1.25;overflow-wrap:anywhere}
+.dest-sub{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;min-width:0;overflow-wrap:anywhere}
+.dest-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--muted)}
+.dest-dot.ok{background:var(--ok)}.dest-dot.todo{background:var(--todo)}.dest-dot.bad{background:var(--bad)}
+.dest-dot.run{background:var(--rev);animation:pulse 1.2s infinite}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.card-head h2{margin:0}
+.dest-block{margin-top:16px;padding-top:16px;border-top:1px solid var(--surface-2)}
+.dest-block h3{margin:0 0 4px;font-size:16px}
+.dest-block .note{margin:0 0 12px;max-width:75ch}
+/* the comma as a checklist (iOS grouped list) */
+.checklist{list-style:none;margin:0 0 8px;padding:0;border-radius:14px;background:var(--surface-2);overflow:hidden}
+.checklist li{display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);
+animation:picker-in .34s cubic-bezier(.2,.8,.2,1) both}
+.checklist li:last-child{border-bottom:0}
+.check-mark{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:13px;font-weight:800;
+margin-top:1px}
+.check-mark.ok{background:var(--ok-soft);color:var(--ok)}.check-mark.todo{background:var(--todo-soft);color:var(--todo)}
+.check-mark.bad{background:var(--bad-soft);color:var(--bad)}.check-mark.muted{background:var(--surface);color:var(--muted)}
+.check-text{flex:1;min-width:0}
+.check-title{font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.check-detail{color:var(--muted);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+@media (prefers-reduced-motion:reduce){.dest-option{transition:none}.checklist li{animation:none}.dest-dot.run{animation:none}}

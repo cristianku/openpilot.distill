@@ -56,6 +56,13 @@ class HfCatalog:
         self._snapshot = None
         self._time = 0.0
 
+    def set_repo(self, repo: str) -> None:
+        """Another repo (saved in Settings): the next snapshot asks Hugging Face about it."""
+        with self._lock:
+            if repo != self.repo:
+                self.repo = repo
+                self._snapshot = None
+
     def snapshot(self, force: bool = False) -> dict:
         with self._lock:
             now = time.monotonic()

@@ -12,12 +12,53 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import web.settings
 from web.jobs import JobManager
 from web.server import App, create_server, parse_range
+from web.settings import Accounts, Rejected
 
 TOKEN = 'TestToken_1234567890abcdef'
 RUN = '2026-10-21_1544'
+HF_TOKEN = 'hf_' + 'A' * 34
+WANDB_KEY = 'b' * 40
+# The variables that point the settings at the real credentials of this machine: every test runs
+# with them unset and HOME/HF_HOME in its own temporary folder.
+CREDENTIAL_VARIABLES = ('HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN', 'HF_TOKEN_PATH', 'HF_HOME', 'XDG_CACHE_HOME',
+                        'HF_ENDPOINT', 'WANDB_API_KEY', 'NETRC', 'HF_REPO', 'COMMA_HOST')
+
+
+def isolated_home(test: unittest.TestCase, base: Path) -> Path:
+    """HOME and HF_HOME in `base` for the whole test, and no request leaves the machine."""
+    home = base / 'home'
+    home.mkdir()
+    environment = mock.patch.dict(os.environ, {'HOME': str(home), 'HF_HOME': str(home / 'hf')})
+    environment.start()
+    test.addCleanup(environment.stop)
+    for name in CREDENTIAL_VARIABLES:
+        if name != 'HF_HOME':
+            os.environ.pop(name, None)
+
+    def no_network(request, timeout):
+        raise AssertionError('a test tried to reach ' + request.full_url)
+
+    network = mock.patch.object(web.settings, '_open', no_network)
+    network.start()
+    test.addCleanup(network.stop)
+    return home
+
+
+def fake_hf_check(token):
+    if token != HF_TOKEN:
+        raise Rejected()
+    return {'user': 'tester', 'role': 'write', 'fine_grained': None}
+
+
+def fake_wandb_check(key):
+    if key != WANDB_KEY:
+        raise Rejected()
+    return {'user': 'tester', 'entity': 'tester-team'}
 
 
 class FakeComma:
@@ -26,6 +67,10 @@ class FakeComma:
     def __init__(self):
         self.state = {'host': 'comma', 'checked': 1.0, 'reachable': True, 'onroad': False, 'bundle': 'Default',
                       'bundle_default': True, 'backup': False, 'error': ''}
+
+    def set_host(self, host):
+        self.host = host
+        self.state['host'] = host
 
     def snapshot(self):
         return dict(self.state)
@@ -42,6 +87,9 @@ class FakeHf:
 
     def __init__(self):
         self.models = ['2026_10_21_1544', 'cd210_native']
+
+    def set_repo(self, repo):
+        self.repo = repo
 
     def snapshot(self, force=False):
         return {'repo': self.repo, 'url': 'https://huggingface.co/' + self.repo, 'ok': True, 'error': '',
@@ -61,6 +109,7 @@ class ServerTestCase(unittest.TestCase):
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
+        self.home = isolated_home(self, Path(self.directory.name).resolve())
         self.repo = Path(self.directory.name).resolve() / 'repo'
         run = self.repo / 'outputs' / 'supervised' / RUN
         run.mkdir(parents=True)
@@ -72,7 +121,9 @@ class ServerTestCase(unittest.TestCase):
         self.comma = FakeComma()
         self.hf = FakeHf()
         jobs = JobManager(self.repo, gpu_check=lambda: '', external_groups=set)
-        app = App(self.repo, token=TOKEN, require_token=self.require_token, comma=self.comma, hf=self.hf, jobs=jobs)
+        self.accounts = Accounts(check_hf=fake_hf_check, check_wandb=fake_wandb_check)
+        app = App(self.repo, token=TOKEN, require_token=self.require_token, comma=self.comma, hf=self.hf, jobs=jobs,
+                  accounts=self.accounts)
         token = TOKEN
         if not self.require_token:
             token = None
@@ -219,6 +270,30 @@ class PageTest(ServerTestCase):
             self.assertEqual(response.getheader('X-Content-Type-Options'), 'nosniff')
             nonces.append(nonce)
         self.assertNotEqual(nonces[0], nonces[1])
+
+    def test_sections_of_the_page(self):
+        """The tabs of the page and of app.js match; the Comma tab is gone: Publish installs on the comma."""
+        response, body = self.request('GET', '/')
+        page = body.decode()
+        tabs = re.findall(r'data-tab="([a-z]+)"', page)
+        self.assertEqual(tabs, ['status', 'preprocessing', 'training', 'evaluation', 'compare', 'publish', 'settings'])
+        for tab in tabs:
+            self.assertIn('id="panel-' + tab + '"', page)
+        self.assertNotIn('id="panel-comma"', page)
+        self.assertNotIn('data-tab="comma"', page)
+        response, body = self.request('GET', '/static/app.js')
+        script = body.decode()
+        match = re.search(r'const TABS = \[([^\]]*)\]', script)
+        self.assertIsNotNone(match)
+        self.assertEqual(re.findall(r"'([a-z]+)'", match.group(1)), tabs)
+        # Old bookmarks of the Comma tab land on Publish, "On your comma".
+        self.assertIn("if (name === 'comma')", script)
+        # Publish holds everything the Comma tab did, next to the Hugging Face publish.
+        for element in ('publish-run-picker', 'dest-comma', 'dest-hf', 'btn-comma-check', 'btn-install', 'btn-restore',
+                        'btn-publish-dry', 'btn-publish', 'hf-models'):
+            self.assertEqual(page.count('id="' + element + '"'), 1, element)
+        # No file path of the comma on the page.
+        self.assertNotIn('/data/driving', page + script)
 
     def test_static_files(self):
         response, body = self.request('GET', '/static/app.js')
@@ -393,6 +468,15 @@ for _ in range(200):
     def test_publish_needs_a_free_name_and_a_good_dry_run(self):
         write_task(self.repo, 'publish.py', 'print("publish", *sys.argv[1:])')
         params = {'run': RUN, 'name': 'nuovo', 'stable': False, 'confirm': 'nuovo'}
+        # Without a Hugging Face login the publish is refused before anything else.
+        response, body = self.post('/api/run/publish', params)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(json.loads(body)['error'], 'hf_not_connected')
+        self.assertIn('Settings', json.loads(body)['message'])
+        response, body = self.request('GET', '/api/status')
+        self.assertIn('connect it in Settings', json.loads(body)['actions']['publish']['reason'])
+        (self.home / 'hf').mkdir()
+        (self.home / 'hf' / 'token').write_text(HF_TOKEN)
         response, body = self.post('/api/run/publish', {'run': RUN, 'name': '2026_10_21_1544', 'stable': False,
                                                         'confirm': '2026_10_21_1544'})
         self.assertEqual(response.status, 409)
@@ -437,7 +521,10 @@ for _ in range(200):
         response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'INSTALL'})
         self.assertEqual(json.loads(body)['error'], 'comma_bundle')
         response, body = self.request('GET', '/api/status')
-        self.assertIn('Models menu', json.loads(body)['actions']['install']['reason'])
+        reason = json.loads(body)['actions']['install']['reason']
+        self.assertIn('Models menu', reason)
+        # The comma's own Settings, not the Settings tab of the site.
+        self.assertIn('on the comma screen', reason)
         self.comma.state['bundle_default'] = True
         response, body = self.post('/api/run/install', {'run': RUN, 'confirm': 'installa'})
         self.assertEqual(response.status, 400)
