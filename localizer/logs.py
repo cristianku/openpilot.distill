@@ -15,6 +15,9 @@ CAMERA_STREAMS = {
 }
 POSE_STREAM = "deviceMotion"
 CALIBRATION_STREAM = "extrinsicsCalibration"
+# Largest share of calibration messages flagged not valid in a usable segment (stable_calibration). A driving
+# model that drops 7 % of its frames flags about 10 %; the start of a drive about 20 % of a short segment.
+MAX_FLAGGED_CALIBRATION = 0.25
 FRAME_INFO_METADATA = {
   "encoded_numpy_dtypes": json.dumps({
     f"{camera}/{field}": {"dtype": dtype, "shape": [1]}
@@ -64,6 +67,42 @@ def _frame_info(streams, device_type: int, video_dir: Path) -> dict[str, np.ndar
       f"{camera}/width": np.asarray([video_stream["width"]], dtype=np.int64),
     })
   return frame_info
+
+
+def stable_calibration(events) -> tuple[np.ndarray, np.ndarray]:
+  """rpyCalib and wideFromDeviceEuler of a segment whose calibration stays in force all along: from the first
+  calibrated message on, every message is calibrated and validBlocks never goes down.
+
+  calibrationd also marks its message not valid (event.valid) whenever one of its inputs is, for example
+  cameraOdometry after a frame the driving model dropped, or in the first seconds after the start: the
+  calibration it carries is still the one in force. So a flagged message only counts against the segment when
+  its content breaks the rule above; its values are never used; and a segment where more than
+  MAX_FLAGGED_CALIBRATION of the messages are flagged is refused."""
+  calibration_values = wide_values = None
+  last_valid_blocks = None
+  total = flagged = 0
+  for event in events:
+    calibration = getattr(event, CALIBRATION_STREAM)
+    rpy, wide = list(calibration.rpyCalib), list(calibration.wideFromDeviceEuler)
+    calibrated = (
+      str(calibration.calStatus) == "calibrated"
+      and len(rpy) == len(wide) == 3
+      and np.all(np.isfinite(rpy + wide))
+    )
+    total += 1
+    if not event.valid:
+      flagged += 1
+    if last_valid_blocks is not None and (not calibrated or calibration.validBlocks < last_valid_blocks):
+      raise UnusableSegment(f"{CALIBRATION_STREAM} changed during the segment (no longer calibrated, or recalibrating)")
+    if calibrated and event.valid:
+      calibration_values = np.asarray(rpy, dtype=np.float64)
+      wide_values = np.asarray(wide, dtype=np.float64)
+      last_valid_blocks = calibration.validBlocks
+  if calibration_values is None:
+    raise UnusableSegment(f"no stable calibrated {CALIBRATION_STREAM} for the segment")
+  if flagged > MAX_FLAGGED_CALIBRATION * total:
+    raise UnusableSegment(f"{CALIBRATION_STREAM} flagged not valid in {round(100 * flagged / total)} % of the segment")
+  return calibration_values, wide_values
 
 
 def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np.ndarray]]:
@@ -147,26 +186,7 @@ def read_log(messages, video_dir: Path) -> tuple[LocalizationInput, dict[str, np
   if not raw_gnss_measurements:
     raise UnusableSegment("no raw UBlox measurement reports found in the log")
 
-  calibration_values = wide_values = None
-  last_valid_blocks = None
-  for event in streams[CALIBRATION_STREAM]:
-    calibration = getattr(event, CALIBRATION_STREAM)
-    rpy, wide = list(calibration.rpyCalib), list(calibration.wideFromDeviceEuler)
-    usable = (
-      event.valid
-      and str(calibration.calStatus) == "calibrated"
-      and len(rpy) == len(wide) == 3
-      and np.all(np.isfinite(rpy + wide))
-    )
-    if last_valid_blocks is not None and (not usable or calibration.validBlocks < last_valid_blocks):
-      calibration_values = None
-      break
-    if usable:
-      calibration_values = np.asarray(rpy, dtype=np.float64)
-      wide_values = np.asarray(wide, dtype=np.float64)
-      last_valid_blocks = calibration.validBlocks
-  if calibration_values is None:
-    raise UnusableSegment(f"no stable calibrated {CALIBRATION_STREAM} for the segment")
+  calibration_values, wide_values = stable_calibration(streams[CALIBRATION_STREAM])
 
   device_type = next(
     event.initData.deviceType.raw
