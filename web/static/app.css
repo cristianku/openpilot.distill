@@ -342,22 +342,27 @@ display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .gps-callout span{flex:1;min-width:200px}
 .gps-callout .btn{flex:none}
 
-/* the picker as a dropdown that slides open */
-.picker{position:relative}
-.picker-toggle{appearance:none;display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border:1px solid var(--line);
-border-radius:16px;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer;min-height:64px;
-box-shadow:var(--shadow);transition:box-shadow .2s,border-color .2s}
-.picker.open .picker-toggle{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-.picker-chevron{flex:none;width:28px;height:28px;border-radius:50%;background:var(--surface-2);color:var(--muted);display:grid;
-place-items:center;font-size:16px;line-height:1;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
-.picker.open .picker-chevron{transform:rotate(180deg);color:var(--accent)}
-.picker-drawer{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .38s cubic-bezier(.2,.8,.2,1),opacity .25s ease}
-.picker.open .picker-drawer{grid-template-rows:1fr;opacity:1}
-.picker-inner{overflow:hidden;min-height:0}
-.picker.open .picker-row{animation:picker-in .34s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i) * 28ms)}
-@keyframes picker-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+/* the picker inline: every model in sight, a long group folds after a few rows */
+.picker{display:flex;flex-direction:column}
+.picker > .picker-group:first-child{margin-top:0}
 .picker-row:active{background:var(--surface)}
-@media (prefers-reduced-motion:reduce){.picker-drawer,.picker-chevron{transition:none}.picker.open .picker-row{animation:none}}
+.picker-row[aria-checked="true"]{box-shadow:inset 3px 0 0 var(--accent)}
+.picker-more{appearance:none;display:block;width:100%;min-height:44px;padding:10px 14px;border:0;
+background:none;color:var(--accent);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.picker-more:hover{background:var(--surface)}
+@keyframes picker-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+/* Evaluation: the model to test and the one to compare it with, side by side (stacked on a phone) */
+.wizard.wide{max-width:1000px}
+.versus{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:0 16px;align-items:start}
+.versus-side{min-width:0}
+.versus .field-label{margin:0 4px 10px;font-size:17px;font-weight:700}
+.versus-mark{display:flex;flex-direction:column;align-items:center;gap:10px;align-self:stretch;padding-top:6px;color:var(--muted);
+font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.versus-mark::before,.versus-mark::after{content:"";flex:1;width:1px;background:var(--line)}
+@media (max-width:760px){.versus{grid-template-columns:minmax(0,1fr)}
+.versus-mark{flex-direction:row;padding:18px 0 14px}
+.versus-mark::before,.versus-mark::after{width:auto;height:1px}}
 
 /* results: ranking bars and the per-drive dot plot */
 .ranking{display:flex;flex-direction:column;gap:18px;margin-top:6px}
@@ -666,6 +671,10 @@ border-radius:14px;border:1px solid var(--line);background:transparent;color:var
 .wizard-action{max-width:none;align-items:stretch}
 .wizard-action .reason{text-align:center;max-width:none}
 .wizard-test{align-self:center}
+/* Preprocessing: the block under the chosen card (download or localize) */
+.prep-job{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+.prep-since{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 16px;min-height:44px}
+.prep-since input[type="date"]{width:auto;min-width:170px}
 @media (prefers-reduced-motion:reduce){.choice,.choice-check{transition:none}}
 
 /* every page in the language of the training wizard: a big title on top, wizards for what starts a job */

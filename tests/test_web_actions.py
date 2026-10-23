@@ -107,6 +107,13 @@ class ArgvTest(ActionTestCase):
             self.assertEqual(self.build('eval', {'model': spec}).argv,
                              [PY, '-m', 'tasks.evaluation', 'holdout', '--model=' + spec])
 
+    def test_eval_against(self):
+        spec = self.build('eval', {'model': 'run:' + RUN, 'against': 'stock'})
+        self.assertEqual(spec.argv, [PY, '-m', 'tasks.evaluation', 'holdout', '--model=run:' + RUN, '--model=stock'])
+        self.assertEqual(self.build('eval', {'model': 'teacher', 'against': ''}).argv[-1], '--model=teacher')
+        self.refused('eval', {'model': 'stock', 'against': 'stock'})
+        self.refused('eval', {'model': 'stock', 'against': 'run:2026-10-23_0000'}, 404)
+
     def test_compare(self):
         spec = self.build('compare', {'segment': SEGMENT, 'reference': 'stock', 'student': 'run:' + RUN,
                                       'start': 10, 'duration': 20.5, 'speed': 0.5, 'inset': True, 'show_gt': False})

@@ -960,20 +960,30 @@
       body.appendChild(row);
     }
   }
-  // -- get new drives: a wizard, download (step 1) then localize (step 2) --
-  const prepWizard = wizard('prep', 2, renderPrepWizard);
-  function fetchMode() {
-    const chosen = document.querySelector('input[name="fetch-mode"]:checked');
-    return chosen ? chosen.value : 'new';
+  // -- the drives: two choice cards, download or localize, and the button of the chosen one --
+  // Until the user picks one, Localize is chosen by itself when new segments are waiting for it.
+  let prepChosen = false;
+  function prepJob() {
+    const chosen = document.querySelector('input[name="prep-job"]:checked');
+    return chosen ? chosen.value : 'fetch';
   }
-  function renderPrepWizard() {
-    renderChoices(byId('prep-step-1'));
-    byId('fetch-since-field').hidden = fetchMode() !== 'since';
+  function choosePrepJob(job) {
+    const radio = document.querySelector('input[name="prep-job"][value="' + job + '"]');
+    if (radio && !radio.checked) {
+      radio.checked = true;
+      renderPrepJob();
+    }
+  }
+  function renderPrepJob() {
+    renderChoices(byId('prep-step'));
+    byId('prep-fetch').hidden = prepJob() !== 'fetch';
+    byId('prep-localize').hidden = prepJob() !== 'localize';
+    byId('fetch-since').hidden = !byId('fetch-since-on').checked;
   }
   function fetchFormReason() {
-    return fetchMode() === 'since' && !byId('fetch-since').value ? 'choose the day to start from' : '';
+    return byId('fetch-since-on').checked && !byId('fetch-since').value ? 'choose the day to start from' : '';
   }
-  // What step 2 would do: the new segments, and the ones a more accurate GPS map is out for.
+  // What Localize would do: the new segments, and the ones a more accurate GPS map is out for.
   function renderLocalizeWhat(counts) {
     const parts = [];
     if (counts.todo) parts.push(counts.todo + (counts.todo === 1 ? ' new segment' : ' new segments') + ' to localize');
@@ -981,16 +991,27 @@
       parts.push(counts.refinable + (counts.refinable === 1 ? ' segment' : ' segments') + ' can get a more accurate map');
     }
     byId('prep-localize-what').textContent = parts.length ? capital(parts.join(' · ')) + '.' : 'Nothing new to localize.';
+    let short = 'Nothing new right now';
+    if (counts.todo) short = counts.todo + ' new to localize';
+    else if (counts.refinable) short = counts.refinable + ' can get a better map';
+    byId('prep-localize-short').textContent = short;
+    if (!prepChosen && counts.todo) choosePrepJob('localize');
   }
-  for (const radio of document.querySelectorAll('input[name="fetch-mode"]')) {
-    radio.addEventListener('change', () => { renderPrepWizard(); updateButtons(); });
+  for (const radio of document.querySelectorAll('input[name="prep-job"]')) {
+    radio.addEventListener('change', () => { prepChosen = true; renderPrepJob(); updateButtons(); });
   }
+  byId('fetch-since-on').addEventListener('change', () => {
+    renderPrepJob();
+    if (byId('fetch-since-on').checked) byId('fetch-since').focus();
+    updateButtons();
+  });
   byId('fetch-since').addEventListener('input', updateButtons);
-  renderPrepWizard();
+  renderPrepJob();
   byId('btn-fetch').addEventListener('click', () => {
-    const since = fetchMode() === 'since' ? byId('fetch-since').value : '';
+    const since = byId('fetch-since-on').checked ? byId('fetch-since').value : '';
     const params = since ? {since: since} : {};
-    runAction('fetch', params).then((job) => { if (job) prepWizard.show(2, false); });
+    // Localize comes next: it is ready (and waits for the download) on the other card.
+    runAction('fetch', params).then((job) => { if (job) choosePrepJob('localize'); });
   });
   byId('btn-localize').addEventListener('click', () => runAction('localize', localizeParams()));
 
@@ -1816,8 +1837,9 @@
     return {title: spec, detail: '', badge: ''};
   }
 
-  // Which pickers are open: a refresh rebuilds a picker, it must not close it under the finger.
-  const pickerOpen = {};
+  // A long group shows its first rows (and the chosen one) until "Show more"; which groups are open.
+  const PICKER_ROWS = 4;
+  const pickerMore = {};
   // What an empty picker says.
   const PICKER_EMPTY = {'publish-run': 'No finished training yet: start one in Training.'};
 
@@ -1841,107 +1863,107 @@
     if (checked !== undefined) row.appendChild(node('span', 'picker-check', checked ? '\u2713' : ''));
   }
 
-  function setPickerOpen(selectId, open) {
-    pickerOpen[selectId] = open;
-    const box = byId(selectId + '-picker');
-    box.classList.toggle('open', open);
-    const toggle = box.querySelector('.picker-toggle');
-    if (toggle) toggle.setAttribute('aria-expanded', String(open));
-  }
-
   function renderPicker(selectId) {
     const select = byId(selectId);
     const box = byId(selectId + '-picker');
     const options = Array.from(select.options).map((option) => ({value: option.value,
       group: option.parentElement.tagName === 'OPTGROUP' ? option.parentElement.label : ''}));
-    if (same('picker:' + selectId, [options, select.value, data.runs, data.evalResults])) return;
+    if (same('picker:' + selectId, [options, select.value, data.runs, data.evalResults, pickerMore])) return;
+    // The rebuilt row or button under the finger keeps the keyboard focus.
+    const focused = box.contains(document.activeElement) ? document.activeElement.dataset.key : null;
     box.replaceChildren();
-    box.classList.toggle('open', !!pickerOpen[selectId]);
     if (!options.length) {
       box.appendChild(node('p', 'empty', PICKER_EMPTY[selectId] || 'No models yet.'));
       return;
     }
 
-    // Closed: the chosen model, with a chevron. Open: the whole list slides down under it.
-    const toggle = node('button', 'picker-toggle');
-    toggle.type = 'button';
-    toggle.setAttribute('aria-expanded', String(!!pickerOpen[selectId]));
-    pickerRowContent(toggle, select.value);
-    toggle.appendChild(node('span', 'picker-chevron', '\u2304'));
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setPickerOpen(selectId, !pickerOpen[selectId]);
-    });
-    box.appendChild(toggle);
-
-    const drawer = node('div', 'picker-drawer');
-    const inner = node('div', 'picker-inner');
-    drawer.appendChild(inner);
-    box.appendChild(drawer);
-    let list = null;
-    let group = null;
-    let index = 0;
+    // Every model in sight, grouped: a tap chooses it, nothing opens or closes.
+    const groups = [];
     for (const option of options) {
-      if (list === null || option.group !== group) {
-        group = option.group;
-        if (group) inner.appendChild(node('div', 'picker-group', group));
-        list = node('div', 'picker-list');
-        inner.appendChild(list);
-      }
-      const row = node('button', 'picker-row');
-      row.type = 'button';
-      row.setAttribute('role', 'radio');
-      row.setAttribute('aria-checked', String(option.value === select.value));
-      row.style.setProperty('--i', String(index));
-      index = index + 1;
-      pickerRowContent(row, option.value, option.value === select.value);
-      row.addEventListener('click', (event) => {
-        event.stopPropagation();
-        select.value = option.value;
-        select.dispatchEvent(new Event('change'));
-        // Close with the animation first, then show the new choice.
-        setPickerOpen(selectId, false);
-        setTimeout(() => { same.cache['picker:' + selectId] = ''; renderPicker(selectId); }, 320);
+      if (!groups.length || groups[groups.length - 1].name !== option.group) groups.push({name: option.group, options: []});
+      groups[groups.length - 1].options.push(option);
+    }
+    for (const group of groups) {
+      if (group.name) box.appendChild(node('div', 'picker-group', group.name));
+      const list = node('div', 'picker-list');
+      const key = selectId + '|' + group.name;
+      const long = group.options.length > PICKER_ROWS + 1;
+      let hidden = 0;
+      group.options.forEach((option, position) => {
+        const checked = option.value === select.value;
+        if (long && !pickerMore[key] && position >= PICKER_ROWS && !checked) {
+          hidden = hidden + 1;
+          return;
+        }
+        const row = node('button', 'picker-row');
+        row.type = 'button';
+        row.setAttribute('role', 'radio');
+        row.setAttribute('aria-checked', String(checked));
+        row.dataset.key = option.value;
+        pickerRowContent(row, option.value, checked);
+        row.addEventListener('click', () => {
+          if (select.value === option.value) return;
+          select.value = option.value;
+          select.dispatchEvent(new Event('change'));
+        });
+        list.appendChild(row);
       });
-      list.appendChild(row);
+      if (long) {
+        const more = node('button', 'picker-more', pickerMore[key] ? 'Show fewer'
+          : 'Show ' + hidden + ' more');
+        more.type = 'button';
+        more.setAttribute('aria-expanded', String(!!pickerMore[key]));
+        more.dataset.key = 'more|' + key;
+        more.addEventListener('click', () => {
+          pickerMore[key] = !pickerMore[key];
+          renderPicker(selectId);
+        });
+        list.appendChild(more);
+      }
+      box.appendChild(list);
     }
+    const target = focused ? Array.from(box.querySelectorAll('button')).find((item) => item.dataset.key === focused) : null;
+    if (target) target.focus({preventScroll: true});
   }
-  document.addEventListener('click', (event) => {
-    for (const id of Object.keys(pickerOpen)) {
-      if (pickerOpen[id] && !byId(id + '-picker').contains(event.target)) setPickerOpen(id, false);
-    }
-  });
-  for (const id of ['eval-model', 'cmp-student']) {
-    byId(id).addEventListener('change', () => { if (!pickerOpen[id]) renderPicker(id); updateButtons(); });
+  for (const id of ['eval-against', 'cmp-student']) {
+    byId(id).addEventListener('change', () => { renderPicker(id); updateButtons(); });
   }
+  // The model on the left leaves the list on the right: renderEval fills it again.
+  byId('eval-model').addEventListener('change', () => { renderEval(); updateButtons(); });
 
   // -- Evaluation -------------------------------------------------------------------------------
+  // Two columns: the model to test (yours first) and the one to compare it with (the references first).
   function renderEval() {
-    const options = runModelOptions().concat([{value: 'stock', label: 'Stock', group: 'Reference models'},
-      {value: 'teacher', label: 'Teacher', group: 'Reference models'},
-      {value: 'logged', label: 'Logged', group: 'Reference models'}], hfModelOptions());
-    const firstRun = runModelOptions();
-    fillSelect(byId('eval-model'), options, firstRun.length ? firstRun[0].value : 'stock');
+    const runs = runModelOptions();
+    const published = hfModelOptions();
+    const references = ['stock', 'teacher', 'logged'].map((value) => ({value: value, label: value, group: 'Reference models'}));
+    fillSelect(byId('eval-model'), runs.concat(published, references), runs.length ? runs[0].value : 'stock');
+    const model = byId('eval-model').value;
+    const others = references.concat(runs, published).filter((option) => option.value !== model);
+    fillSelect(byId('eval-against'), others, model === 'stock' ? 'teacher' : 'stock');
     renderPicker('eval-model');
+    renderPicker('eval-against');
     if (evalWizard.step === 2) renderEvalSummary();
     renderResults(data.evalResults || []);
   }
 
-  // -- evaluate a model: a wizard, the model (step 1) then the summary (step 2) --
+  // -- evaluate a model: a wizard, the two models (step 1) then the summary (step 2) --
   const evalWizard = wizard('eval', 2, (step) => { if (step === 2) renderEvalSummary(); });
   function renderEvalSummary() {
     const spec = byId('eval-model').value;
+    const against = byId('eval-against').value;
     const list = byId('eval-summary');
     list.replaceChildren();
-    kvRow(list, 'Model', spec ? modelInfo(spec).title : '–');
+    kvRow(list, 'Model to test', spec ? modelInfo(spec).title : '–');
+    kvRow(list, 'Compared with', against ? modelInfo(against).title : '–');
     const counts = data.segments ? data.segments.counts : null;
     kvRow(list, 'Test drives', counts ? counts.heldout_localized + ' hold-out segments, never seen in training' : '–');
-    const result = spec ? evalResultOf(spec) : null;
-    if (result && result.avg_miss_m !== null) {
-      kvRow(list, 'Last time', result.avg_miss_m.toFixed(2) + ' m average miss · '
-        + fmtDay(typeof result.date === 'string' ? Date.parse(result.date) / 1000 : result.date));
-    }
-    kvRow(list, 'Hardware', 'the GPU, for a few minutes');
+    const last = [spec, against].map((value) => {
+      const result = value ? evalResultOf(value) : null;
+      return result && result.avg_miss_m !== null ? result.avg_miss_m.toFixed(2) + ' m' : 'not evaluated';
+    });
+    if (last[0] !== 'not evaluated' || last[1] !== 'not evaluated') kvRow(list, 'Last time', last.join(' vs '));
+    kvRow(list, 'Hardware', 'the GPU, a few minutes per model; a result already computed on these drives is reused');
   }
 
   // Colours of the models in the results, in ranking order (Apple system colours).
@@ -2048,7 +2070,7 @@
   }
   // Step 2 is the confirmation: no extra question.
   byId('btn-eval').addEventListener('click', () => {
-    runAction('eval', {model: byId('eval-model').value});
+    runAction('eval', {model: byId('eval-model').value, against: byId('eval-against').value});
   });
 
   // -- drive picker --------------------------------------------------------------------------
@@ -2605,7 +2627,7 @@
   });
   byId('publish-run').addEventListener('change', () => {
     followRunName();
-    if (!pickerOpen['publish-run']) renderPicker('publish-run');
+    renderPicker('publish-run');
     updateButtons();
   });
   for (const id of ['publish-name', 'publish-stable']) {

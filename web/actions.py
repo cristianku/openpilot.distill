@@ -427,11 +427,21 @@ def build_job(repo: Path, action_id: str, params, *, test_actions: bool = False)
         summary = '10 steps to check that everything starts, ' + gpus_text(gpus)
 
     elif action_id == 'eval':
-        check_keys(params, ('model',))
-        model = model_spec_param(repo, params, 'model', ('stock', 'teacher', 'logged', 'run', 'hf'))
+        check_keys(params, ('model', 'against'))
+        kinds = ('stock', 'teacher', 'logged', 'run', 'hf')
+        model = model_spec_param(repo, params, 'model', kinds)
         argv = [sys.executable, '-m', 'tasks.evaluation', 'holdout', '--model=' + model]
         clean['model'] = model
         summary = model
+        # The model to compare it with runs too, on the same drives: a result kept from before is reused
+        # only while the hold-out drives are the same.
+        if params.get('against') not in (None, ''):
+            against = model_spec_param(repo, params, 'against', kinds)
+            if against == model:
+                raise bad('against: choose a different model to compare with.')
+            argv.append('--model=' + against)
+            clean['against'] = against
+            summary = model + ' vs ' + against
 
     elif action_id == 'compare':
         check_keys(params, ('segment', 'reference', 'student', 'start', 'duration', 'speed', 'inset', 'show_gt'))

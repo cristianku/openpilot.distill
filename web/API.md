@@ -34,7 +34,7 @@ own: a phone can have an app newer or older than the server it talks to. Keep th
 | `GET /api/eval` | yes | `results[]`: `model`, `avg_miss_m`, `selection`, `rate_hz`, `date` |
 | `GET /api/hf` | yes | `ok`, `stable`, `models[]`, `error` |
 | `POST /api/run/train` | yes | `{"ok": true, "job": {…, "label"}}`. Body: `mode` (`fresh`, `continue`, `resume`), `steps` and `teacher` or `run` (resume), `batch_size`, `workers`, `wandb`, `gpus` |
-| `POST /api/run/eval` `{"model"}` | yes | the job; `model` is `stock`, `teacher`, `logged`, `run:<name>` or `hf:<name>` |
+| `POST /api/run/eval` `{"model", "against"?}` | yes | the job; `model` is `stock`, `teacher`, `logged`, `run:<name>` or `hf:<name>`; `against`, another of them, is evaluated after it on the same drives |
 | `POST /api/run/install` `{"run", "confirm": "INSTALL"}` | yes | the job; the comma must be reachable, offroad, on the Default model |
 | `POST /api/run/restore` `{"confirm": "RESTORE"}` | yes | the job |
 | `POST /api/jobs/<id>/stop` `{}` | yes | the job, stopping |

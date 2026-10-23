@@ -448,10 +448,19 @@ class PageTest(ServerTestCase):
         self.assertEqual(re.findall(r'data-tab="([a-z]+)"', bar), tabs[:-1])
         self.assertIn('<button class="gear" type="button" id="tab-settings" data-tab="settings"', page)
         # Every section that starts a job is a wizard, as Training.
-        for wizard in ('train', 'prep', 'eval', 'cmp', 'publish'):
+        for wizard in ('train', 'eval', 'cmp', 'publish'):
             self.assertIn('id="' + wizard + '-step-1"', page)
             self.assertIn('id="' + wizard + '-back"', page)
             self.assertIn('id="' + wizard + '-dots"', page)
+        # Preprocessing is one page: its two jobs side by side as choice cards, the day of the
+        # download an option of its own card.
+        self.assertEqual(re.findall(r'name="prep-job" value="([a-z]+)"', page), ['fetch', 'localize'])
+        for element in ('prep-step', 'btn-fetch', 'btn-localize', 'fetch-since-on', 'fetch-since'):
+            self.assertEqual(page.count('id="' + element + '"'), 1, element)
+        self.assertNotIn('Already downloaded', page)
+        # Evaluation: the model to test and the one to compare it with, both in sight.
+        for element in ('eval-model-picker', 'eval-against-picker'):
+            self.assertEqual(page.count('id="' + element + '"'), 1, element)
         self.assertNotIn('id="panel-comma"', page)
         self.assertNotIn('data-tab="comma"', page)
         response, body = self.request('GET', '/static/app.js')

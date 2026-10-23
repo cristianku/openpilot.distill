@@ -11,7 +11,7 @@ from unittest import mock
 
 import tasks.train as train_task
 from tasks.common import Gpu, TaskError, say, select_gpus
-from tasks.evaluation import uses_gpu
+from tasks.evaluation import model_runs, uses_gpu
 from tasks.teacher import TEACHERS, teacher_of_file
 
 GPUS = [Gpu(0, 'Tesla V100', 32768.0), Gpu(1, 'Tesla V100', 32768.0)]
@@ -145,6 +145,11 @@ class EvaluationTest(unittest.TestCase):
         self.assertTrue(uses_gpu(['--model=stock']))
         self.assertFalse(uses_gpu(['--model=stock', '--device=cpu']))
         self.assertFalse(uses_gpu(['--device', 'cpu']))
+
+    def test_one_run_per_model(self):
+        self.assertEqual(model_runs(['--model=stock', '--rate', '5']), [['--model=stock', '--rate', '5']])
+        self.assertEqual(model_runs(['--model=run:a', '--model=stock', '--device=cpu']),
+                         [['--model=run:a', '--device=cpu'], ['--model=stock', '--device=cpu']])
 
 
 
