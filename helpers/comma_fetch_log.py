@@ -6,21 +6,61 @@
   python helpers/comma_fetch_log.py reverse <segment-rlog.zst>
 
 Prefer openpilot's LogReader (openpilot.distill); fall back to pycapnp + zstandard
-and the schemas selected by NNSLR_OPENPILOT_ROOT / NNSLR_OPENDBC_ROOT
-(sunnypilot.speedlimits). Missing or unreadable data is always 'unknown'.
+and the schemas selected by NNSLR_OPENPILOT_ROOT / NNSLR_OPENDBC_ROOT, or without
+them the pinned schema of the author's comma, downloaded once into
+~/.cache/comma-fetch-log and checked by SHA-256 (the same pins as openpilot.perception).
+Missing or unreadable data is always 'unknown'.
 """
 from __future__ import annotations
 
 import bz2
+import hashlib
 import os
 from pathlib import Path
 import sys
+import urllib.request
+
+SCHEMA_COMMIT = "1b6a472ae61d2d61866902cb48a5b3ab8bd11d07"
+CAR_COMMIT = "6810f033b9e60738365cfecb8504c980dfaad137"
+_RAW = "https://raw.githubusercontent.com"
+# (file in the cache, URL, SHA-256): log.capnp imports "/car.capnp" and "/include/c++.capnp" from the cache folder.
+SCHEMA_FILES = (
+    ("log.capnp", f"{_RAW}/cristianku/openpilot/{SCHEMA_COMMIT}/openpilot/cereal/log.capnp",
+     "be3b81471c18ad7ffbac3890042cd93823c69832fd88130ac9400bd02f8b049b"),
+    ("custom.capnp", f"{_RAW}/cristianku/openpilot/{SCHEMA_COMMIT}/openpilot/cereal/custom.capnp",
+     "439f46f148c6e72571bdc232e29b42ab6bb361c304cff9eaba0afeab66885f19"),
+    ("deprecated.capnp", f"{_RAW}/cristianku/openpilot/{SCHEMA_COMMIT}/openpilot/cereal/deprecated.capnp",
+     "b3aa5c13de40001ed7376cef858500fb003f7698f96131cd0db18d878fa1af0d"),
+    ("include/c++.capnp", f"{_RAW}/cristianku/openpilot/{SCHEMA_COMMIT}/openpilot/cereal/include/c++.capnp",
+     "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44"),
+    ("car.capnp", f"{_RAW}/cristianku/opendbc/{CAR_COMMIT}/opendbc/car/car.capnp",
+     "b4a6502704b0315b8277fb7fe125c9780ec3aae47d4ba3dfa9b3d665160b545a"),
+)
+
+
+def _pinned_schema(fetch=None) -> Path:
+    """The cache folder with the pinned schema files, downloaded and checked when missing."""
+    folder = Path.home() / ".cache" / "comma-fetch-log" / f"{SCHEMA_COMMIT[:12]}-{CAR_COMMIT[:12]}"
+    fetch = fetch or (lambda url: urllib.request.urlopen(url, timeout=60).read())
+    for name, url, sha in SCHEMA_FILES:
+        path = folder / name
+        if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == sha:
+            continue
+        data = fetch(url)
+        if hashlib.sha256(data).hexdigest() != sha:
+            raise RuntimeError(f"{name}: the downloaded schema does not match its pinned SHA-256")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(path.name + ".part")
+        part.write_bytes(data)
+        part.replace(path)
+    return folder
 
 
 def _schema_dirs() -> tuple[Path, Path]:
     value = os.environ.get("NNSLR_OPENPILOT_ROOT")
     if not value:
-        raise RuntimeError("set NNSLR_OPENPILOT_ROOT for the schema reader")
+        folder = _pinned_schema()
+        return folder, folder
     root = Path(value).expanduser()
     cereal = next((root / p for p in ("openpilot/cereal", "cereal")
                    if (root / p / "log.capnp").is_file()), None)
