@@ -25,7 +25,7 @@ We do not train from zero. We start from MD v3's own weights and keep MD v3 as t
 
 Rules that do not move:
 
-- **One owner of Chestnut:** modeld. No second process may open it.
+- **One owner of Chestnut, one model at a time:** modeld runs it, and no second process may open it. So the speed limits live **inside the big model**, compiled with it as one graph. They are not a separate network or process.
 - **No map on the vision side:** no OSM limit, road name or junction as input. Camera and the car's own signals only. OSM may only make training labels offline.
 - **Radar only from `carState`** (`stockRadar*`), never from CAN. Perception outputs never go to vehicle control.
 - **`modelV2.big`** stays the signal that the big model is running: Speed Limit Assist's auto speed depends on it.
@@ -79,15 +79,24 @@ The networks, data and labels come from sunnypilot.speedlimits, read only:
 - model classes in `src/nnslr_tools`;
 - the dataset in `annotations/` and `derived/`, as described in its `docs/DATASET.md`.
 
-Proposal, to be measured:
+Everything goes into the same graph as the driving model. That is Cristian's constraint, passed on by SPEEDLIMITS on 31 Oct 2026.
 
 | Part | Where | Input | Rate |
 |---|---|---|---|
 | Road type (9 classes + junction "passed") | **head on the shared 32 × 512 features** of the big model | what the driving model already sees, plus the car's motion (yaw, steer, blinkers, vEgo) | 1 Hz (its memory was trained on frames 1 s apart) |
-| Sign finder + reader | **separate stage on Chestnut**, same process as the driving model | high-resolution crop of the road frame modeld already holds (today's training input: road camera 1344 × 760, the 896-wide top band) | 5 Hz, right after `modelV2` |
+| Sign finder + reader | **branch of the same graph**, with a second input | the high-resolution top band of the road frame modeld already has on the GPU: 896 × 288, uint8, normalised inside the graph. No extra USB upload: one costs 115 ms | 5 Hz, as today |
 
 - The road-type head learns from the labels and from the current network as a teacher.
 - The finder and reader start from the current checkpoints. Later they may share early layers with the big model, if that is faster and just as good.
+- Inside one graph, with no data-dependent shapes, which tinygrad cannot compile:
+  - the finder's peaks become a fixed top-K, the 3 × 3 max of the heat map;
+  - the reader always reads K crops. The RoIAlign is written with gathers, as SPEEDLIMITS already did on 27 Oct.
+  - The decode and the confidence threshold (0.7) stay after the graph, as in the contracts.
+- To measure, the 5 Hz rate:
+  - either the sign branch runs on every frame and its cost counts four times;
+  - or modeld calls the sign part of the same compiled model only on every fourth frame.
+
+  Both stay inside modeld.
 - **Output:** exactly what `speedvisiond` feeds `SpeedLimitMemory` today. Per frame, the sign boxes, each with class and confidence. Per second, the road-type probabilities and "passed". The speed-limit side then stays unchanged.
 - **Gate:**
   - SPEEDLIMITS' parity check on their test routes: same signs, values and road types as today's ONNX, same F1 and limit timeline;
@@ -102,7 +111,7 @@ Proposal, to be measured:
 
 ### Phase 5: in the car
 
-- Inside modeld on Chestnut, one process:
+- Inside modeld on Chestnut, one compiled model:
   - the driving outputs in `modelV2`, unchanged;
   - the speed-limit observations in their own message for `speedvisiond`, not inside `modelV2`.
 - The 50 ms compile check is a hard gate before any install.
@@ -121,13 +130,14 @@ Neither edits the other's files: requests go by message. Neither installs anythi
 
 ## 6. Risks
 
-- **Too slow on Chestnut:** every phase has a latency gate. If the stages do not fit, the 5 Hz finder runs on fewer frames, or shares the backbone.
+- **Too slow on Chestnut:** every phase has a latency gate. If the sign branch does not fit, it runs on fewer frames, reads fewer crops, or shares the backbone's early layers.
 - **Overfitting on a few hours:** frozen early layers, high distill weight, holdout by place.
 - **Leaking test routes:** the training reads the split files of sunnypilot.speedlimits and refuses its test routes.
 - **Weights:** MD v3's weights come from `commaai/openpilot_driving_models`. Check their licence before publishing anything derived from them.
 
 ## 7. Open decisions (Cristian)
 
-1. Speed limits: road type as a head and finder + reader as a separate stage (proposal above), or everything as heads.
-2. Go for phase 1 on Chestnut: it needs the comma offroad.
-3. How much driving to collect in Germany and Italy before phase 2.
+1. Go for phase 1 on Chestnut: it needs the comma offroad.
+2. How much driving to collect in Germany and Italy before phase 2.
+
+Decided: the speed limits go inside the big model as one graph, the road type as a head and the finder and reader as a branch on the high-res top band (Cristian, through SPEEDLIMITS, 31 Oct 2026).
