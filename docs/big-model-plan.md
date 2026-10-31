@@ -89,9 +89,9 @@ Everything goes into the same graph as the driving model. That is Cristian's con
 - The road-type head learns from the labels and from the current network as a teacher.
 - The finder and reader start from the current checkpoints. Later they may share early layers with the big model, if that is faster and just as good.
 - Inside one graph, with no data-dependent shapes, which tinygrad cannot compile:
-  - the finder's peaks become a fixed top-K, the 3 × 3 max of the heat map;
-  - the reader always reads K crops. The RoIAlign is written with gathers, as SPEEDLIMITS already did on 27 Oct.
-  - The decode and the confidence threshold (0.7) stay after the graph, as in the contracts.
+  - the finder's peaks become a fixed top-K, the 3 × 3 max of the heat map, with **K = 5** as in `speedvisiond`. Their scores are an output of the graph, and the score cut at 0.3 comes after it;
+  - the reader always reads those 5 crops. The RoIAlign is written with gathers, as SPEEDLIMITS already did on 27 Oct.
+  - The decode and the reader's confidence threshold (0.7) stay after the graph, as in the contracts. The parity check compares against exactly this.
 - To measure, the 5 Hz rate:
   - either the sign branch runs on every frame and its cost counts four times;
   - or modeld calls the sign part of the same compiled model only on every fourth frame.
