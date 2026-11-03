@@ -53,7 +53,9 @@
 # Requires a Python log reader: Distill uses uv run python (helpers/common.sh distill_uv_run);
 # speedlimits can use its .venv with [log-reader], NNSLR_OPENPILOT_ROOT and NNSLR_OPENDBC_ROOT.
 # COMMA_FETCH_PYTHON can override the Python interpreter (speedlimits).
-# Already downloaded files are skipped by rsync, so it can be run after every drive.
+# Already downloaded files are skipped without asking rsync (same size as on the comma, read with one
+# stat per drive), and every ssh/rsync goes through one shared ssh connection, so a run with nothing
+# new takes seconds and it can be run after every drive.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival),
@@ -88,6 +90,9 @@ else
 fi
 VIDEOS_DIR="${COMMA_VIDEOS_DIR:-$(dirname "$ROOT")/comma-videos}"
 FILES="rlog.zst fcamera.hevc ecamera.hevc"
+# The comma's owner (uid 1000) must not come along: on the NFS shared folder root then could not
+# read, chmod or set the times of the file, and rsync leaves it 600 (owned by cristianku here).
+RSYNC_NO_OWNER="--no-owner --no-group"
 
 if [ -n "${COMMA_FETCH_PYTHON:-}" ]; then
   FETCH_PYTHON=("$COMMA_FETCH_PYTHON")
@@ -108,7 +113,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # Size in bytes of a file.
 file_size() {
-  wc -c < "$1" | tr -d ' '
+  stat -c %s "$1"
 }
 
 # Old layout: $1 (in data/) still a regular file downloaded there. It goes to $2 (shared
@@ -282,10 +287,22 @@ select_segments() {
   echo "$route on the comma: $(echo $found). Skipping:$skip_numbers. Downloading:$segments"
 }
 
+# Fills comma_size with the size in bytes of every file of $route on the comma, keyed by
+# "<route>--<segment>/<file>", in one ssh call. A file missing on the comma has no key.
+declare -A comma_size
+read_comma_sizes() {
+  comma_size=()
+  local name size
+  while read -r name size; do
+    [ -z "$name" ] || comma_size["$name"]="$size"
+  done < <(ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "cd $REMOTE_DIR && stat -c '%n %s' $route--*/rlog.zst $route--*/fcamera.hevc $route--*/ecamera.hevc 2>/dev/null || true")
+}
+
 # Copies $segments of $route into the shared folder, links them into data/, then runs the
 # localizer when asked.
 download_segments() {
   route_hex="$(echo "$route" | tr -d '-')"
+  read_comma_sizes
   for s in $segments; do
     src="$REMOTE_DIR/$route--$s"
     shared="$VIDEOS_DIR/$route--$s"
@@ -303,7 +320,7 @@ download_segments() {
     echo "== $route--$s -> $shared (link in $dst)"
 
     for f in $FILES; do
-      if ! ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" "test -f $src/$f"; then
+      if [ -z "${comma_size[$route--$s/$f]:-}" ]; then
         die "$src/$f does not exist on the comma"
       fi
     done
@@ -318,11 +335,17 @@ download_segments() {
     fi
 
     mkdir -p "$shared" "$dst"
+    fetched_files=0
     for f in $FILES; do
       move_old_file "$dst/$f" "$shared/$f"
-      rsync -avP -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$src/$f" "$shared/"
+      # Same size as on the comma: already here, no rsync (a file stopped halfway is shorter).
+      if [ ! -f "$shared/$f" ] || [ "$(file_size "$shared/$f")" != "${comma_size[$route--$s/$f]}" ]; then
+        rsync -avP $RSYNC_NO_OWNER -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$src/$f" "$shared/"
+        fetched_files=$((fetched_files + 1))
+      fi
       link_file "$shared/$f" "$dst/$f"
     done
+    [ "$fetched_files" -gt 0 ] || echo "  already here"
 
     if [ "$run_localizer" -eq 1 ]; then
       (cd "$ROOT" && distill_uv_run python -m localizer.run --segment "$name")
@@ -359,7 +382,7 @@ find_dashcam_routes() {
   echo "Routes on the comma since $since:$recent_routes"
 
   qlog_dir="$(mktemp -d)"
-  trap 'rm -rf "$qlog_dir"' EXIT
+  trap 'rm -rf "$qlog_dir"; close_comma_ssh' EXIT
 
   # The qlog of the first segment still on the comma, one per route.
   qlogs=""
@@ -429,7 +452,7 @@ route_is_long_enough() {
 # Scan full rlogs, not just qlogs: a single reverse gear event rejects the
 # entire segment. We never include an unreadable segment in automatic mode.
 filter_reverse_segments() {
-  local s state remaining="" shared logfile
+  local s state remaining="" shared logfile size cached cached_size
   for s in $segments; do
     shared="$VIDEOS_DIR/$route--$s"
     logfile="$shared/rlog.zst"
@@ -441,12 +464,25 @@ filter_reverse_segments() {
     # do not transfer the same (potentially large) rlog on every run.
     if [ ! -s "$logfile" ]; then
       mkdir -p "$shared"
-      if ! rsync -a -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
+      if ! rsync -a $RSYNC_NO_OWNER -e "$DISTILL_RSYNC_SSH" "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
         echo "$route--$s: rlog not available, segment excluded" >&2
         continue
       fi
     fi
-    state="$(inspect_log reverse "$logfile")" || state="unknown"
+    # The answer is kept next to the rlog with its size ("forward 10127246"): a later run does not read
+    # the whole log again, and an rlog that changed (a copy stopped halfway, fetched again) is read anew.
+    size="$(file_size "$logfile")"
+    state=""
+    if [ -f "$shared/gear" ]; then
+      read -r cached cached_size < "$shared/gear" || true
+      [ "${cached_size:-}" != "$size" ] || state="$cached"
+    fi
+    if [ -z "$state" ]; then
+      state="$(inspect_log reverse "$logfile")" || state="unknown"
+      case "$state" in
+        forward|reverse) echo "$state $size" > "$shared/gear" ;;
+      esac
+    fi
     case "$state" in
       forward) remaining="$remaining $s" ;;
       reverse) echo "$route--$s: reverse gear detected, segment excluded" ;;
@@ -527,6 +563,17 @@ fi
 # Absolute path: Distill links must keep working when a folder moves to data_scartati/.
 mkdir -p "$VIDEOS_DIR" || die "cannot create the shared folder $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
+
+# One ssh connection to the comma for the whole run: ssh and rsync reuse it instead of opening
+# a new one (about a second each) for every file.
+SSH_CONTROL_DIR="$(mktemp -d)"
+DISTILL_SSH_OPTIONS+=(-o ControlMaster=auto -o "ControlPath=$SSH_CONTROL_DIR/%C" -o ControlPersist=60)
+DISTILL_RSYNC_SSH="$DISTILL_RSYNC_SSH -o ControlMaster=auto -o ControlPath=$SSH_CONTROL_DIR/%C -o ControlPersist=60"
+close_comma_ssh() {
+  ssh "${DISTILL_SSH_OPTIONS[@]}" -O exit "$COMMA_HOST" > /dev/null 2>&1 || true
+  rm -rf "$SSH_CONTROL_DIR"
+}
+trap close_comma_ssh EXIT
 
 ssh "${DISTILL_SSH_OPTIONS[@]}" "$COMMA_HOST" true \
   || die "comma '$COMMA_HOST' not reachable over ssh (on and online? ssh key registered? from the Mac use ssh -A)"
